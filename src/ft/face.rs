@@ -3,19 +3,19 @@
 use core::ffi::c_void;
 
 use crate::ft::error::{FT_ERR_INVALID_FACE_HANDLE, FT_ERR_OK};
-use crate::ft::glyph_slot::FtFace;
+use crate::ft::glyph_slot::{FtDriverClass, FtFace, FtGeneric};
 use crate::ft::list::{ft_list_find, FtList, FtListNode};
 use crate::ft::memory::{ft_mem_free, FtMemory};
 
-/// The `FT_DriverRec` prefix used by `FT_Done_Face`. On ARM, `memory` is at
-/// +0x08 and `faces_list` is at +0x18. The three words between them belong to
-/// the driver's class/format state and are not read here.
+/// The `FT_DriverRec` prefix. On ARM, `memory` is at +0x08,
+/// `generic` at +0x0c, `clazz` at +0x14, and `faces_list` at +0x18.
 #[repr(C)]
 pub struct FtDriver {
     pub module_class: *mut c_void,
     pub library: *mut c_void,
     pub memory: *mut FtMemory,
-    _before_faces_list: [u32; 3],
+    pub generic: FtGeneric,
+    pub clazz: *const FtDriverClass,
     pub faces_list: FtList,
 }
 
@@ -178,7 +178,8 @@ mod tests {
         let mut memory = allocator();
         let mut driver = FtDriver {
             module_class: ptr::null_mut(), library: ptr::null_mut(), memory: &mut memory,
-            _before_faces_list: [0; 3],
+            generic: FtGeneric { data: ptr::null_mut(), finalizer: None },
+            clazz: ptr::null(),
             faces_list: FtList { head: ptr::null_mut(), tail: ptr::null_mut() },
         };
         let mut face: FtFace = unsafe { core::mem::zeroed() };
@@ -200,7 +201,8 @@ mod tests {
         let mut node = FtListNode { prev: ptr::null_mut(), next: ptr::null_mut(), data: (&mut face as *mut FtFace).cast() };
         let mut driver = FtDriver {
             module_class: ptr::null_mut(), library: ptr::null_mut(), memory: &mut memory,
-            _before_faces_list: [0; 3],
+            generic: FtGeneric { data: ptr::null_mut(), finalizer: None },
+            clazz: ptr::null(),
             faces_list: FtList { head: &mut node, tail: &mut node },
         };
         face.driver = (&mut driver as *mut FtDriver).cast();

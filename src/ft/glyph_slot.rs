@@ -8,6 +8,30 @@ use core::ffi::c_void;
 
 use crate::ft::memory::{ft_mem_alloc, ft_mem_free, FtMemory};
 use crate::ft::types::{FtBBox, FtGlyphMetrics, FtOutline, FtVector};
+use crate::ft::face::FtDriver;
+use crate::ft::module::FtModuleClass;
+use crate::cxx::opaque_record_destroy_and_release::{
+    opaque_record_destroy_and_release, OpaqueRecord,
+};
+
+/// `FT_Driver_ClassRec` through `done_slot` (+0x44 on ARM).
+/// Unused callbacks retain pointer-sized storage on hosts.
+#[repr(C)]
+pub struct FtDriverClass {
+    pub root: FtModuleClass,
+    pub module_init: *const c_void,
+    pub module_done: *const c_void,
+    pub get_interface: *const c_void,
+    pub face_object_size: i32,
+    pub size_object_size: i32,
+    pub slot_object_size: i32,
+    pub init_face: *const c_void,
+    pub done_face: *const c_void,
+    pub init_size: *const c_void,
+    pub done_size: *const c_void,
+    pub init_slot: *const c_void,
+    pub done_slot: Option<unsafe extern "C" fn(*mut FtGlyphSlot)>,
+}
 
 /// `FT_Generic` — two pointer-sized fields in FreeType's public records.
 #[repr(C)]
@@ -186,6 +210,39 @@ pub unsafe extern "C" fn ft_glyphslot_free_bitmap(slot: *mut FtGlyphSlot) {
     } else {
         (*slot).bitmap.buffer = core::ptr::null_mut();
     }
+}
+
+/// FreeType `ft_glyphslot_done` — original: `FUN_080a1f50` @ 0x080a1f50.
+/// True extent [0x080a1f50, 0x080a1fbc): 108 bytes, three plain outgoing
+/// BLs, zero predicated BLs, and one optional BLXNE through `done_slot`.
+/// Whole-image word decoding finds two plain incoming BLs, no predicated BLs.
+///
+/// Snapshot the driver and its allocator; invoke the driver's slot destructor,
+/// clear/free the bitmap, destroy the loader unless module flag 0x200
+/// (`FT_MODULE_DRIVER_NO_OUTLINES`) is set, then free and clear the internal
+/// record. Reload internal after callbacks, as the ARM does. The slot itself
+/// is not freed. No target behavioral deviations; reuse all three existing
+/// Rust callees, including the opaque loader destructor's unported seams.
+///
+/// # Safety
+/// Slot, face, driver, classes and internal must be valid. Callbacks must
+/// leave the records needed by subsequent cleanup valid; owned allocations
+/// must belong to their respective allocators. No null-slot guard is added.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn ft_glyphslot_done(slot: *mut FtGlyphSlot) {
+    let driver = (*(*slot).face).driver.cast::<FtDriver>();
+    let memory = (*driver).memory;
+    if let Some(done) = (*(*driver).clazz).done_slot {
+        done(slot);
+    }
+    ft_glyphslot_free_bitmap(slot);
+    if (*(*driver).module_class.cast::<FtModuleClass>()).module_flags & 0x200 == 0 {
+        opaque_record_destroy_and_release((*(*slot).internal).loader.cast::<OpaqueRecord>());
+        (*(*slot).internal).loader = core::ptr::null_mut();
+    }
+    ft_mem_free(memory, (*slot).internal.cast());
+    (*slot).internal = core::ptr::null_mut();
 }
 
 /// FreeType `ft_glyphslot_alloc_bitmap` (ftobjs.c) — original:
@@ -415,5 +472,100 @@ mod tests {
         assert_eq!(unsafe { ft_get_char_index(&mut face, 0x1f642) }, 0x1234_5678);
         assert_eq!(CHAR_INDEX_CMAP.load(Ordering::Relaxed), &mut cmap as *mut FtCMap as usize);
         assert_eq!(CHAR_INDEX_CODE.load(Ordering::Relaxed), 0x1f642);
+    }
+}
+
+#[cfg(test)]
+mod done_tests {
+    extern crate std;
+    use super::*;
+    use std::vec::Vec;
+
+    struct Cleanup {
+        events: Vec<usize>,
+        replacement: *mut FtGlyphSlotInternal,
+        alternate_memory: *mut FtMemory,
+        saved_memory: *mut FtMemory,
+        expected_bitmap: *mut u8,
+    }
+
+    unsafe extern "C" fn alloc(_: *mut FtMemory, _: i32) -> *mut u8 {
+        core::ptr::null_mut()
+    }
+    unsafe extern "C" fn realloc(_: *mut FtMemory, _: i32, _: i32, _: *mut u8) -> *mut u8 {
+        core::ptr::null_mut()
+    }
+    unsafe extern "C" fn free(memory: *mut FtMemory, block: *mut u8) {
+        let state = &mut *(*memory).user.cast::<Cleanup>();
+        if block == state.expected_bitmap {
+            state.events.push(2);
+        } else {
+            assert_eq!(memory, state.saved_memory, "internal uses the saved driver allocator");
+            assert_eq!(block, state.replacement.cast());
+            state.events.push(3);
+        }
+    }
+    unsafe extern "C" fn done(slot: *mut FtGlyphSlot) {
+        let state = &mut *(*(*(*slot).face).memory).user.cast::<Cleanup>();
+        assert_eq!((*slot).bitmap.buffer, state.expected_bitmap);
+        state.events.push(1);
+        (*slot).internal = state.replacement;
+        (*(*(*slot).face).driver.cast::<FtDriver>()).memory = state.alternate_memory;
+    }
+
+    #[test]
+    fn cleanup_orders_callbacks_reloads_internal_and_preserves_saved_allocator() {
+        for no_outlines in [false, true] {
+            for callback in [false, true] {
+                for owned in [false, true] {
+                    let mut bitmap = [0u8; 4];
+                    let mut internal = FtGlyphSlotInternal {
+                        loader: if no_outlines { 1usize as *mut c_void } else { core::ptr::null_mut() },
+                        flags: if owned { FT_GLYPH_OWN_BITMAP | 0x80 } else { 0x80 },
+                    };
+                    let mut original = FtGlyphSlotInternal { loader: core::ptr::null_mut(), flags: 0 };
+                    let mut state = Cleanup {
+                        events: Vec::new(), replacement: &mut internal,
+                        alternate_memory: core::ptr::null_mut(), saved_memory: core::ptr::null_mut(),
+                        expected_bitmap: bitmap.as_mut_ptr(),
+                    };
+                    let mut memory = FtMemory {
+                        user: (&mut state as *mut Cleanup).cast(), alloc, free, realloc,
+                    };
+                    let mut alternate = FtMemory {
+                        user: (&mut state as *mut Cleanup).cast(), alloc, free, realloc,
+                    };
+                    state.saved_memory = &mut memory;
+                    state.alternate_memory = &mut alternate;
+                    let mut class: FtDriverClass = unsafe { core::mem::zeroed() };
+                    class.root.module_flags = if no_outlines { 0x200 } else { 0 };
+                    class.done_slot = if callback { Some(done) } else { None };
+                    let mut driver: FtDriver = unsafe { core::mem::zeroed() };
+                    driver.module_class = (&mut class.root as *mut FtModuleClass).cast();
+                    driver.clazz = &class;
+                    driver.memory = &mut memory;
+                    let mut face: FtFace = unsafe { core::mem::zeroed() };
+                    face.driver = (&mut driver as *mut FtDriver).cast();
+                    face.memory = &mut memory;
+                    let mut slot: FtGlyphSlot = unsafe { core::mem::zeroed() };
+                    slot.face = &mut face;
+                    slot.internal = if callback { &mut original } else { &mut internal };
+                    slot.bitmap.buffer = bitmap.as_mut_ptr();
+
+                    unsafe { ft_glyphslot_done(&mut slot) };
+
+                    let mut expected = Vec::new();
+                    if callback { expected.push(1); }
+                    if owned { expected.push(2); }
+                    expected.push(3);
+                    assert_eq!(state.events, expected);
+                    assert!(slot.internal.is_null());
+                    assert!(slot.bitmap.buffer.is_null());
+                    assert_eq!(internal.flags, 0x80);
+                    assert_eq!(internal.loader as usize, if no_outlines { 1 } else { 0 });
+                    assert_eq!(original.flags, 0);
+                }
+            }
+        }
     }
 }
