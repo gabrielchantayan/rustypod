@@ -241087,3 +241087,37 @@ functions:
       predication with branches, adds a frame, and selects count/capacity
       offsets separately; signed checks, ordered output writes, original
       fixed addresses and absence of calls remain intact.
+
+  - address: 0x080978fc
+    ghidra: FUN_080978fc
+    name: bswap_u16_array_inplace
+    size: 48
+    sig: "void bswap_u16_array_inplace(u16 *words, u32 count)"
+    module: util/bswap
+    status: ported
+    vars:
+      param_1/r0: words
+      param_2/r1: count
+      uVar2/r2: index
+      puVar3/r12: word
+      uVar1/r3: value
+      lr: shifted_low_byte
+    notes: >-
+      Raw ARM words establish twelve instructions at 0x080978fc..0x08097928,
+      followed by the separately entered identical loop at 0x0809792c.
+      Whole-image aligned ARM BL decoding finds zero plain and two predicated
+      inbound calls, both BLNE, at 0x080be3b0 and 0x080e4f08. No outgoing
+      plain or predicated BLs and no callee seams. Both callers pass a byte
+      length shifted right by one. Swap the bytes of count aligned halfwords
+      in place without changing element order; count zero touches no memory.
+      Volatile halfword reads and writes deliberately preserve scalar access
+      width and ordering rather than permitting vectorization. The existing
+      util/bswap module exports the port; inline(never) retains a real target.
+      Tests cover NULL with zero count, counts 0..64, both halfword positions
+      within a word, unchanged surrounding elements, and every u16 value.
+      All 15297 host tests pass. A standalone host executable confirms byte
+      reversal, unchanged guards, and NULL/zero handling.
+      ARM release build passes. match.py exits 1 with twelve instructions
+      in both bodies: LLVM uses a countdown and post-increment pointer,
+      omits the redundant high-byte mask before STRH, and changes the frame.
+      Zero-count handling and the scalar halfword load/swap/store loop remain.

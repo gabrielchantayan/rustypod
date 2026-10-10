@@ -102,6 +102,30 @@ pub unsafe extern "C" fn bswap16_inplace(ptr: *mut u8) {
     ptr.add(1).write_volatile(first);
 }
 
+/// bswap_u16_array_inplace — original: `FUN_080978fc` @ 0x080978fc
+/// (48 bytes; zero plain and two predicated inbound BLs, zero outbound BLs).
+///
+/// Raw ARM words end with the loop branch at 0x08097928; the next real
+/// function begins at 0x0809792c. Swap each of `count` aligned halfwords
+/// in place, preserving element order. The callers at 0x080be3b0 and
+/// 0x080e4f08 use BLNE and pass their byte length shifted right by one.
+/// A zero count performs no buffer access.
+///
+/// Deliberate deviation: volatile halfword accesses retain the original's
+/// scalar access width and ordering instead of allowing loop vectorization.
+///
+/// # Safety
+/// For nonzero `count`, `words` must be aligned and writable for `count`
+/// consecutive initialized u16 elements in one allocation.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn bswap_u16_array_inplace(words: *mut u16, count: u32) {
+    for index in 0..count {
+        let word = words.add(index as usize);
+        word.write_volatile(word.read_volatile().swap_bytes());
+    }
+}
+
 /// bswap_80_byte_record_inplace — original: `FUN_082d32f0` @ 0x082d32f0
 /// (64 bytes; 6 plain unconditional `bl` callers and one unconditional tail
 /// `b`, no predicated forms).
@@ -331,6 +355,48 @@ pub extern "C" fn transform_checked_word_for_mode(mode: u32, word: u32) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bswap_u16_array_zero_count_accepts_null() {
+        unsafe { bswap_u16_array_inplace(core::ptr::null_mut(), 0) };
+    }
+
+    #[test]
+    fn bswap_u16_array_preserves_order_and_range() {
+        for offset in 0..2 {
+            for count in 0..=64 {
+                let mut words = [0xa55au16; 68];
+                for index in 0..count {
+                    words[offset + index] = (index as u16 * 997) ^ 0x80ff;
+                }
+                let original = words;
+                unsafe {
+                    bswap_u16_array_inplace(words.as_mut_ptr().add(offset), count as u32);
+                }
+                for index in 0..words.len() {
+                    let value = original[index];
+                    let expected = if index >= offset && index < offset + count {
+                        ((value & 0xff) << 8) | (value >> 8)
+                    } else {
+                        value
+                    };
+                    assert_eq!(words[index], expected, "offset={offset} count={count} index={index}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn bswap_u16_array_handles_every_halfword() {
+        let mut words = [0u16; 65536];
+        for (value, word) in words.iter_mut().enumerate() {
+            *word = value as u16;
+        }
+        unsafe { bswap_u16_array_inplace(words.as_mut_ptr(), 65536) };
+        for (value, actual) in words.iter().enumerate() {
+            assert_eq!(*actual as usize, ((value & 0xff) << 8) | (value >> 8));
+        }
+    }
 
     #[test]
     fn bswap32_reverses_all_four_bytes() {
