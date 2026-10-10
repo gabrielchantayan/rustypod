@@ -203,6 +203,60 @@ pub(crate) unsafe fn app_root_object() -> *mut u8 {
     core::ptr::read_volatile(core::ptr::addr_of!(APP_ROOT_OBJECT))
 }
 
+/// system_root_get — original `FUN_0807f254` @ 0x0807f254.
+/// True extent [0x0807f254, 0x0807f26c): 20 instruction bytes and the
+/// 0x089ca674 literal. The next entry starts with `ldr r0,[pc,#0]; b`.
+/// Whole-image A32 decoding finds two incoming plain BLs (0x080c634c,
+/// 0x080c635c), zero predicated BLs; the body has one plain BL to heap_panic
+/// and zero predicated BLs.
+///
+/// Read the app-root slot, return its pointer unchanged when non-NULL,
+/// otherwise enter the nonreturning heap_panic. Do not dereference the root.
+/// Deliberate deviation: reuse the established volatile APP_ROOT_OBJECT
+/// model of the runtime-initialized firmware slot, not its image bytes.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn system_root_get() -> *mut u8 {
+    let root = app_root_object();
+    if root.is_null() {
+        crate::heap::veneers::heap_panic();
+    }
+    root
+}
+
+#[cfg(test)]
+mod system_root_tests {
+    use super::*;
+
+    #[test]
+    fn returns_each_current_pointer_without_dereferencing_it() {
+        let _lock = crate::testing::APP_ROOT_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        unsafe {
+            let saved = APP_ROOT_OBJECT;
+            for value in [1usize, 0x089ca674, usize::MAX] {
+                APP_ROOT_OBJECT = value as *mut u8;
+                assert_eq!(system_root_get() as usize, value);
+            }
+            APP_ROOT_OBJECT = saved;
+        }
+    }
+
+    unsafe extern "C" fn null_root() -> ! {
+        APP_ROOT_OBJECT = core::ptr::null_mut();
+        system_root_get();
+        panic!("NULL root returned");
+    }
+
+    #[test]
+    fn null_root_runs_complete_fatal_path() {
+        crate::heap::veneers::tests::assert_heap_panic_entry_fatal_path(
+            "RUSTYPOD_SYSTEM_ROOT_GET_CHILD",
+            "app::context_scope::system_root_tests::null_root_runs_complete_fatal_path",
+            null_root,
+        );
+    }
+}
+
 /// Reads a word-aligned `u32` field of a foreign firmware object.
 #[inline(always)]
 unsafe fn field(object: *const u8, offset: usize) -> u32 {
@@ -271,10 +325,10 @@ mod subject_equality_tests {
 /// deliberate: it is the source's second `bl 0x0807f254`, not a preserved
 /// first result.
 ///
-/// Deliberate deviation: the unported asserting root getter is expressed
-/// directly through this module's established [`APP_ROOT_OBJECT`] model. The
-/// service-context field remains a 32-bit target word, rather than a host
-/// pointer field, so +0x30 has the same address on both builds.
+/// Deliberate deviation: the asserting getter uses this module's established
+/// [`APP_ROOT_OBJECT`] model. The service-context field remains a 32-bit
+/// target word, rather than a host pointer field, so +0x30 has the same
+/// address on both builds.
 ///
 /// # Safety
 ///
@@ -284,13 +338,13 @@ mod subject_equality_tests {
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn service_context_get() -> *mut u8 {
-    let first_root = unsafe { app_root_object() };
+    let first_root = unsafe { system_root_get() };
     let first_context = unsafe { field(first_root, ROOT_CONTEXT_OFFSET) };
     if first_context == 0 {
         crate::heap::veneers::heap_panic();
     }
 
-    let second_root = unsafe { app_root_object() };
+    let second_root = unsafe { system_root_get() };
     unsafe { field(second_root, ROOT_CONTEXT_OFFSET) as usize as *mut u8 }
 }
 
