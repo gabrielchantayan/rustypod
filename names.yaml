@@ -241847,3 +241847,43 @@ functions:
       two calls and the same state/error flow. Standalone host smoke using
       real callees confirms output-to-input reset and restricted output.
       No device run performed.
+
+  - address: 0x0808ccc8
+    ghidra: FUN_0808ccc8
+    name: record_object_activity
+    size: 112
+    module: ui/object_activity_history
+    status: ported
+    sig: "void record_object_activity(const u32 *object, u32 activity)"
+    args:
+      r0: object
+      r1: activity
+    renames:
+      param_1: object
+      param_2: activity
+      DAT_0808cd30: activity_records
+      DAT_0808cd34: display_runtime_state
+      iVar2: record
+      uVar4: next_index
+      FUN_08086e38: read_usec_timer_into_2
+    notes: >-
+      Raw extent [0x0808ccc8,0x0808cd38) comprises 104 instruction bytes
+      and literals 0x08a79e84 and 0x089cc8a0. The next function opens with
+      push {r4,lr}. Two inbound plain BLs at 0x0807fe04 and 0x0808f854,
+      zero predicated inbound BLs; one outbound plain BL at 0x0808cd10,
+      zero predicated outbound BLs. Registration/removal callers pass 1/0.
+      Records object address, object word +0x12c, and geometry words
+      +0x20..+0x2c in a 30-entry, 32-byte ring, then writes the low activity
+      byte at +0x1c and one microsecond timer sample at +0x18. Reloads the
+      index at state+0x0c before the event store and after sampling; advances
+      with unsigned wrap at 30. Padding bytes +0x1d..+0x1f remain untouched.
+      Target retains original RAM addresses for unported consumers; host
+      substitutes backing storage and truncates identity to a 32-bit word.
+      Existing timer port reused; no new callee seams or target behavioral
+      deviations. Host tests cover 31 successive events, ring overwrite,
+      timer overflow, full-width geometry, event-byte truncation, and
+      untouched padding/neighbors. Full host suite passes (15340 tests);
+      ARM release build passes. match.py exits 1 with a structural diff:
+      31 versus 26 listed instructions (including two Rust literal words),
+      scalar geometry transfers instead of LDM/STM, the same single call,
+      index reloads, stores, and unsigned wrap. No device run performed.
