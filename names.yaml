@@ -243576,3 +243576,30 @@ functions:
       exits 1 with expected frame/register changes and BLX stock-address
       calls; signed-count loop, +0x04/+0x08/+0x3c fields, class 4, and final
       release structure remain intact.
+
+  - address: 0x0806f174
+    ghidra: FUN_0806f174
+    name: release_tag_two_allocation
+    size: 12
+    sig: "void release_tag_two_allocation(void *allocation)"
+    module: cxx/tagged_allocation_release
+    status: ported
+    vars: {param_1: allocation}
+    renames:
+      DAT_0806f17c: TAG_TWO_ALLOCATION_DESCRIPTOR
+      FUN_0803b3a4: typed_allocation_release_helper
+      FUN_080c85bc: type_erased_release_engine
+    notes: >-
+      Raw words e59f1000 eaff3089 0891f788 establish a 12-byte extent,
+      including the descriptor literal at 0x0806f17c; the next real function
+      begins at 0x0806f180 with push {r3,lr}. Independent raw ARM branch
+      decoding finds one plain BL at 0x0809a5bc, one BLEQ at 0x080eb940,
+      and one BEQ tail transfer at 0x0806fb6c. Loads opaque descriptor
+      0x0891f788 and tail-branches to the already-ported helper at
+      0x0803b3a4, preserving allocation including NULL. The helper packages
+      allocation and descriptor and enters the unported engine at
+      0x080c85bc with state zero; no concrete descriptor type is invented.
+      ARM global assembly preserves all three words and the tail transfer.
+      Hosts reuse the existing helper seam. The tag-two caller now uses
+      this symbol on both target and host. Tests exercise NULL delegation
+      and actual owned-allocation destruction through the engine boundary.

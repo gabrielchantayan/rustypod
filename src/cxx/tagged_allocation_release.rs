@@ -34,6 +34,50 @@ use super::{
 /// Descriptor loaded by the `0x0806f174` tag-2 tail wrapper.
 pub const TAG_TWO_ALLOCATION_DESCRIPTOR: usize = 0x0891_f788;
 
+/// Fixed-descriptor release — `FUN_0806f174` @ `0x0806f174`, 12 bytes
+/// including the literal at `0x0806f17c`; the next function is `0x0806f180`.
+/// Raw words: `e59f1000 eaff3089 0891f788`. Independent raw decoding finds
+/// two inbound BL calls (one plain BL, one BLEQ) and one BEQ tail transfer.
+///
+/// Loads descriptor `0x0891f788` and tail-transfers the untouched allocation
+/// to `typed_allocation_release_helper` at `0x0803b3a4`. No NULL guard.
+/// The descriptor's concrete type is unknown. Deliberate deviations: hosts
+/// use the existing helper seam; ARM preserves the exact tail transfer.
+///
+/// # Safety
+/// The allocation must satisfy the retail type-erased release engine's
+/// requirements for this descriptor; NULL is forwarded, not rejected.
+#[cfg(not(target_arch = "arm"))]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn release_tag_two_allocation(allocation: *mut u8) {
+    typed_allocation_release_helper(
+        allocation,
+        TAG_TWO_ALLOCATION_DESCRIPTOR as *const u8,
+    );
+}
+
+#[cfg(target_arch = "arm")]
+extern "C" {
+    pub fn release_tag_two_allocation(allocation: *mut u8);
+}
+
+#[cfg(target_arch = "arm")]
+core::arch::global_asm!(
+    r#"
+    .syntax unified
+    .section .text.release_tag_two_allocation, "ax", %progbits
+    .p2align 2
+    .globl release_tag_two_allocation
+    .type release_tag_two_allocation, %function
+release_tag_two_allocation:
+    ldr     r1, [pc]
+    b       0x0803b3a4
+    .word   0x0891f788
+    .size release_tag_two_allocation, . - release_tag_two_allocation
+"#
+);
+
 /// Releases the allocation selected by a two-word tag record.
 ///
 /// The input must point to at least one readable word. A tag of one or two
@@ -45,10 +89,7 @@ pub const TAG_TWO_ALLOCATION_DESCRIPTOR: usize = 0x0891_f788;
 pub unsafe extern "C" fn release_tagged_allocation(record: *const u32) {
     match record.read() {
         1 => release_opaque_allocation(record.add(1).read() as *mut u8),
-        2 => typed_allocation_release_helper(
-            record.add(1).read() as *mut u8,
-            TAG_TWO_ALLOCATION_DESCRIPTOR as *const u8,
-        ),
+        2 => release_tag_two_allocation(record.add(1).read() as *mut u8),
         _ => {}
     }
 }
@@ -73,7 +114,7 @@ release_tagged_allocation:
     beq     0x08070c04
     cmp     r1, #2
     ldreq   r0, [r0, #4]
-    beq     0x0806f174
+    beq     release_tag_two_allocation
     bx      lr
     .size release_tagged_allocation, . - release_tagged_allocation
 "#
@@ -147,5 +188,34 @@ mod tests {
         let unrecognized = [3];
         unsafe { release_tagged_allocation(unrecognized.as_ptr()) };
         assert_eq!(CALL_COUNT.load(Ordering::SeqCst), 0);
+    }
+
+    unsafe extern "C" fn release_owned_byte(
+        frame: *mut AllocationReleaseFrame,
+        descriptor: *const u8,
+        state: u32,
+    ) {
+        assert_eq!(descriptor as usize, TAG_TWO_ALLOCATION_DESCRIPTOR);
+        assert_eq!((*frame).descriptor, descriptor);
+        assert_eq!(state, 0);
+        if (*frame).allocation.is_null() {
+            CALL_COUNT.fetch_add(1, Ordering::SeqCst);
+        } else {
+            let allocation = std::boxed::Box::from_raw((*frame).allocation);
+            ALLOCATION.store(*allocation as usize, Ordering::SeqCst);
+            drop(allocation);
+        }
+    }
+
+    #[test]
+    fn fixed_descriptor_release_handles_null_and_owned_allocation() {
+        let _lock = TYPE_ERASED_RELEASE_ENGINE_TEST_LOCK.lock();
+        let _reset = install_recorder();
+        unsafe { TYPE_ERASED_RELEASE_ENGINE = release_owned_byte };
+        unsafe { release_tag_two_allocation(core::ptr::null_mut()) };
+        assert_eq!(CALL_COUNT.load(Ordering::SeqCst), 1);
+        let allocation = std::boxed::Box::into_raw(std::boxed::Box::new(0xa5u8));
+        unsafe { release_tag_two_allocation(allocation) };
+        assert_eq!(ALLOCATION.load(Ordering::SeqCst), 0xa5);
     }
 }
