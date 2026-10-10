@@ -16,6 +16,32 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08075914
+    ghidra: FUN_08075914
+    name: crypto_ex_data_implementation_ensure
+    size: 72
+    sig: "void crypto_ex_data_implementation_ensure(void)"
+    module: crypto/ex_data_implementation
+    status: ported
+    vars: {r0: singleton, r1: implementation}
+    renames:
+      FUN_08043b94: resource_op_dispatch
+    notes: >-
+      Raw extent [0x08075914,0x0807595c) is 72 bytes: 68 code and the
+      singleton literal 0x08a0e9e0 at 0x08075958. Next real function begins
+      with LDR at 0x0807595c. Full aligned A32 scan finds zero incoming
+      plain BLs and two BLEQs at 0x080439fc and 0x08043e20. Body has one
+      plain BL at 0x08075928, no predicated BLs, and one tail B at
+      0x08075954, both to resource_op_dispatch. Ghidra follows that tail
+      into unrelated dispatcher logic. Acquire resource 2 with op 9;
+      install embedded vtable singleton+12 only when word zero is null;
+      preserve overrides and release with op 10. Target calls verified
+      stock dispatcher; host substitutes u32 storage and uses its ported
+      hook seam. Both target wrapper callers now use this Rust initializer.
+      All 15406 host tests pass; source-linked smoke verifies publication,
+      override preservation and adjacent words. ARM release build passes.
+      match.py exit 1 reviewed: identical conditional load/add/store;
+      LLVM uses a larger frame, BLX acquire and BX release via literals.
   - address: 0x08075e04
     ghidra: FUN_08075e04
     name: curve_scan_reflected

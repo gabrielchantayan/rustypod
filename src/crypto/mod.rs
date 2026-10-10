@@ -69,6 +69,7 @@ pub mod bio_free_all;
 pub mod free_ex_data;
 pub mod new_ex_data;
 pub mod ex_data_class_table;
+pub mod ex_data_implementation;
 pub mod bio_snprintf;
 pub mod bio_ctrl;
 pub mod bio_find_type;
