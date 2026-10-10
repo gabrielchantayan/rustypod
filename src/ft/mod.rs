@@ -4,6 +4,7 @@
 //! functions keep FreeType's public names in the crate's snake_case.
 pub mod af_detect_features;
 pub mod glyph_hints_save;
+pub mod glyph_hints_done;
 pub mod edge_translate_position;
 pub mod arith;
 pub mod buffer;
