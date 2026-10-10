@@ -28,6 +28,7 @@ pub mod conditional_offset;
 pub mod interpolate_delta;
 pub mod error;
 pub mod face;
+pub mod face_record_select;
 pub mod glyph_slot;
 pub mod glyph_loader;
 pub mod hash;
