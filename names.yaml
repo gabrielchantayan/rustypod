@@ -16,6 +16,36 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08078258
+    ghidra: FUN_08078258
+    name: ipod_serial_nid_ensure
+    size: 120
+    sig: "void ipod_serial_nid_ensure(void)"
+    module: crypto/ipod_serial_nid_ensure
+    status: ported
+    vars:
+      r4: serial_nid_globals
+      r0: serial_number_nid
+    notes: >-
+      Raw A32 establishes 64 code bytes and 56 literal/string bytes before
+      the next independent PUSH at 0x080782d0. Two incoming plain BLs at
+      0x082d438c and 0x082d4744, zero predicated BLs; two outgoing plain
+      BLs and zero predicated BLs. Cache at 0x08a096bc word 2 holds the
+      serial-number NID. Lookup long name iPod Serial Number through
+      OBJ_ln2nid at 0x0805edc4, then on zero create OID 1.3.6.1.4.1.63.42
+      with short name iPod S/N and that long name through OBJ_create at
+      0x0805eb94. Neither callee has an existing names.yaml entry or Rust
+      port. Typed firmware seams preserve their verified ABI; OBJ_create
+      overwrites r3 before use, disproving Ghidra's fourth argument.
+      Relocated strings and isolated host cache are deliberate deviations.
+      Failed creation leaves zero and is retried; any nonzero cache skips
+      both calls. Host tests cover existing cache, lookup hit, failed
+      creation, retry success, and preservation of neighboring words.
+      Host suite passes 15390 tests; standalone exported-path smoke verifies
+      creation and cache reuse. ARM build passes. match.py exit 1 reviewed:
+      LLVM addresses the cache directly at 0x08a096c4, uses BLX seams and
+      relocated string literals, and adds a frame pointer; both zero checks
+      and both cache assignments remain in original order.
   - address: 0x0807a378
     ghidra: FUN_0807a378
     name: directory_visit
