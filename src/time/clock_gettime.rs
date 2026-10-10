@@ -9,9 +9,9 @@
 //! error even on success and return 0 or -1. Callback writes are not rolled
 //! back on error. The next independent prologue is at 0x082c378c.
 //!
-//! Deliberate deviations: unported validation and errno/result helpers stay
-//! fixed-address calls on target. Host validation models the verified 0..3
-//! domain; host callback slots retain native pointer width in repr(C) records.
+//! Deliberate deviations: the errno/result helper stays a fixed-address call
+//! on target. Validation uses the ported clock_id_validate on target and host;
+//! host callback slots retain native pointer width in repr(C) records.
 //! Host-only seams substitute the firmware table and errno/result helper.
 
 use core::ptr;
@@ -65,13 +65,7 @@ pub unsafe extern "C" fn clock_gettime(clock_id: i32, out: *mut ClockTimespec) -
     let error = if out.is_null() {
         26
     } else {
-        #[cfg(target_os = "none")]
-        let validation = {
-            let validate: unsafe extern "C" fn(i32) -> i32 = core::mem::transmute(0x0808_4310usize);
-            validate(clock_id)
-        };
-        #[cfg(not(target_os = "none"))]
-        let validation = if (clock_id as u32) < 4 { 0 } else { 26 };
+        let validation = super::clock_id_validate::clock_id_validate(clock_id);
         if validation != 0 {
             validation
         } else {
