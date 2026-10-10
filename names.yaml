@@ -240356,3 +240356,37 @@ functions:
       Full host suite passes 15254 tests; ARM release build succeeds.
       Standalone host smoke runs the actual query and GPIO port, samples
       mode 3, clears the GPIO fixture, and observes cached mode 3 again.
+
+  - address: 0x080a28a4
+    ghidra: FUN_080a28a4
+    name: facade_query_word
+    size: 92
+    sig: "i32 facade_query_word(u32 selector, u32 *output, u32 query_word)"
+    module: app/facade_query_word
+    status: ported
+    vars: {param_1: selector, param_2: output, param_3: query_word, local_14: entry_guard, iVar3: status}
+    renames:
+      FUN_0814a08c: trace_buffer_get
+      FUN_0814a130: trace_buffer_slot_acquire
+      FUN_08296ec0: facade_registry_walk
+      FUN_08206e9c: counted_mutex_guard_release
+    notes: >-
+      Raw words establish 92 bytes through 0x080a28fc, with the next real
+      function at 0x080a2900. Independent whole-image A32 decoding finds two
+      inbound plain BLs at 0x080481a4 and 0x080952f8, zero predicated BLs.
+      Body contains four plain BLs and one indirect BLX through vtable
+      slot +0x98. Acquires the selected entry and counted guard, resolves a
+      matching facade with selector 1, passes a mutable private copy of
+      incoming r2 and the output pointer to slot 38, clears output on every
+      nonzero status, releases the guard and returns status unchanged.
+      Callers omit r2 in Ghidra output, but raw push preserves incoming r2
+      as the method's stack input. Slot domain meaning remains unproven.
+      All direct callees reuse existing ports; no new seams. Host vtable
+      entries widen natively while target slot offsets stay exact.
+      Host edge tests cover zero/full-width query words and positive,
+      negative and extreme failure statuses. Standalone smoke exercises
+      the public wrapper through real acquisition, registry walk and guard
+      release: success output 12, failure -17 with output zero, balanced
+      entry/table hold counters. ARM build succeeds; match.py reports
+      23 original versus 28 Rust instructions with the same four direct
+      calls, slot +0x98 BLX, conditional clear and final guard release.

@@ -735,6 +735,7 @@ pub mod event_source;
 pub mod event_source_find_payload;
 pub mod facade_registry_walk;
 pub mod facade_for_selector;
+pub mod facade_query_word;
 pub mod owner_scaled_capacity_query;
 pub mod fixed3_assign;
 pub mod fixed3_is_zero;
