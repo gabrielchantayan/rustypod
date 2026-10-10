@@ -54,8 +54,9 @@ pub unsafe extern "C" fn calendar_apply_datetime(datetime: *const u8) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use super::super::calendar_update_fields::{INITIALIZE_RECORD, COMMIT_RECORD,
+    use super::super::calendar_update_fields::{INITIALIZE_RECORD,
         APPLY_CALENDAR_ADJUSTMENT, CALENDAR_UPDATE_FIELDS_TEST_LOCK};
+    use super::super::sync_best_clock::RTC_WRITE;
 
     static mut COMMITTED: [u8; 12] = [0; 12];
     static mut EVENTS: u32 = 0;
@@ -63,10 +64,12 @@ mod tests {
         record.write_bytes(0xa5, 12);
         EVENTS = 1;
     }
-    unsafe extern "C" fn commit(record: *mut u8) {
+    unsafe extern "C" fn commit(mode: u32, record: *const super::super::clock_state::ClockState) -> i32 {
+        assert_eq!(mode, 0);
         assert_eq!(EVENTS, 1);
-        ptr::copy_nonoverlapping(record, ptr::addr_of_mut!(COMMITTED).cast(), 12);
+        ptr::copy_nonoverlapping(record.cast::<u8>(), ptr::addr_of_mut!(COMMITTED).cast(), 12);
         EVENTS = 2;
+        0
     }
     unsafe extern "C" fn unexpected_adjustment(_: i8, _: u8) {
         panic!("date/time application must not adjust UTC/DST");
@@ -82,13 +85,14 @@ mod tests {
             Err(error) => panic!("calendar test lock poisoned: {error}"),
         };
         unsafe {
-            let previous = (INITIALIZE_RECORD, COMMIT_RECORD, APPLY_CALENDAR_ADJUSTMENT,
+            let _clock = super::super::sync_best_clock::tests::install();
+            let previous = (INITIALIZE_RECORD, RTC_WRITE, APPLY_CALENDAR_ADJUSTMENT,
                 CALENDAR_NOTIFICATION);
             INITIALIZE_RECORD = initialize;
-            COMMIT_RECORD = commit;
+            RTC_WRITE = commit;
             APPLY_CALENDAR_ADJUSTMENT = unexpected_adjustment;
-            // Includes zero/max fields and a nonzero ignored byte +5.
-            for input in [[0u16; 4], [0xffff; 4], [0x0201, 0x0403, 0xee05, 0x1234]] {
+            // Includes minimal/max fields and a nonzero ignored byte +5.
+            for input in [[0x0101u16; 4], [0xffff; 4], [0x0201, 0x0403, 0xee05, 0x1234]] {
                 for callback in [None, Some(notify as CalendarNotification)] {
                     CALENDAR_NOTIFICATION = callback;
                     assert_eq!(calendar_apply_datetime(input.as_ptr().cast()), 0);
@@ -98,7 +102,7 @@ mod tests {
                     assert_eq!(EVENTS, if callback.is_some() { 3 } else { 2 });
                 }
             }
-            (INITIALIZE_RECORD, COMMIT_RECORD, APPLY_CALENDAR_ADJUSTMENT,
+            (INITIALIZE_RECORD, RTC_WRITE, APPLY_CALENDAR_ADJUSTMENT,
                 CALENDAR_NOTIFICATION) = previous;
         }
     }

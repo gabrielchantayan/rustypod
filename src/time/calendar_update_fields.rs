@@ -22,11 +22,9 @@
 //!
 //! # Deliberate deviations
 //!
-//! The three unported callees have no `names.yaml` identities. Target builds
-//! call their verified retail addresses directly; host builds expose volatile
-//! dispatch seams so the observable selected bytes and arguments can be
-//! tested. Rust's signed division has the same truncation-toward-zero result
-//! as the ARM ADS signed divider for these nonzero constant divisors.
+//! The initializer and adjustment handler remain fixed-address target calls
+//! with volatile host seams. Clock commits reuse the ported clock_state_commit.
+//! Signed division truncates toward zero like the ADS divider.
 
 #[cfg(not(target_os = "none"))]
 use core::ptr;
@@ -36,11 +34,9 @@ use core::mem;
 extern crate std;
 
 type InitializeRecord = unsafe extern "C" fn(*mut u8);
-type CommitRecord = unsafe extern "C" fn(*mut u8);
 type ApplyCalendarAdjustment = unsafe extern "C" fn(i8, u8);
 
 const INITIALIZE_RECORD_ADDRESS: usize = 0x0806_42a4;
-const COMMIT_RECORD_ADDRESS: usize = 0x0806_748c;
 const APPLY_CALENDAR_ADJUSTMENT_ADDRESS: usize = 0x0806_ce94;
 
 #[cfg(target_os = "none")]
@@ -53,14 +49,9 @@ unsafe fn initialize_record(record: *mut u8) {
     unsafe { ptr::read_volatile(ptr::addr_of!(INITIALIZE_RECORD))(record) }
 }
 
-#[cfg(target_os = "none")]
 #[inline(always)]
 unsafe fn commit_record(record: *mut u8) {
-    unsafe { mem::transmute::<usize, CommitRecord>(COMMIT_RECORD_ADDRESS)(record) }
-}
-#[cfg(not(target_os = "none"))]
-unsafe fn commit_record(record: *mut u8) {
-    unsafe { ptr::read_volatile(ptr::addr_of!(COMMIT_RECORD))(record) }
+    super::sync_best_clock::clock_state_commit(record.cast());
 }
 
 #[cfg(target_os = "none")]
@@ -76,14 +67,10 @@ unsafe fn apply_calendar_adjustment(first: i8, second: u8) {
 #[cfg(not(target_os = "none"))]
 unsafe extern "C" fn missing_initialize_record(_record: *mut u8) {}
 #[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_commit_record(_record: *mut u8) {}
-#[cfg(not(target_os = "none"))]
 unsafe extern "C" fn missing_apply_calendar_adjustment(_first: i8, _second: u8) {}
 
 #[cfg(not(target_os = "none"))]
 pub static mut INITIALIZE_RECORD: InitializeRecord = missing_initialize_record;
-#[cfg(not(target_os = "none"))]
-pub static mut COMMIT_RECORD: CommitRecord = missing_commit_record;
 #[cfg(not(target_os = "none"))]
 pub static mut APPLY_CALENDAR_ADJUSTMENT: ApplyCalendarAdjustment = missing_apply_calendar_adjustment;
 
@@ -146,38 +133,40 @@ mod tests {
     unsafe extern "C" fn recording_initialize(record: *mut u8) {
         unsafe { ptr::copy_nonoverlapping(INITIAL_RECORD.as_ptr(), record, 12); INITIALIZE_CALLS += 1 };
     }
-    unsafe extern "C" fn recording_commit(record: *mut u8) {
-        unsafe { ptr::copy_nonoverlapping(record, COMMITTED_RECORD.as_mut_ptr(), 12); COMMIT_CALLS += 1 };
+    unsafe extern "C" fn recording_commit(mode: u32, record: *const super::super::clock_state::ClockState) -> i32 {
+        assert_eq!(mode, 0);
+        unsafe { ptr::copy_nonoverlapping(record.cast(), COMMITTED_RECORD.as_mut_ptr(), 12); COMMIT_CALLS += 1 };
+        0
     }
     unsafe extern "C" fn recording_adjustment(first: i8, second: u8) {
         unsafe { ADJUSTMENT = (first, second); ADJUSTMENT_CALLS += 1 };
     }
 
-    struct Mocks { previous: (InitializeRecord, CommitRecord, ApplyCalendarAdjustment), _lock: MutexGuard<'static, ()> }
+    struct Mocks { previous: (InitializeRecord, ApplyCalendarAdjustment), _clock: super::super::sync_best_clock::tests::Fixture, _lock: MutexGuard<'static, ()> }
     impl Drop for Mocks {
         fn drop(&mut self) {
             unsafe {
                 ptr::write_volatile(ptr::addr_of_mut!(INITIALIZE_RECORD), self.previous.0);
-                ptr::write_volatile(ptr::addr_of_mut!(COMMIT_RECORD), self.previous.1);
-                ptr::write_volatile(ptr::addr_of_mut!(APPLY_CALENDAR_ADJUSTMENT), self.previous.2);
+                ptr::write_volatile(ptr::addr_of_mut!(APPLY_CALENDAR_ADJUSTMENT), self.previous.1);
             }
         }
     }
     unsafe fn install(initial: [u8; 12]) -> Mocks {
         let lock = CALENDAR_UPDATE_FIELDS_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let previous = unsafe {
-            (ptr::read_volatile(ptr::addr_of!(INITIALIZE_RECORD)), ptr::read_volatile(ptr::addr_of!(COMMIT_RECORD)), ptr::read_volatile(ptr::addr_of!(APPLY_CALENDAR_ADJUSTMENT)))
+            (ptr::read_volatile(ptr::addr_of!(INITIALIZE_RECORD)), ptr::read_volatile(ptr::addr_of!(APPLY_CALENDAR_ADJUSTMENT)))
         };
+        let clock = unsafe { super::super::sync_best_clock::tests::install() };
         unsafe {
             ptr::write_volatile(ptr::addr_of_mut!(INITIALIZE_RECORD), recording_initialize);
-            ptr::write_volatile(ptr::addr_of_mut!(COMMIT_RECORD), recording_commit);
+            ptr::write_volatile(ptr::addr_of_mut!(super::super::sync_best_clock::RTC_WRITE), recording_commit);
             ptr::write_volatile(ptr::addr_of_mut!(APPLY_CALENDAR_ADJUSTMENT), recording_adjustment);
             INITIAL_RECORD = initial;
             INITIALIZE_CALLS = 0;
             COMMIT_CALLS = 0;
             ADJUSTMENT_CALLS = 0;
         }
-        Mocks { previous, _lock: lock }
+        Mocks { previous, _clock: clock, _lock: lock }
     }
 
     #[test]
