@@ -277,13 +277,13 @@ pub unsafe extern "C" fn draw_state_fill_rect_foreground(this: *mut u8, rect: *c
 
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     extern crate std;
 
     use super::*;
     use std::sync::Mutex;
 
-    static OPS_LOCK: Mutex<()> = Mutex::new(());
+    pub(crate) static OPS_LOCK: Mutex<()> = Mutex::new(());
     const GUARD: u8 = 0xa5;
 
     #[derive(Clone, Copy, PartialEq, Debug)]
