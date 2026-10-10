@@ -721,37 +721,6 @@ pub unsafe extern "C" fn shared_context_memory_bounds(
     }
 }
 
-type FormatDottedTriple = unsafe extern "C" fn(u32, *mut u8);
-
-/// Calls the stock dotted-triple formatter, which remains in retailOS.
-///
-/// This is deliberately a boundary rather than a port of 0x0806e0a4. Host
-/// tests replace the one function pointer below; ARM builds call its fixed
-/// firmware load address. The original splits `word` into `(word >> 24)`,
-/// `((word >> 16) & 0xff)` and `(word & 0xffff)` and `sprintf`s them into
-/// `dst` through the format string at 0x0806e0d4, `"%d.%d.%d"`.
-unsafe extern "C" fn firmware_format_dotted_triple(word: u32, dst: *mut u8) {
-    #[cfg(target_os = "none")]
-    {
-        let format_dotted_triple: FormatDottedTriple =
-            core::mem::transmute(0x0806_e0a4usize);
-        format_dotted_triple(word, dst)
-    }
-
-    #[cfg(not(target_os = "none"))]
-    {
-        let _ = (word, dst);
-    }
-}
-
-/// Narrow boundary for the unported 0x0806e0a4 dependency.
-static mut FORMAT_DOTTED_TRIPLE: FormatDottedTriple = firmware_format_dotted_triple;
-
-#[inline(always)]
-unsafe fn format_dotted_triple_fn() -> FormatDottedTriple {
-    core::ptr::read_volatile(core::ptr::addr_of!(FORMAT_DOTTED_TRIPLE))
-}
-
 type ObjectCountedText = unsafe extern "C" fn(*const u8, *mut u8);
 
 /// Calls the stock counted-text setter, which remains in retailOS.
@@ -813,8 +782,8 @@ unsafe fn object_counted_text_fn() -> ObjectCountedText {
 /// original `void`; its r0 residue is 0x08046a88's return, which the call
 /// site ignores, so the port returns nothing. The original's `mov r4,r0`
 /// keeps `object` in a callee-saved register across the calls — an allocation
-/// detail, not observable state. The stock dotted-triple formatter and
-/// counted-text setter stay behind their respective boundaries.
+/// detail, not observable state. The dotted-triple formatter calls its Rust
+/// port directly; the counted-text setter retains its stock boundary.
 ///
 /// # Safety
 ///
@@ -834,7 +803,9 @@ pub unsafe extern "C" fn object_set_version_text(object: *mut u8) {
     let mut formatted = core::mem::MaybeUninit::<[u8; 256]>::uninit();
     let mut counted = core::mem::MaybeUninit::<[u8; 256]>::uninit();
 
-    format_dotted_triple_fn()(version_word, formatted.as_mut_ptr() as *mut u8);
+    crate::util::format_dotted_triple::format_dotted_triple(
+        version_word, formatted.as_mut_ptr() as *mut u8,
+    );
     crate::libc::counted_copy::cstr_to_counted_u8(
         formatted.as_ptr() as *const u8,
         counted.as_mut_ptr() as *mut u8,
@@ -2955,19 +2926,9 @@ mod tests {
     }
 
     static VERSION_TEXT_LOCK: Mutex<()> = Mutex::new(());
-    static mut FORMAT_CALLS: u32 = 0;
-    static mut FORMAT_WORD: u32 = 0;
-    static mut FORMAT_PAYLOAD: [u8; 512] = [0; 512];
-    static mut FORMAT_PAYLOAD_LEN: usize = 0;
     static mut SET_TEXT_CALLS: u32 = 0;
     static mut SET_TEXT_OBJECT: usize = 0;
     static mut SET_TEXT_COUNTED: [u8; 300] = [0; 300];
-
-    unsafe extern "C" fn recording_format_dotted_triple(word: u32, dst: *mut u8) {
-        FORMAT_CALLS += 1;
-        FORMAT_WORD = word;
-        core::ptr::copy_nonoverlapping(FORMAT_PAYLOAD.as_ptr(), dst, FORMAT_PAYLOAD_LEN);
-    }
 
     unsafe extern "C" fn recording_object_counted_text(counted: *const u8, object: *mut u8) {
         SET_TEXT_CALLS += 1;
@@ -2985,8 +2946,6 @@ mod tests {
             unsafe {
                 core::ptr::addr_of_mut!(HOST_SHARED_CONTEXT_SLOT).write(core::ptr::null_mut());
                 core::ptr::addr_of_mut!(HOST_DEFAULT_SHARED_CONTEXT).write(core::ptr::null_mut());
-                core::ptr::addr_of_mut!(FORMAT_DOTTED_TRIPLE)
-                    .write(firmware_format_dotted_triple);
                 core::ptr::addr_of_mut!(OBJECT_COUNTED_TEXT)
                     .write(firmware_object_counted_text);
             }
@@ -3014,20 +2973,12 @@ mod tests {
 
     fn install_version_text_mocks(
         context: *mut u8,
-        payload: &[u8],
     ) -> (MutexGuard<'static, ()>, MutexGuard<'static, ()>) {
         let guards = install_shared_context(context, core::ptr::null_mut());
         unsafe {
-            FORMAT_CALLS = 0;
-            FORMAT_WORD = 0;
-            FORMAT_PAYLOAD = [0; 512];
-            FORMAT_PAYLOAD[..payload.len()].copy_from_slice(payload);
-            FORMAT_PAYLOAD_LEN = payload.len();
             SET_TEXT_CALLS = 0;
             SET_TEXT_OBJECT = 0;
             SET_TEXT_COUNTED = [0; 300];
-            core::ptr::addr_of_mut!(FORMAT_DOTTED_TRIPLE)
-                .write(recording_format_dotted_triple);
             core::ptr::addr_of_mut!(OBJECT_COUNTED_TEXT)
                 .write(recording_object_counted_text);
         }
@@ -3078,18 +3029,12 @@ mod tests {
         context[0x44..0x48].copy_from_slice(&0x1122_3344u32.to_le_bytes());
         context[0x48..0x4c].copy_from_slice(&0x0200_0004u32.to_le_bytes());
         context[0x4c..0x50].copy_from_slice(&0x5566_7788u32.to_le_bytes());
-        let _guard = install_version_text_mocks(context.as_mut_ptr(), b"2.0.4\0");
+        let _guard = install_version_text_mocks(context.as_mut_ptr());
         let _reset = VersionTextReset;
         let mut object = [0u8; 0x5c];
 
         unsafe { object_set_version_text(object.as_mut_ptr()) };
 
-        assert_eq!(unsafe { FORMAT_CALLS }, 1);
-        assert_eq!(
-            unsafe { FORMAT_WORD },
-            0x0200_0004,
-            "the formatter must receive the word at context + 0x48 (`ldr r0,[r0,#0x48]`)"
-        );
         assert_eq!(unsafe { SET_TEXT_CALLS }, 1);
         assert_eq!(
             unsafe { SET_TEXT_OBJECT },
@@ -3103,44 +3048,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn counted_conversion_stops_at_the_ff_limit() {
-        let mut context = [0u8; 0x4c];
-        let mut payload = std::vec::Vec::from([0x61u8; 300]);
-        payload.push(0);
-        let _guard = install_version_text_mocks(context.as_mut_ptr(), &payload);
-        let _reset = VersionTextReset;
-        let mut object = [0u8; 0x5c];
-
-        unsafe { object_set_version_text(object.as_mut_ptr()) };
-
-        let counted = unsafe { SET_TEXT_COUNTED };
-        assert_eq!(
-            counted[0], 0xff,
-            "the 0xff limit caps the counted length (`mov r2,#0xff`)"
-        );
-        assert!(
-            counted[1..=0xff].iter().all(|&byte| byte == 0x61),
-            "exactly 255 payload bytes survive the limit"
-        );
-    }
-
-    #[test]
-    fn empty_formatted_text_installs_a_zero_length_counted_text() {
-        let mut context = [0u8; 0x4c];
-        let _guard = install_version_text_mocks(context.as_mut_ptr(), b"\0");
-        let _reset = VersionTextReset;
-        let mut object = [0u8; 0x5c];
-
-        unsafe { object_set_version_text(object.as_mut_ptr()) };
-
-        assert_eq!(unsafe { SET_TEXT_CALLS }, 1);
-        assert_eq!(
-            unsafe { SET_TEXT_COUNTED }[0],
-            0,
-            "an immediate source NUL leaves the counted length at zero"
-        );
-    }
 
     /// Installs the shared-context default for [`context_mode_flag`].
     ///

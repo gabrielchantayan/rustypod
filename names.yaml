@@ -109246,8 +109246,8 @@ functions:
       field is not recovered. Ghidra declares the original void; its r0
       residue is 0x08046a88's return, which the call site ignores. The
       ported shared_context getter supplies context directly; the formatter
-      and setter remain behind FORMAT_DOTTED_TRIPLE and OBJECT_COUNTED_TEXT
-      boundaries. match.py (structural, exit 1 expected) shows the same
+      now calls util/format_dotted_triple directly, while the setter remains
+      behind OBJECT_COUNTED_TEXT. Historical codegen comparison follows. match.py (structural, exit 1 expected) shows the same
       four-call sequence with the same +0x48 load, 0xff limit and 0x200
       frame; diffs are LLVM's larger push {r4-r6,sl,fp,lr} frame, the
       formatter/setter boundary calls, swapped stack-buffer order, and the
@@ -243692,3 +243692,48 @@ functions:
       value. match.py exits 1 with expected frame/register differences,
       linked-call relocations and a BLX to the exact setter address;
       initialization fields, success gates and ordered cleanup are retained.
+
+  - address: 0x0806e0a4
+    ghidra: FUN_0806e0a4
+    name: format_dotted_triple
+    size: 60
+    sig: "i32 format_dotted_triple(u32 word, u8 *destination)"
+    module: util/format_dotted_triple
+    status: ported
+    vars:
+      param_1/r0/r2: word
+      param_2/r1/r0: destination
+      r2: high_byte
+      r3: middle_byte
+      stack_0: low_halfword
+      return/r0: character_count
+    renames:
+      FUN_080edc2c: retail_sprintf
+      s__d__d__d_0806e0d4: dotted_decimal_format
+    notes: >-
+      Raw words establish 48 instruction bytes ending with POP {ip,pc}
+      at 0x0806e0d0, followed by "%d.%d.%d" and zero padding. The next
+      real function starts PUSH at 0x0806e0e0, giving a true size of 60
+      bytes. Independent aligned whole-image A32 decoding finds two inbound
+      plain BLs at 0x08052240 and 0x08055f68, no predicated inbound BLs,
+      one outbound plain BL at 0x0806e0cc to retail_sprintf @ 0x080edc2c,
+      and no predicated outbound BLs. Split into word>>24, (word>>16)&255
+      and word&65535, format unsigned decimal components separated by dots,
+      and NUL-terminate. Each component is positive in signed %d range.
+      Ghidra's void result omits the formatter count preserved in r0 by
+      the raw epilogue; Rust returns that count. Callers read context+0x4c
+      and context+0x48 respectively and ignore the result. Deliberate
+      deviation: inline the fixed format following bytes16_to_upper_hex,
+      avoiding variadic ABI adaptation and general-formatter dispatch.
+      No allocation, null guard or pointer-layout changes. The existing
+      object_set_version_text caller uses the direct Rust port; its obsolete
+      stock-address formatter seam and impossible mocked empty/oversized
+      formatter-output tests are removed. Host regression compares decimal
+      digit boundaries, maximum values, four output alignments, count,
+      terminator and untouched surrounding bytes against host formatting.
+      Full host suite and ARM release build pass. Executable smoke verifies
+      0.0.0, 2.0.4 and 255.255.65535, counts and output boundaries.
+      match.py exits 1: 12 stock instructions versus 101 Rust instructions;
+      fixed formatting replaces the general formatter BL with decimal loops
+      and division helpers. High-byte/middle-byte/low-halfword extraction,
+      dot writes, final NUL and character-count return remain observable.
