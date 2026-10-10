@@ -70,6 +70,7 @@ pub mod event_loop_callback;
 pub mod gpio;
 pub mod gpio_cmd;
 pub mod gpio_pin_read;
+pub mod lcd_command_mode_get;
 pub mod board_gpio_pin_86;
 pub mod gpio_pin_is_high;
 pub mod gpio_pin_interrupt_set;
