@@ -3841,6 +3841,8 @@ pub static INPUT_SEQUENCE_ITEM_OPS_TEST_LOCK: std::sync::Mutex<()> = std::sync::
 /// Serializes tests that mutate the shared UI sequence identifier at
 /// `0x089c_fcc4`, including callers that consume an identifier.
 pub static SEQUENCE_ID_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+/// Serializes owner entry append/create tests replacing the shared tail helper.
+pub static OWNER_ENTRY_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 /// Serializes tests that replace object-selected-payload lookup's virtual and
 /// stock tail-call seams.
 pub static OBJECT_SELECTED_PAYLOAD_INDEX_TEST_LOCK: parking_lot::Mutex<()> =

@@ -16,6 +16,29 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0805e5f4
+    ghidra: FUN_0805e5f4
+    name: owner_entry_create
+    size: 120
+    sig: "CreatedOwnerEntry *owner_entry_create(EntryCreateOwner *owner, u32 kind, u32 unused, u32 timestamp)"
+    module: app/owner_entry_create
+    status: ported
+    vars: {param_1/r5: owner, param_2/r7: kind, param_3/r2: unused, param_4/r6: timestamp, piVar1/r4: entry}
+    notes: >-
+      Raw extent [0x0805e5f4,0x0805e66c), ending in POP before the
+      next dirty-marker function. Full aligned A32 scan verifies two
+      inbound plain BLs at 0x080954c0 and 0x080d71e4, zero predicated
+      inbound BLs, four outbound plain BLs and zero predicated outbound
+      BLs. Reject unsigned owner count >= 0x7fffffff; acquire from +0x44
+      via existing FIXED_POOL_OPS (unported 0x0805de1c). Initialize owner,
+      kind at +0xc, sequence at +0x18, byte +0x16, pointer to owner +0x918
+      at +0x10 and timestamp at +0x58. Zero timestamp uses canonical
+      current_mac_epoch_seconds_raw; append through owner_entry_append.
+      Argument r2 is unused. Existing names identify all three ported callees.
+      Native repr(C) pointers widen on hosts; ARM field offsets remain exact.
+      Host edge tests and standalone caller smoke pass; ARM release builds.
+      match.py exit 1: 30 stock versus 37 Rust instructions; equivalent
+      unsigned rejection, stores, timestamp branch and append; allocator
   - address: 0x0805e93c
     ghidra: FUN_0805e93c
     name: registry_initialize
