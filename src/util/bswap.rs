@@ -1,7 +1,7 @@
 //! Byte-order swap helpers — the endianness cluster @ 0x0805dc24..0x0805dd88.
 //!
 //! retailOS parses big-endian file formats (iTunesDB atoms, MPEG-4 boxes,
-//! resource records) on a little-endian core; these four helpers are its
+//! resource records) on a little-endian core; these helpers are its
 //! `htonl`/`htons` family. All are pure leaf functions — no hardware is
 //! touched, so host tests prove complete behavior. Originals (sizes from
 //! decomp/functions.csv; call counts from scanning osos.dec for `b`/`bl`
@@ -15,6 +15,9 @@
 //!   `bl` call sites). Spills the two argument words to the stack, re-reads
 //!   all eight bytes in reverse order into a second slot, then reloads the
 //!   swapped `r0:r1` result.
+//! - `bswap64_inplace` — `FUN_0805dca8` @ 0x0805dca8 (104 bytes;
+//!   2 plain BL callers, no predicated BLs). Snapshots eight bytes and
+//!   writes them back in reverse order.
 //! - `bswap16` — `FUN_0805dd48` @ 0x0805dd48 (32 bytes; 133 call sites).
 //!   Same stack dance over the low 2 bytes; the result is re-read with
 //!   `ldrh`, so the return value is the swapped low half zero-extended —
@@ -71,6 +74,39 @@ pub extern "C" fn bswap64(value: u64) -> u64 {
 #[cfg_attr(target_os = "none", no_mangle)]
 pub extern "C" fn bswap16(value: u32) -> u32 {
     (value as u16).swap_bytes() as u32
+}
+
+/// bswap64_inplace — original: `FUN_0805dca8` @ 0x0805dca8 (104 bytes).
+///
+/// Raw words establish the extent from the push at 0x0805dca8 through
+/// the pop at 0x0805dd0c; the next real function starts at 0x0805dd10.
+/// Two inbound plain BLs at 0x082d32f8 and 0x082d33cc, zero predicated
+/// BLs, zero tail branches, and zero outgoing calls.
+/// Snapshot all eight bytes before writing their reversal in place.
+///
+/// Deliberate deviation: byte-wise volatile reads instead of four aligned
+/// halfword reads preserve the existing record ports' unaligned support.
+/// Aligned inputs have identical results; stores remain byte-wise.
+///
+/// # Safety
+/// `ptr` must point to eight initialized, readable and writable bytes in
+/// one allocation. No null check is performed, matching retailOS.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn bswap64_inplace(ptr: *mut u8) {
+    let bytes = [
+        ptr.read_volatile(),
+        ptr.add(1).read_volatile(),
+        ptr.add(2).read_volatile(),
+        ptr.add(3).read_volatile(),
+        ptr.add(4).read_volatile(),
+        ptr.add(5).read_volatile(),
+        ptr.add(6).read_volatile(),
+        ptr.add(7).read_volatile(),
+    ];
+    for (offset, byte) in bytes.into_iter().rev().enumerate() {
+        ptr.add(offset).write_volatile(byte);
+    }
 }
 
 /// bswap32_inplace — original: `FUN_0805dd10` @ 0x0805dd10 (56 bytes).
@@ -133,9 +169,9 @@ pub unsafe extern "C" fn bswap_u16_array_inplace(words: *mut u16, count: u32) {
 /// Reverses the first eight bytes of the fixed 80-byte record, then reverses
 /// each of the eighteen consecutive 32-bit fields at offsets 8 through 76.
 /// The raw extent ends at 0x082d3330; the distinct next function starts at
-/// 0x082d3334. The first 8-byte lane is the original's `bswap64` helper
-/// (0x0805dca8), which remains unported; the remaining fields call the
-/// ported [`bswap32_inplace`] helper (0x0805dd10).
+/// 0x082d3334. The first 8-byte lane calls [`bswap64_inplace`]
+/// (0x0805dca8); the remaining fields call [`bswap32_inplace`]
+/// (0x0805dd10).
 ///
 /// Deliberate deviation: the retail helpers load halfwords and require
 /// 2-byte alignment on ARMv5. This port uses byte-wise volatile accesses, so
@@ -144,19 +180,7 @@ pub unsafe extern "C" fn bswap_u16_array_inplace(words: *mut u16, count: u32) {
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn bswap_80_byte_record_inplace(record: *mut u8) {
-    let first_eight = [
-        record.read_volatile(),
-        record.add(1).read_volatile(),
-        record.add(2).read_volatile(),
-        record.add(3).read_volatile(),
-        record.add(4).read_volatile(),
-        record.add(5).read_volatile(),
-        record.add(6).read_volatile(),
-        record.add(7).read_volatile(),
-    ];
-    for (offset, byte) in first_eight.into_iter().enumerate() {
-        record.add(7 - offset).write_volatile(byte);
-    }
+    bswap64_inplace(record);
     for offset in (8..80).step_by(4) {
         bswap32_inplace(record.add(offset));
     }
@@ -184,19 +208,7 @@ pub unsafe extern "C" fn bswap_512_byte_block_inplace(block: *mut u8) {
         bswap32_inplace(block.add(offset));
     }
 
-    let field64 = [
-        block.add(72).read_volatile(),
-        block.add(73).read_volatile(),
-        block.add(74).read_volatile(),
-        block.add(75).read_volatile(),
-        block.add(76).read_volatile(),
-        block.add(77).read_volatile(),
-        block.add(78).read_volatile(),
-        block.add(79).read_volatile(),
-    ];
-    for (offset, byte) in field64.into_iter().enumerate() {
-        block.add(79 - offset).write_volatile(byte);
-    }
+    bswap64_inplace(block.add(72));
 
     for offset in (112..512).step_by(80) {
         bswap_80_byte_record_inplace(block.add(offset));
@@ -355,6 +367,24 @@ pub extern "C" fn transform_checked_word_for_mode(mode: u32, word: u32) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bswap64_inplace_reverses_exact_lane_at_all_alignments() {
+        for offset in 0..4 {
+            for bit in 0..64 {
+                let mut buffer = [0xa5u8; 16];
+                let start = 4 + offset;
+                buffer[start..start + 8].copy_from_slice(&(1u64 << bit).to_le_bytes());
+                let original = buffer;
+                let mut expected = original;
+                expected[start..start + 8].reverse();
+                unsafe { bswap64_inplace(buffer.as_mut_ptr().add(start)) };
+                assert_eq!(buffer, expected, "offset={offset} bit={bit}");
+                unsafe { bswap64_inplace(buffer.as_mut_ptr().add(start)) };
+                assert_eq!(buffer, original, "offset={offset} bit={bit}");
+            }
+        }
+    }
 
     #[test]
     fn bswap_u16_array_zero_count_accepts_null() {

@@ -51835,6 +51835,25 @@ functions:
       Byte-swap of the low 16 bits, zero-extended by the ldrh reload
       (the argument's top half is discarded). 133 call sites.
 
+  - address: 0x0805dca8
+    ghidra: FUN_0805dca8
+    name: bswap64_inplace
+    size: 104
+    sig: "void bswap64_inplace(u8 *ptr)"
+    module: util/bswap
+    status: ported
+    vars: {param_1: ptr}
+    notes: >-
+      Raw osos.dec confirms the 104-byte extent from push at 0x0805dca8
+      through pop at 0x0805dd0c; the next real function starts at 0x0805dd10.
+      Four halfword loads snapshot eight bytes before eight byte stores
+      reverse their order in place. No outgoing calls. Independent decoding
+      of all immediate ARM B/BL words finds two plain unconditional BL
+      callers at 0x082d32f8 and 0x082d33cc, no predicated BLs, and no tail
+      branches. The Rust port uses byte-wise volatile reads, deliberately
+      supporting unaligned input like the existing record ports; aligned
+      results match retailOS. Both existing Rust callers now use this helper.
+
   - address: 0x0805dd10
     ghidra: FUN_0805dd10
     name: bswap32_inplace
@@ -51872,7 +51891,7 @@ functions:
       following function starts at 0x082d3334, correcting Ghidra's 68-byte
       extent. Reverses bytes 0..7 as one 8-byte lane, then reverses each of
       the eighteen 4-byte lanes at offsets 8..76. The first lane calls the
-      unported 0x0805dca8 helper; the remaining 18 calls use ported
+      bswap64_inplace @ 0x0805dca8 helper; the remaining 18 calls use ported
       bswap32_inplace @ 0x0805dd10 directly. Decoding every ARM B/BL word in
       osos.dec finds six plain unconditional BL callers (0x082d3260,
       0x082d3268, 0x082d33d4, 0x082d33dc, 0x082d33e4, 0x082d33ec) and one
