@@ -26,6 +26,37 @@ pub const METADATA_SIGNED_BYTE_B3D_OFFSET: usize = 0xb3d;
 pub const METADATA_SIGNED_BYTE_B41_OFFSET: usize = 0xb41;
 /// Byte offset of this signed byte in the metadata block.
 pub const METADATA_SIGNED_BYTE_B40_OFFSET: usize = 0xb40;
+/// Byte offset of the low word of this 64-bit metadata value.
+pub const METADATA_U64_B44_OFFSET: usize = 0xb44;
+
+/// ft_service_metadata_u64_at_b44 — original: `FUN_08054e34` @
+/// `0x08054e34` (16 bytes; two plain inbound BLs, zero predicated inbound
+/// BLs, zero outgoing plain or predicated BLs).
+///
+/// Raw words `e5901f00 e5910b44 e5911b48 e12fff1e` establish the extent
+/// [0x08054e34, 0x08054e44), ending at the separately called signed-byte
+/// accessor. Follow the aligned pointer at context+0xf00, load the low
+/// word at metadata+0xb44 and high word at +0xb48, and return them in r0:r1.
+/// Callers at 0x08173430 and 0x08173448 compare/cache both words at
+/// caller+0x68; the field's higher-level meaning is unrecovered.
+/// Deliberate deviations: native-width host pointers, four-byte ARM pointers;
+/// no added NULL or bounds checks. Separate u32 reads retain four-byte
+/// alignment rather than requiring an eight-byte-aligned u64 pointer.
+///
+/// # Safety
+/// `service_context` must contain an aligned readable metadata pointer at
+/// +0xf00, whose pointee has aligned readable words at +0xb44 and +0xb48.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn ft_service_metadata_u64_at_b44(
+    service_context: *const u8,
+) -> u64 {
+    let metadata = (service_context.add(SERVICE_CONTEXT_METADATA_OFFSET) as *const *const u8).read();
+    let words = metadata.add(METADATA_U64_B44_OFFSET) as *const u32;
+    let low = words.read();
+    let high = words.add(1).read();
+    (low as u64) | ((high as u64) << 32)
+}
 
 /// Byte offset of this byte in the metadata block.
 pub const METADATA_BYTE_B50_OFFSET: usize = 0xb50;
@@ -467,6 +498,50 @@ mod tests {
     struct ServiceContextFixture {
         before_metadata: [u8; SERVICE_CONTEXT_METADATA_OFFSET],
         metadata: *const u8,
+    }
+
+    #[test]
+    fn b44_preserves_word_order_and_all_boundary_bits() {
+        use super::{ft_service_metadata_u64_at_b44, METADATA_U64_B44_OFFSET};
+        // The final pair starts at +0xb44, only four-byte aligned.
+        let mut metadata = [0xa5a5_a5a5u32; (METADATA_U64_B44_OFFSET + 8) / 4];
+        let context = ServiceContextFixture {
+            before_metadata: [0x3c; SERVICE_CONTEXT_METADATA_OFFSET],
+            metadata: metadata.as_ptr().cast(),
+        };
+        for low in [0u32, 1, 0x7fff_ffff, 0x8000_0000, u32::MAX] {
+            for high in [0u32, 1, 0x7fff_ffff, 0x8000_0000, u32::MAX] {
+                metadata[METADATA_U64_B44_OFFSET / 4] = low;
+                metadata[METADATA_U64_B44_OFFSET / 4 + 1] = high;
+                let bytes: [u8; 8] = [
+                    low.to_le_bytes(), high.to_le_bytes(),
+                ].concat().try_into().unwrap();
+                assert_eq!(unsafe {
+                    ft_service_metadata_u64_at_b44((&context as *const ServiceContextFixture).cast())
+                }, u64::from_le_bytes(bytes));
+            }
+        }
+    }
+
+    #[test]
+    fn b44_reloads_both_words_and_replaced_metadata_pointer() {
+        use super::{ft_service_metadata_u64_at_b44, METADATA_U64_B44_OFFSET};
+        let mut first = [0u32; (METADATA_U64_B44_OFFSET + 8) / 4];
+        let mut second = first;
+        first[METADATA_U64_B44_OFFSET / 4] = 0x7654_3210;
+        second[METADATA_U64_B44_OFFSET / 4 + 1] = 0xfedc_ba98;
+        let mut context = ServiceContextFixture {
+            before_metadata: [0; SERVICE_CONTEXT_METADATA_OFFSET],
+            metadata: first.as_ptr().cast(),
+        };
+        let read = |context: &ServiceContextFixture| unsafe {
+            ft_service_metadata_u64_at_b44((context as *const ServiceContextFixture).cast())
+        };
+        assert_eq!(read(&context), 0x7654_3210);
+        first[METADATA_U64_B44_OFFSET / 4 + 1] = 0x8000_0000;
+        assert_eq!(read(&context), 0x8000_0000_7654_3210);
+        context.metadata = second.as_ptr().cast();
+        assert_eq!(read(&context), 0xfedc_ba98_0000_0000);
     }
 
     #[test]
