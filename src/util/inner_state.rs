@@ -880,6 +880,71 @@ pub unsafe extern "C" fn object_reset_to_active_plst(object: *mut u8) -> i32 {
     0
 }
 
+/// inner_select_primary_resource_index — `FUN_08066584` @ `0x08066584`.
+/// True extent: 148 instruction bytes; next real PUSH at `0x08066618`.
+/// Whole-image raw A32 decoding finds two inbound plain BLs (0x0813bc10,
+/// 0x0813bca4); the body has eight plain BLs and zero predicated BLs.
+///
+/// Accept -1 without inspecting bounds; otherwise reject negative indices
+/// and indices at/past the unsigned signed-divide-by-12 count of the vector
+/// at +0xe58. Store the index at +0xc, clear the counted UTF-16 length at
+/// +0x2c for -1 or read its resource string, then reset selection state in
+/// stock order and dispatch. Ignore reader/dispatch status and return zero.
+/// Deliberate deviations: inline vector_size_elem12's arithmetic through
+/// the canonical signed divide, reading target-width aligned bounds even
+/// on hosts. Reuse the existing unported 0x08059700 operation seam; no new
+/// callee identity. The generic behavioral driver monomorphizes on target.
+///
+/// # Safety
+/// `object` must be writable and word-aligned, with valid resource-vector,
+/// resource-reader, reset, and selected-resource-dispatch state.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn inner_select_primary_resource_index(object: *mut u8, index: i32) -> i32 {
+    select_primary_resource_index_with(object, index,
+        |object, index, counted| {
+            crate::ui::object_resource_string::object_resource_string(object.cast(), index, counted)
+        },
+        |object| {
+            let ops = core::ptr::read_volatile(core::ptr::addr_of!(OBJECT_SELECTION_OPS));
+            (ops.call_08059700)(object);
+            inner_clear_selection_cache(object);
+            inner_reset_transient_state(object);
+            inner_release_buffer_and_reset_cursor(object);
+            inner_clear_cached_results(object);
+            inner_dispatch_selected_resource(object)
+        })
+}
+
+#[inline(always)]
+unsafe fn select_primary_resource_index_with(
+    object: *mut u8,
+    index: i32,
+    read_string: impl FnOnce(*mut u8, i32, *mut u16) -> i32,
+    reset_and_dispatch: impl FnOnce(*mut u8) -> i32,
+) -> i32 {
+    if index != -1 {
+        if index < 0 {
+            return RESOURCE_INDEX_OUT_OF_RANGE;
+        }
+        let begin = object.add(0xe58).cast::<u32>().read();
+        let end = object.add(0xe5c).cast::<u32>().read();
+        let count = crate::runtime::rt_div::__rt_sdiv(end.wrapping_sub(begin) as i32, 12) as u32;
+        if count <= index as u32 {
+            return RESOURCE_INDEX_OUT_OF_RANGE;
+        }
+    }
+    object.add(0xc).cast::<i32>().write(index);
+    let counted = object.add(0x2c).cast::<u16>();
+    if index == -1 {
+        counted.write(0);
+    } else {
+        let _ = read_string(object, index, counted);
+    }
+    let _ = reset_and_dispatch(object);
+    0
+}
+
 /// inner_select_resource_index — `FUN_080667d4` @ `0x080667d4`.
 /// True extent: 128 bytes (124 instruction bytes and the +0x82c literal);
 /// next real entry is the PUSH at 0x08066854. Whole-image ARM decoding finds
@@ -1188,6 +1253,57 @@ mod tests {
     use crate::heap::veneers::tests::{
         alloc_log, free_log, mock_block, mock_heap, set_alloc_ret,
     };
+
+    #[test]
+    fn primary_resource_rejection_preserves_state() {
+        for (index, span) in [(-2, 36), (i32::MIN, 36), (0, 0),
+            (0, 11), (3, 36), (i32::MAX, 36)]
+        {
+            let mut object = [0x5a5a_5a5au32; 0x1000 / 4];
+            object[0xe58 / 4] = 0x1000;
+            object[0xe5c / 4] = 0x1000 + span;
+            let before = object;
+            let result = unsafe {
+                select_primary_resource_index_with(object.as_mut_ptr().cast(), index,
+                    |_, _, _| panic!("reader on rejected index"),
+                    |_| panic!("reset on rejected index"))
+            };
+            assert_eq!(result, -50);
+            assert_eq!(object, before);
+        }
+    }
+
+    #[test]
+    fn primary_resource_selection_commits_and_ignores_operation_errors() {
+        for (index, begin, end) in [(-1, 0, 0), (0, 0x1000, 0x100c),
+            (2, 0x1000, 0x1025), (0, 0xffff_fff4, 0),
+            (i32::MAX, 0x1000, 0x0ff4)]
+        {
+            let mut object = [0x5a5a_5a5au32; 0x1000 / 4];
+            object[0xe58 / 4] = begin;
+            object[0xe5c / 4] = end;
+            let mut expected = object;
+            expected[0xc / 4] = index as u32;
+            expected[0x2c / 4] = if index == -1 { 0x5a5a_0000 } else { 0x5a5a_0003 };
+            let result = unsafe {
+                select_primary_resource_index_with(object.as_mut_ptr().cast(), index,
+                    |object, selected, counted| {
+                        assert_ne!(selected, -1);
+                        assert_eq!(object.add(0xc).cast::<i32>().read(), selected);
+                        counted.write(3);
+                        -50
+                    },
+                    |object| {
+                        assert_eq!(object.add(0xc).cast::<i32>().read(), index);
+                        assert_eq!(object.add(0x2c).cast::<u16>().read(),
+                            if index == -1 { 0 } else { 3 });
+                        -17
+                    })
+            };
+            assert_eq!(result, 0);
+            assert_eq!(object, expected);
+        }
+    }
 
     #[test]
     fn resource_index_rejection_preserves_entire_object() {

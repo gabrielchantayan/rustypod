@@ -16,6 +16,39 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08066584
+    ghidra: FUN_08066584
+    name: inner_select_primary_resource_index
+    size: 148
+    sig: "i32 inner_select_primary_resource_index(u8 *object, i32 index)"
+    module: util/inner_state
+    status: ported
+    vars:
+      param_1/r0: object
+      param_2/r1: index
+      r4: index
+      r5: object
+      object+0xc: primary_resource_index
+      object+0x2c: primary_resource_counted_string
+      object+0xe58: resource_table_vector
+    notes: >-
+      Raw A32 words establish [0x08066584,0x08066618), 148 instruction
+      bytes; the next function begins with its own PUSH. Whole-image BL
+      decoding finds two plain incoming calls at 0x0813bc10 and 0x0813bca4,
+      no predicated incoming calls, and eight plain outgoing BLs with no
+      predicated forms. Accept -1; otherwise reject negative or unsigned
+      out-of-range indices against the signed truncating 12-byte vector
+      count. Commit +0xc and clear/read +0x2c, then call 0x08059700,
+      selection-cache reset, transient reset, buffer/cursor reset, cached
+      results reset, and selected-resource dispatch in stock order.
+      Reader and dispatch errors are ignored. Reuse canonical Rust ports
+      and the existing 0x08059700 operation seam without inventing its
+      identity. Deliberate deviations: inline vector-size arithmetic using
+      wrapping target-width bounds and canonical signed divide; target
+      cleanup uses the existing volatile indirect seam. Host tests cover
+      sentinel, negative, empty, partial, wrapped and negative spans,
+      committed state before reset, and ignored errors. match.py confirms
+      rejection branches, target field stores, and ordered reset calls.
   - address: 0x08066d70
     ghidra: FUN_08066d70
     name: rtc_context_set_configuration_b89
