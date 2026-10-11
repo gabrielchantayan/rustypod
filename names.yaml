@@ -32723,7 +32723,7 @@ functions:
       "[stream + 0x1c]": buffer_start
       FUN_08042e70: buffered_stream_tell
       FUN_0805b804: backing stream seek (unported)
-      FUN_0805b834: backing stream write (unported)
+      FUN_0805b834: validated_file_write
       FUN_08076b30: ft_buffered_stream_reset_buffer_cursor
     notes: >-
       Raw osos.dec decodes exactly 35 ARM words from 0x08042d68 through the
@@ -32733,8 +32733,8 @@ functions:
       the logical position, seeks the +8 I/O context, then resets the buffered
       cursor. Output mode writes the positive signed cursor-buffer_start span,
       maps a short successful write to -34, and resets even after a write
-      error. The unported write and seek calls are volatile host seams and
-      retailOS-address dispatches on target. match.py reports a structural
+      error. Write and seek calls retain volatile host seams; target writes
+      now use validated_file_write and seeks retain retailOS dispatch. match.py reports a structural
       diff: LLVM emits indirect seam calls and different stack/control-flow
       layout, while preserving the mode split, signed span test, error paths,
       short-write mapping, and reset placement.
@@ -245723,3 +245723,42 @@ functions:
       reads into two byte loads; both store calls remain, with the second
       gated on the original counter being zero. NULL error and big-endian
       decrement agree; instruction-for-instruction matching is not expected.
+
+  - address: 0x0805b834
+    ghidra: FUN_0805b834
+    name: validated_file_write
+    size: 56
+    sig: "i32 validated_file_write(const u32 *handle, u32 *transferred, u32 data)"
+    module: fs/validated_file_write
+    status: ported
+    vars:
+      param_1/r4: handle
+      param_2/r5: transferred
+      param_3/r6: data
+      "[handle + 4]": descriptor
+    renames:
+      FUN_08087974: stream_handle_validate
+      FUN_0805ae18: retail write and error-translation wrapper (unported)
+    notes: >-
+      Raw osos.dec establishes [0x0805b834,0x0805b86c), 56 instruction
+      bytes ending with POP to PC; the next function begins with PUSH.
+      Independent aligned A32 decoding finds two outbound plain BLs at
+      0x0805b844 and 0x0805b864, no predicated BLs. Inbound calls are
+      plain BLs at 0x08042dd8 and 0x0804332c, no predicated calls.
+      Ghidra's void return is incorrect: r0 returns the validator status
+      or backend result. Validate the mrts handle, then pass its descriptor
+      word at +4, data, requested count, flags zero, and the same count
+      pointer to 0x0805ae18. Raw backend code verifies the five-argument ABI,
+      invalid descriptor/data checks, write at 0x0827899c, and error mapping
+      via tail branch to 0x0809da3c. No canonical name exists for this backend;
+      no additional function is ported. Short writes and errors are returned
+      unchanged. Deliberate deviation: reuse the existing Rust validator
+      and retain the backend as a volatile host-replaceable retail seam.
+      ft/buffer now calls the Rust writer instead of its stock address.
+      Host tests cover invalid/null handles without touching count, zero
+      count, full and short writes, backend error, and u32::MAX count.
+      Executable smoke confirms invalid=-50, error=-43, partial count=3.
+      ARM release build succeeds. match.py reports 22 instructions versus
+      14 retail instructions: LLVM adds a frame and uses BLX for the backend
+      seam, but preserves validation gating, +4 descriptor access, requested
+      count, zero flags, stack count pointer, and unchanged status return.
