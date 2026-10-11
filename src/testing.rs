@@ -3632,6 +3632,8 @@ pub mod hints {
     // Dedicated secondary resource table fixture; mapping never unmapped.
     pub const OBJECT_SELECT_SECONDARY_RESOURCE_INDEX: usize = 0x53e0_0000;
     pub const RESOURCE_SLOT_VALUE: usize = 0x53f0_0000;
+    // Dedicated controller context value fixture; mapping never unmapped.
+    pub const CONTROLLER_CONTEXT_VALUE: usize = 0x53f1_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span

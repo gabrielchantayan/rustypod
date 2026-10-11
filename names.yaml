@@ -16,6 +16,33 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08053820
+    ghidra: FUN_08053820
+    name: controller_context_value
+    size: 12
+    sig: "u32 controller_context_value(const u32 *controller)"
+    module: app/controller_context_value
+    status: ported
+    renames:
+      param_1/r0: controller
+      intermediate/r0: context
+      return/r0: value
+    notes: >-
+      Raw words e5900f00 e5900afc e12fff1e establish the true extent
+      [0x08053820,0x0805382c); the next function begins with cmp r1,#3.
+      Independent whole-image aligned A32 decoding finds two plain inbound
+      BLs at 0x08172dc8 and 0x08172ddc, zero predicated inbound BLs,
+      and zero outgoing BLs. Follow controller+0xf00 and return the full
+      aligned context word at +0xafc. Caller FUN_08172c6c compares against
+      a cached signed byte at +0x40, updates that byte, dispatches a virtual
+      notification and uses it with event base 0x6067. Finer semantics are
+      unknown. No callee seams, NULL guards or algorithm deviations;
+      stored pointers remain four-byte words on hosts. Tests cover zero,
+      byte/word boundaries, high/all bits, context replacement and unchanged
+      storage. All 15628 host tests and ARM release build pass. Actual-source
+      smoke returns 0,1,ff,100,80000001,ffffffff across two contexts.
+      match.py exits 1: both load offsets match; LLVM adds push {fp,lr},
+      mov fp,sp and pop {fp,pc} instead of bx lr. No device execution.
   - address: 0x0805382c
     ghidra: FUN_0805382c
     name: resource_slot_value
