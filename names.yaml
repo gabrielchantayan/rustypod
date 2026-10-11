@@ -245797,3 +245797,45 @@ functions:
       volatile retail seam rather than porting another function. Deliberate
       deviation: reuse the Rust validator. ft/buffer now invokes this Rust
       wrapper. Host tests cover NULL and foreign single-word handles across
+  # --- Validated backing-stream read ---
+  - address: 0x0805b7cc
+    ghidra: FUN_0805b7cc
+    name: validated_file_read
+    size: 56
+    sig: "i32 validated_file_read(const u32 *handle, u32 *transferred, u32 destination)"
+    module: fs/validated_file_read
+    status: ported
+    vars:
+      param_1/r0/r4: handle
+      param_2/r1/r5: transferred
+      param_3/r2/r6: destination
+      "[handle + 4]": descriptor
+    renames:
+      FUN_08087974: stream_handle_validate
+      FUN_0805a6e8: retail read and error-translation wrapper (unported)
+    notes: >-
+      Raw osos.dec establishes [0x0805b7cc,0x0805b804), 56 instruction
+      bytes ending with POP to PC; the next real function starts with PUSH.
+      Independent whole-image aligned A32 decoding finds two inbound plain
+      BLs at 0x08043070 and 0x080430a4, zero predicated inbound BLs.
+      The body contains two outbound plain BLs at 0x0805b7dc and 0x0805b7fc,
+      zero predicated BLs. Ghidra's void return is wrong: r0 returns either
+      validation failure or backend status unchanged. Validate the mrts tag
+      before loading count or descriptor word 1, then pass descriptor,
+      destination, requested count, mode 2, and the original count pointer
+      to 0x0805a6e8. No canonical entry exists for that wrapper. Its raw
+      words verify the five-argument ABI, rejection of descriptor -1 or
+      destination zero, mode-bit-2 selection of the already ported
+      retail_file_read_mode_2 at 0x08277c74 (otherwise retail_file_read at
+      0x082784b8), and nonzero error tail translation at 0x0809da3c.
+      Deliberate deviation: reuse the Rust validator and keep that entire
+      unported backend as a volatile host-replaceable retail seam; no second
+      function is ported. Host tests cover null/foreign single-word handles
+      without count access, empty input, zero/exact/short/maximal requests,
+      and backend errors preserving count. Standalone executable smoke
+      observes invalid=-50, short_read=-39, transferred=3 and checks the
+      five backend arguments. Host suite and ARM release build pass.
+      match.py reports 22 Rust instructions versus 14 original: frame
+      setup and indirect volatile BLX replace the fixed backend BL; the
+      validation gate, word loads, mode 2, stack argument and status return
+      remain structurally equivalent.
