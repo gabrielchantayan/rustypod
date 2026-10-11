@@ -245692,3 +245692,34 @@ functions:
       call seam can establish faithful behavior from these bytes. Need
       verified comparator code or evidence explaining runtime replacement
       of this address before porting; no Rust implementation or seam added.
+
+  - address: 0x0805b86c
+    ghidra: FUN_0805b86c
+    name: payload_counter_decrement
+    size: 120
+    sig: "i32 payload_counter_decrement(u8 *const *handle)"
+    module: util/payload_counter_decrement
+    status: ported
+    vars: {param_1/r4: handle, r5: decremented}
+    renames:
+      FUN_080ed738: read_u16_le
+      FUN_080eda28: store_u16_le_last_byte
+    notes: >-
+      Raw A32 words establish [0x0805b86c,0x0805b8e4), 120 bytes:
+      116 instruction bytes and the NULL-handle error literal 0xfffff7c5
+      at 0x0805b8e0. Next real function begins with PUSH at 0x0805b8e4.
+      Whole-image aligned BL decoding finds two incoming plain BLs at
+      0x0805b408 and 0x0805b5cc, zero predicated incoming BLs. Outgoing
+      calls are plain BL at 0x0805b884 and 0x0805b898 to read_u16_le,
+      plain BL at 0x0805b8c0 and BLLT at 0x0805b8d4 to
+      store_u16_le_last_byte. Returns -2107 for NULL handle, otherwise
+      decrements the big-endian halfword at (*handle)+10 and returns zero.
+      Preserves both reads and the initial wrapping store followed by
+      the zero overwrite on underflow. Caller 0x0805b0d0 pairs this with
+      0x0805b5f0 around packed-record mutation and at cleanup.
+      Deliberate deviation: the typed single-pointer handle widens on
+      hosts, following payload_u16_be_store; target layout is unchanged.
+      ARM match review: LLVM inlines and merges the ordinary halfword
+      reads into two byte loads; both store calls remain, with the second
+      gated on the original counter being zero. NULL error and big-endian
+      decrement agree; instruction-for-instruction matching is not expected.
