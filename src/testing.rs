@@ -3436,6 +3436,8 @@ pub mod hints {
     pub const RECORD_INDEXED_PAYLOAD_LOOKUP_220: usize = 0x321b_0000;
     // Dedicated to record_string_pool_read_counted_at_0x220; never shared.
     pub const RECORD_STRING_POOL_READ_COUNTED_220: usize = 0x321c_0000;
+    // Dedicated to record_string_pool_read_counted_at_0x278; never shared.
+    pub const RECORD_STRING_POOL_READ_COUNTED_278: usize = 0x321d_0000;
     // 0x6ff0_0000: dedicated to ui/tdat_element_teardown's target-width
     // element and linked 'plst' node fixture; mappings never unmap.
     pub const TDAT_ELEMENT_TEARDOWN: usize = 0x6ff0_0000;
