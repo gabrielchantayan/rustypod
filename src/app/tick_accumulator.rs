@@ -12,10 +12,11 @@
 //! vtable `+0x1c` callback. Its update sibling at `0x081bb2a0` consumes the
 //! tick deadlines, scale factor, remainder, input divisor, bound, and flags.
 //!
-//! The tick helper `0x081bb384` is now ported as
-//! [`crate::drivers::timer::tick_millis`]. The mode query `0x080562ec` is
-//! not yet ported. Target builds call it directly and use the ported
-//! global observer getter; host tests install the equivalent operation table.
+//! The tick helper `0x081bb384` is ported as
+//! [`crate::drivers::timer::tick_millis`]. The system-mode query is the
+//! constant-one [`system_mode_enabled`]; both input bounds therefore use
+//! the enabled values, independently of the object's `mode_enabled` byte.
+//! Host tests install clock and observer operations.
 //!
 //! The module also carries the constructor's step sibling
 //! [`tick_accumulator_step`] (`0x081bb3a0`), which gates one call of the
@@ -62,20 +63,26 @@ pub type TickAccumulatorUpdateFn =
 #[derive(Clone, Copy)]
 pub struct TickAccumulatorOps {
     pub tick_millis: unsafe extern "C" fn() -> u32,
-    pub system_mode_enabled: unsafe extern "C" fn() -> u32,
     pub register: TickAccumulatorRegisterFn,
     pub update: TickAccumulatorUpdateFn,
 }
 
-const RETAIL_SYSTEM_MODE_ENABLED: usize = 0x0805_62ec;
 const RETAIL_TICK_UPDATE: usize = 0x081b_b2a0;
 
 
-#[cfg(target_os = "none")]
-unsafe extern "C" fn retail_system_mode_enabled() -> u32 {
-    let system_mode_enabled: unsafe extern "C" fn() -> u32 =
-        core::mem::transmute(RETAIL_SYSTEM_MODE_ENABLED);
-    system_mode_enabled()
+/// System-mode query — original: `FUN_080562ec` @ `0x080562ec`.
+///
+/// True extent: 8 bytes, `[0x080562ec, 0x080562f4)`, before the next
+/// function's PUSH. Raw words are `e3a00001 e12fff1e` (MOV r0,#1; BX lr).
+/// Whole-image aligned ARM decoding finds two incoming plain BLs at
+/// `0x081bb4b4` and `0x081bb4c8`, zero predicated BLs, and no outgoing calls.
+/// Returns canonical u32 one without reading arguments, memory, or hardware.
+/// The caller uses this predicate to select 17,000/20,000 input bounds;
+/// no more specific system-mode identity is established. No deviations.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub extern "C" fn system_mode_enabled() -> u32 {
+    1
 }
 
 #[cfg(target_os = "none")]
@@ -110,7 +117,6 @@ unsafe extern "C" fn retail_update(
 #[cfg(target_os = "none")]
 const DEFAULT_TICK_ACCUMULATOR_OPS: TickAccumulatorOps = TickAccumulatorOps {
     tick_millis: crate::drivers::timer::tick_millis,
-    system_mode_enabled: retail_system_mode_enabled,
     register: retail_register,
     update: retail_update,
 };
@@ -120,10 +126,6 @@ unsafe extern "C" fn missing_tick_millis() -> u32 {
     panic!("install tick accumulator host operations before constructing one")
 }
 
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_system_mode_enabled() -> u32 {
-    panic!("install tick accumulator host operations before constructing one")
-}
 
 #[cfg(not(target_os = "none"))]
 unsafe extern "C" fn missing_register(_: *mut *mut TickAccumulator) {
@@ -138,13 +140,12 @@ unsafe extern "C" fn missing_update(_: *mut TickAccumulator, _: u32, _: u32) -> 
 #[cfg(not(target_os = "none"))]
 pub const DEFAULT_TICK_ACCUMULATOR_OPS: TickAccumulatorOps = TickAccumulatorOps {
     tick_millis: missing_tick_millis,
-    system_mode_enabled: missing_system_mode_enabled,
     register: missing_register,
     update: missing_update,
 };
 
 /// Host-side dependency seam. Tests replace this table with deterministic
-/// clock, mode, and observer-registration fixtures.
+/// clock and observer-registration fixtures.
 #[cfg(not(target_os = "none"))]
 pub static mut TICK_ACCUMULATOR_OPS: TickAccumulatorOps = DEFAULT_TICK_ACCUMULATOR_OPS;
 
@@ -188,12 +189,12 @@ pub unsafe extern "C" fn tick_accumulator_construct(
     (*accumulator).mode_enabled = mode_enabled;
     (*accumulator).scale_suppressed = 0;
 
-    if (operations.system_mode_enabled)() == 0 {
+    if system_mode_enabled() == 0 {
         (*accumulator).lower_input_bound = 10_000;
     } else {
         (*accumulator).lower_input_bound = 17_000;
     }
-    if (operations.system_mode_enabled)() == 0 {
+    if system_mode_enabled() == 0 {
         (*accumulator).upper_input_bound = 15_000;
     } else {
         (*accumulator).upper_input_bound = 20_000;
@@ -553,7 +554,6 @@ mod tests {
     static TEST_LOCK: Mutex<()> = Mutex::new(());
     static mut TICKS: [u32; 3] = [0; 3];
     static mut TICK_INDEX: usize = 0;
-    static mut MODE_ENABLED: u32 = 0;
     static mut REGISTERED: *mut TickAccumulator = core::ptr::null_mut();
     static mut REGISTER_CALLS: u32 = 0;
 
@@ -563,9 +563,6 @@ mod tests {
         value
     }
 
-    unsafe extern "C" fn mock_system_mode_enabled() -> u32 {
-        MODE_ENABLED
-    }
 
     unsafe extern "C" fn mock_register(accumulator: *mut *mut TickAccumulator) {
         REGISTER_CALLS += 1;
@@ -580,16 +577,14 @@ mod tests {
         }
     }
 
-    unsafe fn install_fixture(ticks: [u32; 3], mode_enabled: u32) -> OpsReset {
+    unsafe fn install_fixture(ticks: [u32; 3]) -> OpsReset {
         TICKS = ticks;
         TICK_INDEX = 0;
-        MODE_ENABLED = mode_enabled;
         REGISTERED = core::ptr::null_mut();
         REGISTER_CALLS = 0;
         let old = TICK_ACCUMULATOR_OPS;
         TICK_ACCUMULATOR_OPS = TickAccumulatorOps {
             tick_millis: mock_tick_millis,
-            system_mode_enabled: mock_system_mode_enabled,
             register: mock_register,
             update: missing_update,
         };
@@ -602,7 +597,7 @@ mod tests {
         assert_eq!(size_of::<TickAccumulator>(), 0x34);
 
         unsafe {
-            let _reset = install_fixture([100, 200, 300], 1);
+            let _reset = install_fixture([100, 200, 300]);
             let mut enabled: TickAccumulator = core::mem::zeroed();
             let enabled_ptr = tick_accumulator_construct(addr_of_mut!(enabled), 6, 1, 0x15e);
             assert_eq!(enabled_ptr, addr_of!(enabled) as *mut TickAccumulator);
@@ -625,16 +620,30 @@ mod tests {
         }
 
         unsafe {
-            let _reset = install_fixture([0xffff_fff0, 0xffff_fff8, 0xffff_ffff], 0);
+            let _reset = install_fixture([0xffff_fff0, 0xffff_fff8, 0xffff_ffff]);
             let mut disabled: TickAccumulator = core::mem::zeroed();
             let disabled_ptr = tick_accumulator_construct(addr_of_mut!(disabled), 2, 0, 0x20);
             assert_eq!(disabled_ptr, addr_of!(disabled) as *mut TickAccumulator);
             assert_eq!(disabled.backoff_deadline_ms, 0x18);
             assert_eq!(disabled.next_update_ms, 399);
-            assert_eq!(disabled.lower_input_bound, 10_000);
-            assert_eq!(disabled.upper_input_bound, 15_000);
+            assert_eq!(disabled.mode_enabled, 0);
+            assert_eq!(disabled.lower_input_bound, 17_000);
+            assert_eq!(disabled.upper_input_bound, 20_000);
             assert_eq!(REGISTER_CALLS, 1);
             assert_eq!(REGISTERED, disabled_ptr);
+        }
+
+        unsafe {
+            let _reset = install_fixture([0, 0, 0]);
+            let mut accumulator: TickAccumulator = core::mem::zeroed();
+            accumulator._padding = [0xa5, 0x5a];
+            tick_accumulator_construct(addr_of_mut!(accumulator), u32::MAX, u8::MAX, u32::MAX);
+            assert_eq!(accumulator.mode_enabled, u8::MAX);
+            assert_eq!(accumulator.input_divisor, u32::MAX);
+            assert_eq!(accumulator.lower_input_bound, 17_000);
+            assert_eq!(accumulator.upper_input_bound, 20_000);
+            assert_eq!(accumulator._padding, [0xa5, 0x5a]);
+            assert_eq!(accumulator.backoff_deadline_ms, u32::MAX);
         }
     }
 
@@ -671,7 +680,6 @@ mod tests {
         let old = TICK_ACCUMULATOR_OPS;
         TICK_ACCUMULATOR_OPS = TickAccumulatorOps {
             tick_millis: step_tick_millis,
-            system_mode_enabled: mock_system_mode_enabled,
             register: mock_register,
             update: mock_update,
         };
