@@ -16,6 +16,34 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080604ac
+    ghidra: FUN_080604ac
+    name: opaque_parameter_descriptor_value
+    size: 12
+    sig: "u32 opaque_parameter_descriptor_value(const u8 *incoming_descriptor, u32 incoming_r1, u32 incoming_r2, u32 opaque_context)"
+    module: runtime/opaque_parameter_descriptor_value
+    status: ported
+    renames:
+      DAT_080604b4/r0: opaque_descriptor_0x0890b608
+      FUN_0803b468: parameter_descriptor_value
+      r1: incoming_r1
+      r2: incoming_r2
+      r3: opaque_context
+    notes: >-
+      EXTENT: raw words e59f0000 eaff6bec 0890b608 establish 12 bytes,
+      including the literal omitted by Ghidra's eight-byte extent. The next
+      real function starts at 0x080604b8 with e92d4038. CALL COUNT:
+      whole-image ARM decoding finds two inbound unconditional plain BLs
+      at 0x0805fa08 and 0x082d4270, zero predicated BLs; the body has no BLs.
+      ALGORITHM: replace r0 with descriptor 0x0890b608 and tail-branch to
+      the existing parameter_descriptor_value port at 0x0803b468. Preserve
+      incoming r1/r2 and the live r3 resolver context. Callers use the result
+      as an allocation, but its concrete type is unknown. No new seam or
+      deliberate behavioral deviation. Host tests cover signed status
+      boundaries and a positive status without an output store; full host
+      suite and ARM release build pass. match.py exits 1: LLVM adds a restored
+      frame and relocates the literal before the tail branch. Raw and compiled
+      ARM smoke pass eight cases preserving descriptor, r1/r2/r3, SP, fp and LR.
   - address: 0x0806430c
     ghidra: FUN_0806430c
     name: word_record_register
