@@ -10,6 +10,8 @@ pub const SERVICE_CONTEXT_METADATA_OFFSET: usize = 0xf00;
 pub const METADATA_U16_B1C_OFFSET: usize = 0xb1c;
 /// Byte offset of this byte in the metadata block.
 pub const METADATA_BYTE_B1A_OFFSET: usize = 0xb1a;
+/// Byte offset of this unsigned byte in the metadata block.
+pub const METADATA_BYTE_B4F_OFFSET: usize = 0xb4f;
 
 /// Byte offset of this byte in the metadata block.
 pub const METADATA_BYTE_B50_OFFSET: usize = 0xb50;
@@ -135,6 +137,32 @@ pub unsafe extern "C" fn ft_service_metadata_byte_at_b89(
     (metadata.add(METADATA_BYTE_B89_OFFSET) as *const u8).read() as u32
 }
 
+/// ft_service_metadata_byte_at_b4f — original: `FUN_08054f84` @ `0x08054f84`
+/// (12 bytes; two plain inbound BLs, zero predicated inbound BLs,
+/// zero outgoing BLs).
+///
+/// Raw words `e5900f00 e5d00b4f e12fff1e` decode to
+/// `ldr r0,[r0,#0xf00]; ldrb r0,[r0,#0xb4f]; bx lr`, ending at the
+/// separately called accessor at 0x08054f90. Follow the context's metadata
+/// pointer and zero-extend its byte at +0xb4f. Callers at 0x08173238 and
+/// 0x0817324c compare/cache the byte at caller+0x84; its meaning is unknown.
+/// Deliberate deviations: native-width pointers on hosts, four-byte pointers
+/// on ARM; no additional NULL or bounds checks.
+/// Codegen deviation: LLVM adds frame setup/teardown; `match.py` confirms
+/// both retail loads and their offsets are retained.
+///
+/// # Safety
+/// `service_context` must contain an aligned readable metadata pointer at
+/// +0xf00, whose pointee is readable through +0xb4f.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn ft_service_metadata_byte_at_b4f(
+    service_context: *const u8,
+) -> u32 {
+    let metadata = (service_context.add(SERVICE_CONTEXT_METADATA_OFFSET) as *const *const u8).read();
+    metadata.add(METADATA_BYTE_B4F_OFFSET).read() as u32
+}
+
 /// ft_service_metadata_byte_at_b8a — original: `FUN_08054f90` @ `0x08054f90`
 /// (12 bytes; two plain inbound `bl` call sites, zero predicated inbound
 /// `bl` call sites; zero outgoing BLs).
@@ -248,6 +276,34 @@ mod tests {
     struct ServiceContextFixture {
         before_metadata: [u8; SERVICE_CONTEXT_METADATA_OFFSET],
         metadata: *const u8,
+    }
+
+    #[test]
+    fn b4f_zero_extends_all_bytes_and_follows_replaced_metadata() {
+        use super::{ft_service_metadata_byte_at_b4f, METADATA_BYTE_B4F_OFFSET};
+        let mut metadata = [0xa5u8; METADATA_BYTE_B4F_OFFSET + 2];
+        let mut other = [0x5au8; METADATA_BYTE_B4F_OFFSET + 2];
+        let mut context = ServiceContextFixture {
+            before_metadata: [0x3c; SERVICE_CONTEXT_METADATA_OFFSET],
+            metadata: metadata.as_ptr(),
+        };
+        for value in 0..=255u8 {
+            metadata[METADATA_BYTE_B4F_OFFSET] = value;
+            assert_eq!(unsafe {
+                ft_service_metadata_byte_at_b4f((&context as *const ServiceContextFixture).cast())
+            }, u32::from(value));
+        }
+        other[METADATA_BYTE_B4F_OFFSET] = 0x81;
+        context.metadata = other.as_ptr();
+        assert_eq!(unsafe {
+            ft_service_metadata_byte_at_b4f((&context as *const ServiceContextFixture).cast())
+        }, 0x81);
+        assert!(metadata[..METADATA_BYTE_B4F_OFFSET].iter().all(|&byte| byte == 0xa5));
+        assert_eq!(metadata[METADATA_BYTE_B4F_OFFSET], 255);
+        assert_eq!(metadata[METADATA_BYTE_B4F_OFFSET + 1], 0xa5);
+        assert!(other[..METADATA_BYTE_B4F_OFFSET].iter().all(|&byte| byte == 0x5a));
+        assert_eq!(other[METADATA_BYTE_B4F_OFFSET + 1], 0x5a);
+        assert!(context.before_metadata.iter().all(|&byte| byte == 0x3c));
     }
 
     #[test]
