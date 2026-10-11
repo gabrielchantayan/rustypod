@@ -16,6 +16,40 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08065698
+    ghidra: FUN_08065698
+    name: sha1_init_compact
+    size: 84
+    sig: "u32 sha1_init_compact(u32 *context)"
+    module: crypto/sha1_init_compact
+    status: ported
+    vars:
+      param_1/r0: context
+      r1: state_constant_then_zero
+      context+0x00: state
+      context+0x14: bit_count_low
+      context+0x18: bit_count_high
+      context+0x1c: block_buffer
+      context+0x5c: buffered_bytes
+    notes: >-
+      Raw A32 extent [0x08065698,0x080656ec) is 64 instruction bytes
+      plus five IV literals (20 bytes), ending before the next PUSH.
+      Ghidra's 64-byte size excludes that literal pool. Independent whole-image
+      decoding finds two incoming plain BLs at 0x08104120 and 0x08104128,
+      no incoming predicated BLs, and no outgoing plain or predicated BLs.
+      Installs the standard five-word SHA-1 IV, clears low/high bit counts
+      at +0x14/+0x18 and buffered bytes at +0x5c, returns one, and preserves
+      the sixteen buffer words at +0x1c..+0x58. The caller initializes two
+      consecutive 96-byte contexts; this is not the 352-byte sha1_init layout.
+      Uses aligned u32 word indices on host and target. Deliberate deviation:
+      volatile stores preserve write order and prevent libc substitution.
+      Host tests cover dirty counters, buffer and neighbor preservation, and
+      uninitialized storage without reading the untouched buffer. A standalone
+      smoke run compares two consecutive contexts against an interpreter of
+      the original sixteen A32 instruction words, including return values.
+      ARM match.py confirms the same eight stores and return-one sequence;
+      LLVM adds a frame-pointer prologue/epilogue, and the diff also lists
+      the five literal words. No calls or buffer writes are introduced.
   - address: 0x08065d08
     ghidra: FUN_08065d08
     name: rtc_context_reset_time_pair
