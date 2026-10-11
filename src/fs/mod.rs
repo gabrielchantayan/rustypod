@@ -159,6 +159,8 @@ pub mod validated_file_tell;
 pub mod hfs_btree_get_node;
 /// HFS B-tree node free-space probe @ 0x08053e14.
 pub mod hfs_btree_free_space;
+/// HFS B-tree record-offset table insertion @ 0x0805945c.
+pub mod hfs_btree_insert_offsets;
 pub mod hfs_btree_get_record;
 /// HFS B-tree record-request preparation and opaque consumer dispatch @ 0x080595c0.
 pub mod hfs_btree_prepare_record_request;
