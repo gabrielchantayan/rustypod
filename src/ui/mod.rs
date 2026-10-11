@@ -1,5 +1,7 @@
 //! retailOS UI / graphics layer — the geometry primitives the drawing
 //! and view code is built on.
+pub mod fixed_index_limit;
+pub use fixed_index_limit::*;
 pub mod element_state_can_change;
 pub mod plst_enable_tdat;
 pub mod ui_element_word_pair_set;
