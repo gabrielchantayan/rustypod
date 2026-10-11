@@ -245318,3 +245318,38 @@ functions:
       match.py confirms identical conditional table/slot guards and final
       BX r0; LLVM adds a frame-pointer setup and uses an early conditional
       pop for the zero path instead of the original conditional tail-pop.
+  - address: 0x08062154
+    ghidra: FUN_08062154
+    name: callback_table_random_seed
+    size: 88
+    sig: u32 callback_table_random_seed(void)
+    module: app/callback_table_random_seed
+    status: ported
+    renames:
+      local_2c: bytes
+      uVar1/r4: byte_index
+      param_1/r0: entropy_word
+      thunk_FUN_080548ec: rtc_seeded_random_service_veneer
+      FUN_080620ac: callback_table_double_to_i32_dispatch
+      FUN_0805f440: heap_poison
+    notes: >-
+      Raw words establish 88 instruction bytes from 0x08062154 through
+      the pop at 0x080621a8. Two literal words at 0x080621ac and 0x080621b0
+      encode double 32.0; the next real function begins at 0x080621b4.
+      Outgoing calls are one BLEQ at 0x08062168 to the verified random
+      service veneer, and two plain BL instructions at 0x08062190 and
+      0x0806219c to the existing callback dispatch and heap poison ports.
+      Eight random words are packed little-endian into 32 stack bytes,
+      dispatched with length 32 and converted entropy 32, then poisoned;
+      return is always 1, including when the callback slot is absent.
+      The Rust implementation passes inherited r4 explicitly as byte index
+      to the existing random-service implementation rather than depending
+      on LLVM register allocation through the veneer; unused r0-r3 inputs
+      are zero. Host tests exercise first-use seeding, warm-up reads,
+      full-width word packing, repeated use, absent callback, and poison
+      after callback mutation of the shared tag. All 15504 host tests pass.
+      Standalone host smoke observes the 32-byte callback payload and
+      success with an absent slot. ARM release builds successfully.
+      match.py reports 40 instructions versus 22: LLVM unrolls eight
+      entropy reads into aligned word stores, then dispatches, poisons,
+      and returns 1. Relocations confirm the reused Rust callee targets.

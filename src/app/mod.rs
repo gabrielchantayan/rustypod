@@ -1,5 +1,6 @@
 //! retailOS application/UI framework glue — the global application
 //! context and the small helpers its view classes lean on.
+pub mod callback_table_random_seed;
 pub mod packet_ring_next_index;
 pub mod indexed_record_insert;
 pub mod owner_entry_append;

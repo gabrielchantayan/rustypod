@@ -74,7 +74,7 @@ pub static mut ENTROPY_SEED: *mut u32 = core::ptr::null_mut();
 pub static mut ENTROPY_WORD: *mut u32 = core::ptr::null_mut();
 
 #[inline(never)]
-unsafe extern "C" fn rtc_seeded_random_service_inner(
+pub(crate) unsafe extern "C" fn rtc_seeded_random_service_inner(
     _: u32, _: u32, _: u32, _: u32, inherited_r4: u32,
 ) -> u32 {
     #[cfg(target_arch = "arm")]
