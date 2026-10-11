@@ -46457,6 +46457,31 @@ functions:
       cmp/moveq; the core cmp r0,#0 / beq / ldr r0,[r0,#4] / ldr r1,[pc]
       sequence matches verbatim.
 
+  - address: 0x0805c1a4
+    ghidra: FUN_0805c1a4
+    name: object_counter_increment
+    size: 16
+    sig: "void object_counter_increment(u8 *object)"
+    module: util/object_counter_increment
+    status: ported
+    renames:
+      param_1/r0: object
+      r1: counter
+    notes: >-
+      Raw osos.dec words e5901014 e2811001 e5801014 e12fff1e establish
+      the 16-byte extent 0x0805c1a4..0x0805c1b4, where the next independent
+      function begins with e92d4070 (push {r4,r5,r6,lr}). Increment the
+      aligned word at object +0x14 modulo 2^32, without a NULL guard.
+      A full raw ARM BL-immediate scan finds two plain inbound calls at
+      0x0804881c and 0x08048910, zero predicated inbound BLs, and no
+      outgoing calls. Both callers bracket indexed traversal with this
+      increment and positive_counter_decrement; the counter's broader
+      identity remains unresolved. No callee seams or deliberate
+      behavioral deviations. Host tests cover signed-boundary crossing,
+      negative bit patterns, wraparound, repeated calls, and adjacent words.
+      ARM release build succeeds; match.py preserves the exact load/add/store
+      sequence, with only LLVM's frame-pointer push/mov/pop replacing bx lr.
+
   - address: 0x0805c1b4
     ghidra: FUN_0805c1b4
     name: magic_tagged_object_retain

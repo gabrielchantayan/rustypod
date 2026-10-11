@@ -1,4 +1,5 @@
 //! retailOS-native utility functions (CRC, itoa, byte swaps, ...).
+pub mod object_counter_increment;
 pub mod word_record_register;
 pub mod format_dotted_triple;
 pub mod signed_word_insertion_sort;
