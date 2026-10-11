@@ -16,6 +16,37 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08066d70
+    ghidra: FUN_08066d70
+    name: rtc_context_set_configuration_b89
+    size: 28
+    sig: "void rtc_context_set_configuration_b89(RtcContextOwner *owner, u32 value)"
+    module: time/rtc
+    status: ported
+    vars:
+      param_1/r0: owner
+      param_2/r1: value
+      r2: context
+      r3: previous_configuration_byte
+      owner+0xf00: rtc_context
+      context+0xb89: configuration_b89
+      context+0xb90: dirty
+    notes: >-
+      Raw words e5902f00 e5d23b89 e1530001 15c21b89 15900f00
+      1affde38 e12fff1e establish extent [0x08066d70,0x08066d8c),
+      28 bytes; next independent setter starts at 0x08066d8c.
+      Whole-image A32 decoding finds two incoming plain BLs at
+      0x08171950 and 0x081728b8, zero predicated incoming BLs and
+      zero outgoing BLs. Conditional tail BNE targets canonical
+      rtc_context_mark_dirty at 0x0805e66c. Compare unsigned byte
+      +0xb89 with full u32; mismatch stores low byte, reloads owner
+      context and marks +0xb90 dirty; equality preserves dirtiness.
+      Both raw callers pass normalized booleans in r1; Ghidra omits
+      the second argument in 0x08172744. Product role is unrecovered.
+      Reuse RTC layout and dirty port; host owner tail pointers widen.
+      Host suite, ARM build and actual-source smoke pass. match.py
+      exits 1: 10 versus 7 instructions, frame and equal early return;
+      store, owner reload and dirty tail branch remain. No symbol fold.
   - address: 0x08066db4
     ghidra: FUN_08066db4
     name: rtc_context_set_configuration_b3c
