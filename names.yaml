@@ -16,6 +16,35 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0805b764
+    ghidra: FUN_0805b764
+    name: data_stream_context_create
+    size: 104
+    sig: "i32 data_stream_context_create(u32 *out_context, u32 request, u32 mode)"
+    module: fs/data_stream_context_create
+    status: ported
+    vars: {param_1/r0: out_context, param_2/r1: request, param_3/r2: mode, r4: context, r6: status}
+    renames: {FUN_0805d1dc: calloc_tag4, FUN_0805a634: opaque_handle_acquire, FUN_0805d070: free_tag4}
+    notes: >-
+      Raw A32 verifies 96 instruction bytes and two literal words at
+      0x0805b7c4 (0x64617461, data) and 0x0805b7c8 (0x7374726d, strm).
+      The next real function starts at 0x0805b7cc: true extent 104 bytes,
+      not the reported 96. Whole-image aligned decoding finds two incoming
+      plain BLs at 0x08042f28 and 0x08042f94, no predicated incoming BLs.
+      Body has three plain BLs and no predicated BLs. Allocates eight zeroed
+      bytes with tag 4; OOM returns -108 without touching output. Acquires
+      a backing handle with fixed data tag and mode masked to eight bits.
+      Success stores handle at word one and stream magic at word zero;
+      failure frees the context, clears output and returns unchanged status.
+      All callees reuse Rust ports. Deliberate deviation: acquisition uses
+      a native-width local on hosts before writing the four-byte handle field;
+      ARM acquisition writes directly into word one. Buffered-stream caller migrated from
+      its incorrect five-argument seam to this three-argument Rust default.
+      Host suite passes 15526 tests. Source-linked exported-constructor smoke
+      verifies OOM output preservation and real NULL-request rejection/free.
+      ARM release build passes; match.py exit 1 shows 24 stock versus 31 Rust
+      listing lines, preserving three calls, mode mask and ownership branches.
+
   - address: 0x0805caa8
     ghidra: FUN_0805caa8
     name: clock_changed
@@ -54136,22 +54165,22 @@ functions:
       param_3/r2: buffer_size
       param_4/r3: tag
       local_1c: io_context
-      FUN_0805b764: data-backed I/O-context constructor (unported)
+      FUN_0805b764: data_stream_context_create
       FUN_080f06f4: ft_buffered_stream_initialize
       FUN_08042cfc: ft_buffered_stream_finalize
     notes: >-
       Raw osos.dec decoding verifies the 104-byte body from push at
       0x08042efc through the `data` literal at 0x08042f64; the next real
       function starts with push at 0x08042f68. The tag mismatch path returns
-      -50. A matching tag creates an input I/O context through unported
-      0x0805b764, then initializes the target stream through the Rust port
+      -50. A matching tag creates an input I/O context through the Rust port
+      data_stream_context_create, then initializes the target stream through
       ft_buffered_stream_initialize. An initializer error finalizes the stream only after a
       successful context creation. Full binary B/BL decoding finds four
       inbound plain bl callers at 0x08063aa0, 0x08063f28, 0x080aaffc, and
       0x080b4cbc. Its outbound calls are two plain bl (0x0805b764 and
-      0x080f06f4) and one conditional blne (0x08042cfc). Only the unported
-      context constructor remains a volatile host seam and indirect dispatch
-      to its verified retailOS entry on target.
+      0x080f06f4) and one conditional blne (0x08042cfc). The context
+      constructor defaults to its Rust port through a host-replaceable
+      volatile slot; its ABI consumes only the first three arguments.
 
   - address: 0x080f06f4
     ghidra: FUN_080f06f4

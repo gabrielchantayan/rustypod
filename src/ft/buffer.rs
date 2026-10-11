@@ -148,36 +148,11 @@ unsafe fn buffered_stream_io_context_finalize() -> BufferedStreamIoContextFinali
     core::ptr::read_volatile(core::ptr::addr_of!(BUFFERED_STREAM_IO_CONTEXT_FINALIZE))
 }
 
-/// ABI of the unported data-backed I/O-context constructor at `0x0805b764`.
-///
-/// The raw call site passes `out_context`, `data`, input mode `1`, the
-/// `data` tag, and the requested buffer size.
+/// Three-argument ABI of the data-backed I/O-context constructor.
 pub type BufferedStreamDataContextCreateFn =
-    unsafe extern "C" fn(out_context: *mut u32, data: u32, is_input: u32, tag: u32, buffer_size: u32) -> i32;
+    unsafe extern "C" fn(out_context: *mut u32, data: u32, is_input: u32) -> i32;
 
 
-#[cfg(target_os = "none")]
-unsafe extern "C" fn firmware_buffered_stream_data_context_create(
-    out_context: *mut u32,
-    data: u32,
-    is_input: u32,
-    tag: u32,
-    buffer_size: u32,
-) -> i32 {
-    let create: BufferedStreamDataContextCreateFn = core::mem::transmute(0x0805b764usize);
-    create(out_context, data, is_input, tag, buffer_size)
-}
-
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn firmware_buffered_stream_data_context_create(
-    _out_context: *mut u32,
-    _data: u32,
-    _is_input: u32,
-    _tag: u32,
-    _buffer_size: u32,
-) -> i32 {
-    panic!("ft_buffered_stream_init_data requires data-context constructor 0x0805b764")
-}
 
 /// ABI of the unported signed first-halfword accessor at `0x0805aca8`.
 pub type BufferedStreamDataKindFn = unsafe extern "C" fn(data: u32) -> i32;
@@ -193,9 +168,9 @@ unsafe extern "C" fn firmware_buffered_stream_data_kind(_data: u32) -> i32 {
     panic!("buffered stream data kind requires accessor 0x0805aca8")
 }
 
-/// Host-replaceable unported calls; target defaults reach verified firmware entries.
+/// Host-replaceable constructor defaults to the Rust port; kind remains unported.
 pub static mut BUFFERED_STREAM_DATA_CONTEXT_CREATE: BufferedStreamDataContextCreateFn =
-    firmware_buffered_stream_data_context_create;
+    crate::fs::data_stream_context_create::data_stream_context_create;
 pub static mut BUFFERED_STREAM_DATA_KIND: BufferedStreamDataKindFn =
     firmware_buffered_stream_data_kind;
 
@@ -272,8 +247,8 @@ pub unsafe extern "C" fn ft_buffered_stream_initialize(
 /// context creation succeeds but stream initialization fails, it finalizes the
 /// partially initialized stream. A foreign tag returns -50 without calls.
 ///
-/// Deliberate deviation: the unported context constructor at `0x0805b764`
-/// remains a volatile dispatch seam; the initializer calls the Rust port.
+/// Deliberate deviation: the constructor and initializer call Rust ports;
+/// host fixtures replace the constructor through a volatile dispatch slot.
 /// Raw `osos.dec` decoding confirms the body ends with literal `0x64617461`
 /// at `0x08042f64`.
 /// # Safety
@@ -299,8 +274,6 @@ pub unsafe extern "C" fn ft_buffered_stream_init_data(
         &mut io_context,
         data,
         1,
-        tag,
-        buffer_size,
     );
     if result != 0 {
         return result;
@@ -1140,7 +1113,7 @@ mod initialize_tests {
 
     unsafe extern "C" fn data_kind(_data: u32) -> i32 { -32767 }
     unsafe extern "C" fn create(
-        out: *mut u32, _data: u32, _input: u32, _tag: u32, _size: u32,
+        out: *mut u32, _data: u32, _input: u32,
     ) -> i32 {
         out.write(0x76543210);
         0
