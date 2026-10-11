@@ -82,6 +82,7 @@ mod tests {
 
     #[test]
     fn empty_then_nonempty_preserves_links_and_wraps_count_before_dispatch() {
+        let _guard = crate::testing::OWNER_ENTRY_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         unsafe {
             OWNER_ENTRY_TAIL_HELPER = inspect_published_list;
             for initial in [0, 7, u32::MAX] {
