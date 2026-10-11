@@ -187,6 +187,9 @@ pub unsafe extern "C" fn ft_service_metadata_byte_at_b89(
 /// its higher-level meaning is unknown.
 /// Deliberate deviations: native-width host pointers, four-byte ARM pointers;
 /// no additional NULL or bounds checks.
+/// Codegen deviation: LLVM adds frame setup/teardown and uses a register
+/// offset of 0xb40 for `ldrsb` instead of `add #0xb00; ldrsb #0x40`.
+/// The aligned pointer load and signed byte load are retained.
 ///
 /// # Safety
 /// `service_context` must contain an aligned readable metadata pointer at
