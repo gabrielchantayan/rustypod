@@ -32722,7 +32722,7 @@ functions:
       "[stream + 0x18]": cursor
       "[stream + 0x1c]": buffer_start
       FUN_08042e70: buffered_stream_tell
-      FUN_0805b804: backing stream seek (unported)
+      FUN_0805b804: validated_file_seek
       FUN_0805b834: validated_file_write
       FUN_08076b30: ft_buffered_stream_reset_buffer_cursor
     notes: >-
@@ -32733,8 +32733,9 @@ functions:
       the logical position, seeks the +8 I/O context, then resets the buffered
       cursor. Output mode writes the positive signed cursor-buffer_start span,
       maps a short successful write to -34, and resets even after a write
-      error. Write and seek calls retain volatile host seams; target writes
-      now use validated_file_write and seeks retain retailOS dispatch. match.py reports a structural
+      error. Write and seek calls retain volatile host seams; both now invoke
+      validated_file_write and validated_file_seek respectively.
+      match.py reports a structural
       diff: LLVM emits indirect seam calls and different stack/control-flow
       layout, while preserving the mode split, signed span test, error paths,
       short-write mapping, and reset placement.
@@ -245762,3 +245763,37 @@ functions:
       14 retail instructions: LLVM adds a frame and uses BLX for the backend
       seam, but preserves validation gating, +4 descriptor access, requested
       count, zero flags, stack count pointer, and unchanged status return.
+
+  - address: 0x0805b804
+    ghidra: FUN_0805b804
+    name: validated_file_seek
+    size: 48
+    sig: "i32 validated_file_seek(const u32 *handle, u64 position)"
+    module: fs/validated_file_seek
+    status: ported
+    vars:
+      param_1/r4: handle
+      param_3/r5: position_low
+      param_4/r6: position_high
+      "[handle + 4]": descriptor
+    renames:
+      FUN_08087974: stream_handle_validate
+      FUN_0805a73c: retail absolute seek and error-translation wrapper (unported)
+    notes: >-
+      Raw osos.dec establishes [0x0805b804,0x0805b834), 48 instruction
+      bytes; the next real function starts with PUSH at 0x0805b834.
+      Independent whole-image aligned A32 decoding finds two incoming plain
+      BLs at 0x08042d9c and 0x08043234, no predicated incoming BLs.
+      The body has one outgoing plain BL at 0x0805b814 to the ported tag
+      validator, no predicated BLs, and a conditional tail B at 0x0805b82c
+      to 0x0805a73c. Ghidra's 100-byte extent and one-argument prototype
+      are wrong. Position occupies r2:r3 under AAPCS; r1 is unused.
+      Validate before reading descriptor word 1; return validation failure
+      or backend status unchanged. No canonical entry or Rust implementation
+      exists for 0x0805a73c. Raw backend code rejects descriptor -1 with
+      -50, passes the high offset word in r1, the offset in r2:r3, and origin
+      zero on stack to ported ft_platform_file_seek at 0x082787b8; nonzero
+      errors tail-branch to 0x0809da3c. Retain that whole backend as a typed
+      volatile retail seam rather than porting another function. Deliberate
+      deviation: reuse the Rust validator. ft/buffer now invokes this Rust
+      wrapper. Host tests cover NULL and foreign single-word handles across
