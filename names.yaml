@@ -16,6 +16,34 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08054e44
+    ghidra: FUN_08054e44
+    name: ft_service_metadata_signed_byte_at_b40
+    size: 16
+    sig: "int32_t ft_service_metadata_signed_byte_at_b40(const uint8_t *service_context)"
+    module: ft/service/metadata
+    status: ported
+    renames:
+      param_1/r0: service_context
+      return/r0: signed_metadata_byte
+    notes: >-
+      Raw words e5900f00 e2800c0b e1d004d0 e12fff1e establish the true
+      extent [0x08054e44,0x08054e54), ending at the separately called
+      signed accessor. Whole-image aligned A32 decoding finds two plain
+      inbound BLs at 0x081733b0 and 0x081733c4, zero predicated inbound
+      BLs, and zero outgoing plain or predicated BLs. Follow the aligned
+      pointer at service_context+0xf00 and sign-extend metadata byte +0xb40.
+      FUN_08172c6c compares/caches it at caller+0x62; higher-level meaning
+      remains unknown. The existing registered Rust accessor and tests
+      already implement this function; no new module or callee seam.
+      Native-width host pointers preserve the field offset; ARM pointers
+      remain four bytes. No added NULL or bounds checks. Host tests cover
+      all 256 values, live pointer replacement and neighboring-byte
+      preservation. Standalone smoke maps 0xfe to -2. Host suite and ARM
+      release build pass. match.py exits 1 with six Rust instructions
+      versus four original: LLVM adds frame setup/teardown and constructs
+      +0xb40 in r1. Both the aligned pointer load and signed byte load
+      retain the original algorithm; the exported symbol is present.
   - address: 0x08054e54
     ghidra: FUN_08054e54
     name: ft_service_metadata_signed_byte_at_b41
