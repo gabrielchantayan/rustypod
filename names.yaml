@@ -16,6 +16,32 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0805caa8
+    ghidra: FUN_0805caa8
+    name: clock_changed
+    size: 64
+    sig: "void clock_changed(void)"
+    module: time/clock_changed
+    status: ported
+    vars: {DAT_0805cae0: current_clock, DAT_0805cae4: marker, local_10: packet}
+    notes: >-
+      Raw extent [0x0805caa8,0x0805cae8) comprises 56 instruction bytes
+      and literals 0x08a662e0 and 0x72746356; next function starts with
+      PUSH at 0x0805cae8. Independent whole-image aligned ARM decoding
+      finds two plain incoming BLs at 0x080674e8 and 0x080e1d94, zero
+      predicated incoming BLs, one plain outgoing BL at 0x0805cad8 and
+      zero predicated outgoing BLs. Any nonzero clock status submits
+      marker Vctr followed by UTC-offset and DST bytes. Raw helper
+      0x0809eff0..0x0809f02c writes byte 5 to PMU register 5, byte 4 to
+      register 4, and four marker bytes to register 0 through ported
+      pmu_i2c_write_locked. Ghidra falsely includes additional callees.
+      Keep that helper in retailOS with an injected host writer. Zero
+      unused bytes 6-7 rather than saved r3 garbage; helper never reads
+      them. Existing callers use the Rust notifier on target. Host
+      tests cover status gating, signed offset extrema, arbitrary DST
+      bytes and unchanged metadata. ARM mnemonic review confirms the
+      status branch, stack packet and helper call; LLVM rebases the
+      clock pointer to +6, emits BLX and zeros the unused halfword.
   - address: 0x0805e5f4
     ghidra: FUN_0805e5f4
     name: owner_entry_create

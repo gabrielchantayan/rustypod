@@ -18,8 +18,8 @@
 //!
 //! # Deliberate deviations
 //!
-//! The unported RTC setter (`FUN_0806e7e4`) and change notifier
-//! (`FUN_0805caa8`) are fixed-address calls on target and volatile host seams.
+//! The unported RTC setter (`FUN_0806e7e4`) is a fixed-address call on
+//! target and a volatile host seam. Clock changes use the Rust notifier.
 
 use core::ptr;
 
@@ -31,7 +31,6 @@ const CLOCK_SOURCES_ADDRESS: usize = 0x08a6_62ec;
 const CURRENT_CLOCK_ADDRESS: usize = 0x08a6_62e0;
 const SELECTED_CLOCK_SOURCE_ADDRESS: usize = 0x089c_aa90;
 const RTC_WRITE_ADDRESS: usize = 0x0806_e7e4;
-const CLOCK_CHANGED_ADDRESS: usize = 0x0805_caa8;
 const CLOCK_SOURCE_COUNT: usize = 5;
 const CLOCK_SOURCE_SIZE: usize = 20;
 const CLOCK_SOURCE_STORAGE_COUNT: usize = 6;
@@ -46,8 +45,6 @@ type ClockChangedFn = unsafe extern "C" fn();
 
 #[cfg(not(target_os = "none"))]
 unsafe extern "C" fn missing_rtc_write(_mode: u32, _source: *const ClockState) -> i32 { 0 }
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_clock_changed() {}
 
 #[cfg(not(target_os = "none"))]
 pub static mut CLOCK_SOURCES: ClockSourceStorage = ClockSourceStorage([[0; CLOCK_SOURCE_SIZE]; CLOCK_SOURCE_STORAGE_COUNT]);
@@ -58,7 +55,7 @@ pub static mut SELECTED_CLOCK_SOURCE: i32 = -1;
 #[cfg(not(target_os = "none"))]
 pub static mut RTC_WRITE: RtcWriteFn = missing_rtc_write;
 #[cfg(not(target_os = "none"))]
-pub static mut CLOCK_CHANGED: ClockChangedFn = missing_clock_changed;
+pub static mut CLOCK_CHANGED: ClockChangedFn = super::clock_changed::clock_changed;
 
 #[inline(always)]
 unsafe fn sources() -> *mut u8 {
@@ -68,7 +65,7 @@ unsafe fn sources() -> *mut u8 {
     { ptr::addr_of_mut!(CLOCK_SOURCES).cast() }
 }
 #[inline(always)]
-unsafe fn current_clock() -> *mut ClockState {
+pub(super) unsafe fn current_clock() -> *mut ClockState {
     #[cfg(target_os = "none")]
     { CURRENT_CLOCK_ADDRESS as *mut ClockState }
     #[cfg(not(target_os = "none"))]
@@ -91,7 +88,7 @@ unsafe fn rtc_write() -> RtcWriteFn {
 #[inline(always)]
 unsafe fn clock_changed() -> ClockChangedFn {
     #[cfg(target_os = "none")]
-    { core::mem::transmute(CLOCK_CHANGED_ADDRESS) }
+    { super::clock_changed::clock_changed }
     #[cfg(not(target_os = "none"))]
     { ptr::read_volatile(ptr::addr_of!(CLOCK_CHANGED)) }
 }
