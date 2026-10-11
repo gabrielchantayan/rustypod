@@ -3228,6 +3228,8 @@ pub mod hints {
     pub const ENTRY_NESTED_LITI_CLASS_CHECK: usize = 0x80b2_0000;
     // Dedicated raw-u32 container and database fixture; mappings never unmap.
     pub const LITI_CONTAINER_SUCCESSOR: usize = 0x80b3_0000;
+    // Dedicated first-or-successor selector fixture; mappings never unmap.
+    pub const ENTRY_MATCH_ADVANCE: usize = 0x80b4_0000;
     // 0x80c0_0000 and 0x80d0_0000: dedicated to
     // ui/object_resource_counted_string's raw-u32 object and entry-table
     // fixtures; mappings never unmap, so no other user may share them.

@@ -724,6 +724,7 @@ pub mod element_array2_expand;
 pub mod element_table;
 pub mod element_registry;
 pub mod entry_match_first;
+pub mod entry_match_advance;
 pub mod entry_cursor_ensure_key;
 pub mod entry_match_find_eligible;
 pub mod entry_match_next;
