@@ -244739,3 +244739,47 @@ functions:
       instructions; loop, flag test, cache store, resets, selection clear
       and callback dispatch remain; frame setup and volatile cleanup-slot
       loads/BLX differ. No intentional symbol fold.
+
+  # --- inner resource-vector selection setter ---
+  - address: 0x080667d4
+    ghidra: FUN_080667d4
+    name: inner_select_resource_index
+    size: 128
+    sig: "i32 inner_select_resource_index(u8 *object, i32 index)"
+    module: util/inner_state
+    status: ported
+    vars:
+      param_1/r5: object
+      param_2/r4: index
+      object+0x1c: selected_index
+      object+0x82c: counted_selection
+      object+0xebc: vector_begin
+      object+0xec0: vector_end
+      FUN_083d7684: vector_size_elem16
+      FUN_08053084: object_resource_counted_string
+      FUN_08059a98: inner_clear_cached_results
+      FUN_08059ad4: inner_dispatch_selected_resource
+    notes: >-
+      Raw ARM establishes [0x080667d4,0x08066854): 124 instruction bytes
+      plus the 0x82c literal at 0x08066850, followed by a real PUSH entry.
+      Whole-image immediate BL decoding finds two inbound plain calls
+      at 0x081116c8 and 0x0813c5f4, four outbound plain calls at
+      0x080667f8, 0x08066834, 0x0806683c and 0x08066844, and zero
+      predicated calls either way. Accept -1 without reading bounds;
+      otherwise reject negative or index >= unsigned vector count with
+      -50 and no writes. Store index at +0x1c, clear the u16 counted
+      length at +0x82c for -1 or read its counted resource string, then
+      clear cached results and dispatch selected resource. Ignore both
+      statuses and return zero. Ghidra CONCAT44 is a liveness artifact.
+      Reuse existing Rust callees; inline vector_size_elem16 wrapping
+      u32 subtraction and arithmetic shift to preserve target-word layout
+      on 64-bit hosts. No new seam, allocation or intentional symbol fold.
+      Tests cover sentinel, empty vector, negative/equal/past-end indices,
+      wrapped bounds, unsigned comparison of negative counts, rejected
+      object preservation, halfword isolation, cleanup order and ignored
+      errors. All 15475 host tests pass; ARM release build passes. Temporary
+      public-function smoke proves index==count returns -50 without writes.
+      match.py exits 1: 31 original versus 32 Rust instructions, equivalent
+      branches and three remaining calls after inlining the count helper.
+      LLVM changes frame/register allocation and independent sentinel-store
+      order. No hardware execution was performed.
