@@ -16,6 +16,36 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080545c4
+    ghidra: FUN_080545c4
+    name: element_state_can_change
+    size: 160
+    sig: "uint32_t element_state_can_change(uint8_t *element, uint8_t *first_state, uint8_t *second_state)"
+    module: ui/element_state_can_change
+    status: ported
+    vars: {param_1/r3: element, param_2/r1: first_state, param_3/r2: second_state}
+    renames: {FUN_08059bc0: plst_flag_10, FUN_08059d04: plst_flag_20}
+    notes: >-
+      Raw A32 establishes [0x080545c4,0x08054664): 152 instruction bytes
+      followed by dev-space and tune literals at 0x0805465c/60. The next
+      real function begins with push at 0x08054664. Two outbound plain
+      BLs at 0x0805461c/2c, zero predicated; two inbound plain BLs at
+      0x0806737c and 0x081790b4, zero predicated. NULL or kind word +0x198
+      equal to 0x64657620 or 0x74756e65 clears optional outputs and returns
+      zero. Otherwise sequentially report +0x18c bits 0/1, then reject
+      +0x18d bit 6 or either playlist predicate, short-circuiting in order.
+      Raw callees confirm class check 0x080613e0 then +0x1ac bits 4/5.
+      Neither callee has a registry entry or Rust port; retain fixed-address
+      boundaries and explicit host seams. Ghidra's indirect calls are
+      actually conditional pop-pc returns. No algorithm deviations.
+      Tests cover all state bytes, excluded kinds, NULL, optional outputs,
+      inhibit precedence, short-circuiting, and output aliases affecting
+      subsequent reads. Host suite and ARM release build pass. Public-API
+      smoke observes allowed=1, blocked=0, outputs=1/1 with installed host
+      predicates; no device execution. match.py reports 38 original versus
+      47 Rust instructions: same kind checks, sequential output reads,
+      inhibit guard and ordered calls; LLVM uses BLX to fixed addresses,
+      a larger saved-register frame, and CLZ for the final zero predicate.
   - address: 0x08054d78
     ghidra: FUN_08054d78
     name: context_short_text_to_counted_u16
