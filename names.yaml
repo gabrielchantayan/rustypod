@@ -16,6 +16,41 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08066f54
+    ghidra: FUN_08066f54
+    name: rtc_context_set_configuration_index
+    size: 88
+    sig: "u32 rtc_context_set_configuration_index(const RtcContextOwner *owner, u32 index)"
+    module: time/rtc
+    status: ported
+    renames:
+      param_1/r0/r4: owner
+      param_2/r1: index
+      param_3: unused scratch register (not an argument)
+      param_4/local_10: overwritten stack scratch (not an argument)
+      context+0xb64: configuration
+      local_10: mapped
+      FUN_08086dd0: retail_word_at
+      FUN_0805e66c: rtc_context_mark_dirty
+      FUN_0817ceb4: media_player_get
+    notes: >-
+      Raw extent [0x08066f54,0x08066fac), 88 bytes, ending in POP;
+      next entry starts MOVS. Whole-image aligned A32 decoding verifies two
+      incoming plain BLs at 0x080648a8 and 0x08170e00, no predicated BLs,
+      three outgoing plain BLs and one virtual BLX. Map index using canonical
+      retail_word_at; compare full mapped u32 against unsigned halfword +0xb64.
+      On mismatch store low halfword, reload context, mark dirty and dispatch
+      canonical player's slot +0xa0 with low byte. Always return zero.
+      Caller 0x080648a8 supplies index zero; 0x08170e00 supplies a loaded word.
+      Discard spurious Ghidra r2/r3 arguments: nonnull lookup overwrites saved
+      r3 before use. Product meaning remains unrecovered. Reuse registered RTC
+      module and all canonical direct callees; native host virtual slots use
+      word indices. Existing singleton constructor limitation is unchanged.
+      Host suite and ARM release build pass. Behavioral tests cover equal
+      bypass, dirty preservation, high-bit mismatch, halfword and byte
+      truncation, adjacent storage and store/dirty-before-notification order.
+      Actual-source executable smoke verifies equal, high-bit and changed paths.
+      match.py exits 1: 28 versus 22 instructions; LLVM adds frame setup and
   - address: 0x08067478
     ghidra: FUN_08067478
     name: object_backend_set_primary_control_byte
