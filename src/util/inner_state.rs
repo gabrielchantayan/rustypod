@@ -814,6 +814,72 @@ pub unsafe extern "C" fn object_select_resource_index(object: *mut u8, index: i3
     0
 }
 
+/// object_reset_to_active_plst — `FUN_08066854` @ `0x08066854`.
+/// True size: 196 bytes (192 instruction bytes plus callback literal at
+/// 0x08066914); next real function starts with PUSH at 0x08066918.
+/// Raw-word census: two inbound plain BLs (0x081162c8, 0x0813c520),
+/// twelve outbound plain BLs, zero predicated BLs in either direction.
+///
+/// Resolve the backend, walk its +0xf60 tdat's plst sequence to the first
+/// +0x1ac bit-0x10 item, and cache it at backend+0xf44. If none exists,
+/// return 0xfffeffff without changing the object. Otherwise clear object+4,
+/// reset selection-dependent caches in stock order, clear this object's
+/// selection bit on the active item, and dispatch its +0x40 resource root
+/// with callback 0x080d43c4. Ignore both dispatch results and return zero.
+///
+/// Deliberate deviations: use the existing operation slots for the unported
+/// 0x08059700 cleanup and host callback execution; target callback dispatch
+/// is the real Rust dispatcher. All other callees reuse their canonical ports.
+/// The unreachable null check after storing a known-nonnull item is omitted.
+///
+/// # Safety
+/// Object and backend must satisfy the backend resolver and all cleanup
+/// contracts; list entries must be readable through +0x1ad and have a valid
+/// target-width +0x40 callback-root word.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn object_reset_to_active_plst(object: *mut u8) -> i32 {
+    let backend = crate::ui::object_state::object_backend_for_kind(object) as *mut u8;
+    let tdat = backend.add(0xf60).cast::<u32>().read() as usize as *const u8;
+    let mut item = crate::ui::tdat_first_plst::ui_tdat_first_plst(tdat);
+    loop {
+        if item == 0 {
+            return 0xfffe_ffffu32 as i32;
+        }
+        let node = item as usize as *mut u8;
+        if node.add(0x1ac).read() & 0x10 != 0 {
+            break;
+        }
+        item = crate::ui::plst_next::ui_plst_next(node);
+    }
+    backend.add(0xf44).cast::<u32>().write(item);
+    if object.add(SELECTED_RESOURCE).cast::<u32>().read() != 0 {
+        object.add(SELECTED_RESOURCE).cast::<u32>().write(0);
+    }
+    inner_release_record_buffer_and_reset_cursor(object);
+    inner_clear_record_cache(object);
+    let ops = core::ptr::read_volatile(core::ptr::addr_of!(OBJECT_SELECTION_OPS));
+    (ops.call_08059700)(object);
+    inner_clear_selection_cache(object);
+    inner_reset_transient_state(object);
+    inner_clear_cached_results(object);
+    let _ = inner_dispatch_selected_resource(object);
+    let active = backend.add(0xf44).cast::<u32>().read() as usize as *mut u8;
+    crate::ui::object_state::set_resource_selected(0, active, object);
+    let active = backend.add(0xf44).cast::<u32>().read() as usize as *mut u8;
+    let root = active.add(0x40).cast::<u32>().read() as usize as *mut u8;
+    #[cfg(target_os = "none")]
+    let _ = crate::app::resource::cache::resource_callback_dispatch(
+        root, SELECTED_RESOURCE_CALLBACK, object,
+    );
+    #[cfg(not(target_os = "none"))]
+    {
+        let dispatch = core::ptr::read_volatile(core::ptr::addr_of!(INNER_SELECTED_RESOURCE_OPS));
+        let _ = (dispatch.dispatch)(root, SELECTED_RESOURCE_CALLBACK, object);
+    }
+    0
+}
+
 /// object_select_secondary_resource_index — `FUN_080669d4` @ `0x080669d4`.
 /// True extent: 152 bytes, ending at the next PUSH at `0x08066a6c`.
 /// Verified calls: one inbound plain BL at `0x0813d9a0`, one inbound BLCC
@@ -2275,6 +2341,63 @@ mod tests {
             );
         }
         ObjectSelectionOpsRestore
+    }
+
+    #[test]
+    fn reset_to_active_plst_preserves_failed_search_and_resets_first_match() {
+        use crate::testing::{hints, try_map_u32_slab, note_missing_u32_fixture};
+        let _selection_guard = OBJECT_SELECTION_TEST_LOCK.lock();
+        let _dispatch_guard = SELECTED_RESOURCE_TEST_LOCK.lock();
+        let _selection_restore = install_object_selection_mocks();
+        let _dispatch_restore = install_selected_resource_mocks();
+        let Some(object) = try_map_u32_slab(hints::OBJECT_RESET_TO_ACTIVE_PLST, 0x3000) else {
+            assert!(note_missing_u32_fixture("object_reset_to_active_plst"));
+            return;
+        };
+        unsafe {
+            core::ptr::write_bytes(object, 0, 0x3000);
+            object.write(1);
+            object.add(1).write(2);
+            object.add(4).cast::<u32>().write(0x1234);
+            object.add(0xf44).cast::<u32>().write(0x5678);
+            let before = core::slice::from_raw_parts(object, 0x1000).to_vec();
+            assert_eq!(object_reset_to_active_plst(object), 0xfffe_ffffu32 as i32);
+            assert_eq!(core::slice::from_raw_parts(object, 0x1000), before);
+
+            let tdat = object.add(0x1000);
+            let first = object.add(0x1400);
+            let second = object.add(0x1800);
+            let third = object.add(0x1c00);
+            tdat.add(4).cast::<u32>().write(0x7464_6174);
+            object.add(0xf60).cast::<u32>().write(tdat as usize as u32);
+            tdat.add(0x34).cast::<u32>().write(first as usize as u32);
+            for node in [first, second, third] {
+                node.add(4).cast::<u32>().write(0x706c_7374);
+            }
+            first.add(0x24).cast::<u32>().write(second as usize as u32);
+            second.add(0x24).cast::<u32>().write(third as usize as u32);
+            let before = core::slice::from_raw_parts(object, 0x1000).to_vec();
+            assert_eq!(object_reset_to_active_plst(object), 0xfffe_ffffu32 as i32);
+            assert_eq!(core::slice::from_raw_parts(object, 0x1000), before);
+            second.add(0x1ac).write(0x10);
+            third.add(0x1ac).write(0x10);
+            second.add(0x1ad).write(0xff);
+            third.add(0x1ad).write(0xff);
+            second.add(0x40).cast::<u32>().write(object.add(0x2000) as usize as u32);
+            object.add(RECORD_INDEX).cast::<u32>().write(7);
+            object.add(RESULT_COUNT).cast::<u32>().write(9);
+            SELECTED_RESOURCE_STATUS = -50;
+            assert_eq!(object_reset_to_active_plst(object), 0);
+            assert_eq!(object.add(0xf44).cast::<u32>().read(), second as usize as u32);
+            assert_eq!(object.add(4).cast::<u32>().read(), 0);
+            assert_eq!(object.add(RECORD_INDEX).cast::<u32>().read(), u32::MAX);
+            assert_eq!(object.add(RESULT_COUNT).cast::<u32>().read(), 0);
+            assert_eq!(second.add(0x1ad).read(), 0xfb);
+            assert_eq!(third.add(0x1ad).read(), 0xff);
+            assert_eq!(SELECTED_RESOURCE_DISPATCH_ROOT, object.add(0x2000));
+            assert_eq!(SELECTED_RESOURCE_DISPATCH_CALLBACK, SELECTED_RESOURCE_CALLBACK);
+            assert_eq!(SELECTED_RESOURCE_DISPATCH_CONTEXT, object);
+        }
     }
 
     #[test]
