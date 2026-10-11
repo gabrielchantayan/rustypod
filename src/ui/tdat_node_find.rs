@@ -35,13 +35,37 @@ const ALT_ID_HI_OFFSET: usize = 0x11c;
 /// element+0x28 instead of +0x34.
 pub type TdatNodeListHead = unsafe extern "C" fn(*const u8) -> u32;
 
-/// ABI of the still-unported node successor selector at `0x08053d54`.
+/// Node prefix: owner pointer at target +0, successor word at target +4.
+/// Host builds widen only the owner pointer.
+#[repr(C)]
+pub struct TdatNodeLink {
+    pub owner_element: *const u8,
+    pub next: u32,
+}
+
+/// `tdat_node_next` — `FUN_08053d54` at 0x08053d54, exactly 24 bytes.
 ///
-/// Raw ARM: `mov r2, r0; push {lr}; bl 0x0806b410; movs r0, r0;
-/// ldrne r0, [r2, #0x4]; pop {pc}` — returns the word at node+0x4 only
-/// when the ported `scoped_context_owner_validity` predicate accepts the
-/// node.
-pub type TdatNodeNext = unsafe extern "C" fn(*const u8) -> u32;
+/// Raw words: e1a02000 e52de004 eb005dab e1b00000 15920004 e49df004.
+/// The next real function starts at 0x08053d6c with `push {r4,r5,r6,lr}`.
+/// Two plain BL callers (0x08050cfc, 0x08050d70), zero predicated BL
+/// callers; the body has one plain BL to 0x0806b410 and no predicated BL.
+/// Validate the node's owner using `scoped_context_owner_validity`, then
+/// return its successor word, or zero on rejection without reading the link.
+/// Deliberate deviations: call the existing Rust predicate; use a C-layout
+/// prefix so the owner pointer and successor remain distinct on 64-bit hosts.
+///
+/// # Safety
+/// `node` may be NULL. Otherwise its owner pointer must be readable and
+/// satisfy the owner predicate's contract. Accepted nodes must also have
+/// a readable, aligned successor word.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn tdat_node_next(node: *const u8) -> u32 {
+    if crate::app::scoped_context::scoped_context_owner_validity(node.cast()) == 0 {
+        return 0;
+    }
+    (*node.cast::<TdatNodeLink>()).next
+}
 
 #[cfg(target_os = "none")]
 unsafe extern "C" fn retail_node_list_head(element: *const u8) -> u32 {
@@ -54,40 +78,22 @@ unsafe extern "C" fn retail_node_list_head(_element: *const u8) -> u32 {
     0
 }
 
-#[cfg(target_os = "none")]
-unsafe extern "C" fn retail_node_next(node: *const u8) -> u32 {
-    let next: TdatNodeNext = core::mem::transmute(0x0805_3d54usize);
-    next(node)
-}
 
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn retail_node_next(_node: *const u8) -> u32 {
-    0
-}
-
-/// Calls outside this one-function port.
-///
-/// Target builds dispatch to the unported list-head getter at
-/// `0x080522fc` and successor selector at `0x08053d54`. Host tests
-/// replace this boundary to drive the loop with fixture nodes.
+/// Dispatch boundary for the still-unported list-head getter at 0x080522fc.
+/// Successor traversal calls the Rust port directly.
 #[derive(Clone, Copy)]
 pub struct TdatNodeFindOps {
     pub list_head: TdatNodeListHead,
-    pub next: TdatNodeNext,
 }
 
 /// Production dispatch boundary for the node-list accessors.
 pub const DEFAULT_TDAT_NODE_FIND_OPS: TdatNodeFindOps = TdatNodeFindOps {
     list_head: retail_node_list_head,
-    next: retail_node_next,
 };
 
 /// Active node-list accessor boundary.
 ///
-/// This is intentionally a separate seam: `0x080522fc` and `0x08053d54`
-/// have no `ported` ledger entries, whereas the class predicate
-/// `ui_element_is_tdat_class` at `0x0806aa3c` is the existing Rust port
-/// called directly above.
+/// Only 0x080522fc remains unported; owner and class predicates are Rust ports.
 pub static mut TDAT_NODE_FIND_OPS: TdatNodeFindOps = DEFAULT_TDAT_NODE_FIND_OPS;
 
 #[inline(always)]
@@ -136,8 +142,8 @@ fn tdat_node_find_ops() -> TdatNodeFindOps {
 /// Algorithm: validate `element` as a 'tdat' UI element and reject the
 /// all-zero identifier, then walk the node list whose head is the word at
 /// element+0x28 (via the unported getter `0x080522fc`) and whose successor
-/// step is the validity-gated word at node+0x4 (via the unported selector
-/// `0x08053d54`). Return the first node whose 64-bit identifier word pair
+/// step is the validity-gated word at node+0x4 via [`tdat_node_next`].
+/// Return the first node whose 64-bit identifier word pair
 /// at node+0x110/+0x114 equals `(id_lo, id_hi)` — the high word is
 /// compared first, the low word only on a high-word match. Return zero
 /// when the class check fails, the identifier is zero, or the list
@@ -150,10 +156,8 @@ fn tdat_node_find_ops() -> TdatNodeFindOps {
 /// 0x0813e44c, 0x082a5fd4), zero predicated forms. The function itself
 /// contains 3 unconditional `bl` instructions and zero predicated ones.
 ///
-/// Deliberate deviations: `0x080522fc` and `0x08053d54` are not ported,
-/// so their retail calls go through the explicit [`TDAT_NODE_FIND_OPS`]
-/// dispatch seam; the port calls the existing Rust
-/// `ui_element_is_tdat_class` instead of branching to stock `0x0806aa3c`.
+/// Deliberate deviations: only `0x080522fc` uses [`TDAT_NODE_FIND_OPS`].
+/// Successor and class checks call the existing Rust ports directly.
 /// Aligned word loads and return-zero semantics are unchanged.
 ///
 /// # Safety
@@ -185,7 +189,7 @@ pub unsafe extern "C" fn ui_tdat_find_node_by_id(
         {
             return node;
         }
-        node = (ops.next)(words);
+        node = tdat_node_next(words);
     }
     0
 }
@@ -234,7 +238,7 @@ pub unsafe extern "C" fn ui_tdat_find_node_by_id(
 /// a 'tdat' UI element and reject the all-zero identifier, then walk the
 /// node list whose head is the word at element+0x28 (via the unported
 /// getter `0x080522fc`) and whose successor step is the validity-gated
-/// word at node+0x4 (via the unported selector `0x08053d54`). Return the
+/// word at node+0x4 via [`tdat_node_next`]. Return the
 /// first node whose alternate 64-bit identifier equals `(id_lo, id_hi)` —
 /// the high word is compared first, the low word only on a high-word
 /// match. Return zero when the class check fails, the identifier is zero,
@@ -248,11 +252,9 @@ pub unsafe extern "C" fn ui_tdat_find_node_by_id(
 /// contains 3 unconditional `bl` instructions and zero predicated ones
 /// (Ghidra's "5 bl call sites" counts the callers).
 ///
-/// Deliberate deviations: same as the sibling — the unported accessors
-/// `0x080522fc`/`0x08053d54` dispatch through the [`TDAT_NODE_FIND_OPS`]
-/// seam and the class predicate is the existing Rust
-/// `ui_element_is_tdat_class`; aligned word loads and return-zero
-/// semantics are unchanged.
+/// Deliberate deviations: only `0x080522fc` uses [`TDAT_NODE_FIND_OPS`];
+/// successor and class checks call Rust ports directly. Aligned identifier
+/// loads and return-zero semantics are unchanged.
 ///
 /// # Safety
 ///
@@ -283,7 +285,7 @@ pub unsafe extern "C" fn ui_tdat_find_node_by_alt_id(
         {
             return node;
         }
-        node = (ops.next)(words);
+        node = tdat_node_next(words);
     }
     0
 }
@@ -340,7 +342,10 @@ mod tests {
                     } else {
                         0
                     };
-                    node.add(4).cast::<u32>().write(next);
+                    node.cast::<TdatNodeLink>().write(TdatNodeLink {
+                        owner_element: element,
+                        next,
+                    });
                 }
                 Some(Fixture {
                     base,
@@ -371,7 +376,6 @@ mod tests {
                 NEXT_LOOKUP = head;
                 TDAT_NODE_FIND_OPS = TdatNodeFindOps {
                     list_head: fixture_list_head,
-                    next: fixture_next,
                 };
             }
             Some((lock, reset))
@@ -384,8 +388,23 @@ mod tests {
         NEXT_LOOKUP
     }
 
-    unsafe extern "C" fn fixture_next(node: *const u8) -> u32 {
-        node.add(4).cast::<u32>().read()
+
+    #[test]
+    fn successor_checks_owner_and_preserves_all_link_bits() {
+        let tdat = [0u32, TDAT_CLASS_TAG];
+        let other = [0u32, 0x706c_7374];
+        let mut node = TdatNodeLink { owner_element: ptr::null(), next: u32::MAX };
+        unsafe {
+            assert_eq!(tdat_node_next(ptr::null()), 0);
+            assert_eq!(tdat_node_next((&node as *const TdatNodeLink).cast()), 0);
+            node.owner_element = other.as_ptr().cast();
+            assert_eq!(tdat_node_next((&node as *const TdatNodeLink).cast()), 0);
+            node.owner_element = tdat.as_ptr().cast();
+            for next in [0, 1, 0x0805_3d54, 0x8000_0000, u32::MAX] {
+                node.next = next;
+                assert_eq!(tdat_node_next((&node as *const TdatNodeLink).cast()), next);
+            }
+        }
     }
 
     #[test]
@@ -497,7 +516,10 @@ mod tests {
                     } else {
                         0
                     };
-                    node.add(4).cast::<u32>().write(next);
+                    node.cast::<TdatNodeLink>().write(TdatNodeLink {
+                        owner_element: element,
+                        next,
+                    });
                 }
                 Some(Fixture {
                     base,

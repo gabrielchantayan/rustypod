@@ -16,6 +16,32 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08053d54
+    ghidra: FUN_08053d54
+    name: tdat_node_next
+    size: 24
+    sig: "u32 tdat_node_next(const u8 *node)"
+    module: ui/tdat_node_find
+    status: ported
+    renames:
+      param_1/r0: node
+      r2: saved_node
+      FUN_0806b410: scoped_context_owner_validity
+      return/r0: successor
+    notes: >-
+      Raw extent [0x08053d54,0x08053d6c); next function starts with
+      push {r4,r5,r6,lr}. Two plain inbound BLs at 0x08050cfc and
+      0x08050d70, zero predicated; one plain outbound BL to 0x0806b410,
+      zero predicated. Return node+4 only when the owner predicate accepts,
+      otherwise zero without reading the successor. Reuse the existing
+      Rust owner predicate. C-layout prefix widens the owner pointer on
+      hosts while preserving the target's two four-byte fields.
+      Host suite and ARM release build pass. Isolated actual-source smoke
+      returns 80000001 for an accepted owner, zero for a null owner and
+      null node. match.py exits 1: LLVM saves r4 and adds frame setup,
+      uses cmp and an explicit zero move; conditional successor load
+      remains at +4. The BL relocation targets the Rust owner predicate,
+      not the unresolved zero address shown by archive disassembly.
   - address: 0x08053e40
     ghidra: FUN_08053e40
     name: ft_service_metadata_u16_at_b06
@@ -36277,7 +36303,7 @@ functions:
       param_4/r3: id_hi
       FUN_0806aa3c: ui_element_is_tdat_class
       FUN_080522fc: tdat_node_list_head (seam, unported)
-      FUN_08053d54: tdat_node_next (seam, unported)
+      FUN_08053d54: tdat_node_next
     notes: >-
       Raw ARM extent is exactly 0x08050d10..0x08050d84; the next function's
       push {r4,r5,r6,lr} prologue at 0x08050d84 confirms Ghidra's 116-byte
@@ -36287,7 +36313,7 @@ functions:
       node list whose head is the word at element+0x28 via the unported
       tdat-class-gated getter 0x080522fc and whose successor step is the
       scoped_context_owner_validity-gated word at node+0x4 via the
-      unported selector 0x08053d54, returning the first node whose word
+      ported selector 0x08053d54, returning the first node whose word
       pair at node+0x110/+0x114 equals (id_lo, id_hi) with the high word
       compared first. Returns zero on class rejection, zero identifier, or
       list exhaustion. Callers pass split 64-bit identifiers: 0x080ab120
@@ -36297,10 +36323,9 @@ functions:
       0x08094c9c, 0x080ab39c, 0x0813e44c, 0x082a5fd4), zero predicated
       forms; the function itself contains 3 unconditional bl instructions
       and zero predicated ones, not Ghidra's reported 5 call sites (that
-      count is its caller count). The port keeps the two unported callees
-      behind the explicit TDAT_NODE_FIND_OPS dispatch seam (target builds
-      transmute the retail addresses; host tests install fixture
-      accessors) and calls the ported class predicate directly. match.py:
+      count is its caller count). Only the list-head getter remains behind
+      TDAT_NODE_FIND_OPS; successor and class checks call Rust directly.
+      Original lookup match.py review:
       crate fp frame and blx seam dispatch vs ADS bl, LLVM orr zero-id
       test, and an ldreq low-word load replacing the unconditional
       ldr/cmpeq pair; the guard order, hi-then-lo compare loop, and
@@ -36319,7 +36344,7 @@ functions:
       param_4/r3: id_hi
       FUN_0806aa3c: ui_element_is_tdat_class
       FUN_080522fc: tdat_node_list_head (seam, unported)
-      FUN_08053d54: tdat_node_next (seam, unported)
+      FUN_08053d54: tdat_node_next
     notes: >-
       Raw ARM extent is exactly 0x08050c9c..0x08050d10; the sibling
       lookup's push {r4,r5,r6,lr} prologue at 0x08050d10 confirms Ghidra's
@@ -36331,7 +36356,7 @@ functions:
       identifier, then walk the node list whose head is the word at
       element+0x28 via the unported tdat-class-gated getter 0x080522fc and
       whose successor step is the scoped_context_owner_validity-gated word
-      at node+0x4 via the unported selector 0x08053d54, returning the
+      at node+0x4 via the ported selector 0x08053d54, returning the
       first node whose word pair at node+0x118/+0x11c equals
       (id_lo, id_hi) with the high word compared first. Returns zero on
       class rejection, zero identifier, or list exhaustion. Caller
@@ -36342,9 +36367,9 @@ functions:
       (0x081598cc, 0x0815991c, 0x08159a58, 0x0816edb4, 0x0816eed4), zero
       predicated forms; the function itself contains 3 unconditional bl
       instructions and zero predicated ones (Ghidra's "5 bl call sites"
-      counts the callers). The port shares the sibling's
-      TDAT_NODE_FIND_OPS dispatch seam for the two unported accessors and
-      calls the ported class predicate directly. match.py: crate fp frame
+      counts the callers). Only the list-head getter shares the sibling's
+      TDAT_NODE_FIND_OPS seam; successor and class checks call Rust directly.
+      Original lookup match.py review: crate fp frame
       and blx seam dispatch vs ADS bl, LLVM orr zero-id test, and an ldreq
       low-word load replacing the unconditional ldr/cmpeq pair; the guard
       order, hi-then-lo compare loop at +0x11c/+0x118, and
