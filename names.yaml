@@ -16,6 +16,38 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0806430c
+    ghidra: FUN_0806430c
+    name: word_record_register
+    size: 96
+    sig: "i32 word_record_register(u32 key, u32 value, u32 extra, u32 flags, u32 *index_out)"
+    module: util/word_record_register
+    status: ported
+    vars:
+      param_1/r0: key
+      param_2/r1: value
+      param_3/r2: extra
+      param_4/r3: flags
+      param_5/r5: index_out
+      r4: table at 0x08ad1458
+      r12: index
+      lr: selected record address
+    notes: >-
+      Raw A32 extent [0x0806430c,0x0806436c) is 96 bytes: 92 code
+      bytes plus literal at 0x08064368. Next independent PUSH at 0x0806436c.
+      Whole-image word decoding verifies two incoming plain BLs at
+      0x0805ddcc and 0x0805e2e4, zero predicated incoming BLs and zero
+      outgoing plain or predicated BLs. Reject zero key with -50; scan
+      50 four-word records for first zero key, store inputs, then optionally
+      write index and return zero. Raw CMP r0,#0 at 0x08064348 makes -108
+      unreachable; exhaustion writes address zero with index 50. Preserve
+      target store using ARM STM assembly to avoid Rust null-pointer UB.
+      Host exhaustion panics instead; host table is explicitly supplied.
+      Tests cover all free positions, neighbors, full-width values, optional
+      and aliased outputs, zero-key rejection and exact scan exhaustion.
+      Parallel host suite SIGSEGVed in sqlite/error_message; serialized suite
+      passes 15497 tests. ARM release build and 50-registration executable
+      smoke pass. match.py exits 1: 23 instructions each, same bounded scan,
   - address: 0x0806451c
     ghidra: FUN_0806451c
     name: hfs_extent_record_release
