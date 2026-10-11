@@ -4,6 +4,8 @@ pub mod object_collection20_size;
 pub use object_collection20_size::*;
 pub mod object_collection_size;
 pub use object_collection_size::*;
+pub mod object_collection_size_for_mode;
+pub use object_collection_size_for_mode::*;
 pub mod fixed_index_limit;
 pub use fixed_index_limit::*;
 pub mod element_state_can_change;

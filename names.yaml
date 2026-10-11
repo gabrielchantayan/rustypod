@@ -247830,3 +247830,36 @@ functions:
       failure branch skips bound loads; success loads +0xe64/+0xe68 and
       calls the canonical size port rather than retail's conditional tail
       branch. LLVM adds native bounds staging and an ordinary call.
+
+  - address: 0x08053e50
+    ghidra: FUN_08053e50
+    name: object_collection_size_for_mode
+    size: 80
+    sig: "i32 object_collection_size_for_mode(u8 *object)"
+    module: ui/object_collection_size_for_mode
+    status: ported
+    vars: {param_1: object, param_2: unused_dispatch_input, return/r0: record_count}
+    notes: >-
+      Raw extent [0x08053e50,0x08053ea0): 76 code bytes plus callback
+      literal 0x080bf474 at 0x08053e9c. Next entry has an independent
+      push prologue. Two inbound plain BLs at 0x08111544 and 0x0813e548,
+      zero predicated BLs; one outbound plain BL to unported dispatcher
+      0x0808cec4, zero predicated BLs. Nonzero byte +0xef9 tail-branches
+      to canonical object_collection_size at 0x08053f38. Zero dispatches
+      selector 2, secondary zero, callback 0x080bf474; failure returns
+      zero, success tail-branches to canonical vector_size_elem24 at
+      0x083d7750 with bounds +0xeb0/+0xeb4. Ghidra folds the callees and
+      invents extra calls. Replace dead incoming r1 with zero following
+      the existing size port. Host dispatcher injection and native bounds
+      staging preserve target u32 spacing. Migrated media-player cache
+      target consumer; host aggregate simulation remains unchanged.
+      Host suite and ARM build-std release pass. Actual-source smoke
+      returns three records in mode zero and two in mode 255 after
+      dispatch updates wrapping bounds. Tests cover failure, empty,
+      partial, reversed, wrapping and signed-extreme spans in both modes.
+      match.py exits 1 with 20 original versus 30 LLVM instructions:
+      mode byte and selector retained, BLX through verified dispatcher,
+      failure skips bound loads, native bounds temporary and ordinary
+      vector count call replace conditional tail branch. Relocations
+      verify JUMP24 object_collection_size and CALL vector_size_elem24;
+      no intentional symbol fold.
