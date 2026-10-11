@@ -16,6 +16,32 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08058584
+    ghidra: FUN_08058584
+    name: initialize_zero_word
+    size: 12
+    sig: "u32 *initialize_zero_word(u32 *dst)"
+    module: util/initialize_zero_word
+    status: ported
+    vars: {param_1/r0: dst, r1: zero}
+    notes: >-
+      Raw words e3a01000 e5801000 e12fff1e establish extent
+      [0x08058584,0x08058590); the next function starts with e92d47f0.
+      Independent whole-image aligned A32 decoding finds two plain inbound
+      BLs at 0x0805e0b8 and 0x0805e194, zero predicated inbound BLs,
+      and zero outgoing calls. Initialize one aligned word to zero;
+      callers supply embedded fields at +0x24 and +0x18. Higher-level
+      field identity is unproven; no callee seams are needed.
+      Deliberate deviation from Ghidra: return the destination pointer
+      to expose unchanged r0. No NULL guard or extra stores.
+      Host regressions cover zero, low-bit, high-bit, mixed and all-one
+      inputs, neighboring-word preservation, both caller offsets and
+      pointer return. Full host suite and ARM release build pass.
+      Standalone executable smoke clears both embedded fields and verifies
+      canaries and returned pointers. match.py exits 1: three stock versus
+      five Rust instructions, with identical MOV/STR and an added restored
+      frame. Exported symbol is present; no device execution.
+
   - address: 0x080586b8
     ghidra: FUN_080586b8
     name: kinded_interface_proxy_create
