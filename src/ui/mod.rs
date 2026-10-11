@@ -189,6 +189,7 @@ pub mod empty_destructor_0806715c;
 pub mod plst_task_complete;
 pub mod plst_task_complete_tree;
 pub mod plst_complete_item_at;
+pub mod plst_complete_linked_items;
 pub mod plst_task_resource_callback;
 pub mod plst_resource_reset;
 pub mod plst_find_by_persistent_id;
