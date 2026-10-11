@@ -51727,6 +51727,39 @@ functions:
       and NULL optional outputs; obsolete mock forwarding tests are removed.
 
   # --- record indexed payload lookup wrapper (app) ---
+  - address: 0x08055aa4
+    ghidra: FUN_08055aa4
+    name: record_indexed_payload_lookup_at_0xc0
+    size: 56
+    sig: "u32 record_indexed_payload_lookup_at_0xc0(const u32 *record, void **payload_out, u32 *encoded_length_out)"
+    module: app/indexed_payload_lookup
+    status: ported
+    renames:
+      param_1/r0: record
+      param_2/r1: payload_out
+      param_3/r2: encoded_length_out
+      record_word_0: index_base
+      record_word_10: entry
+      FUN_0809e3d0: indexed_payload_lookup
+    notes: >-
+      Raw words establish the true 56-byte extent 0x08055aa4..0x08055adc;
+      the next mov ip,r1 begins a distinct wrapper. Two inbound plain BLs
+      occur at 0x08045570 and 0x08045580, with one outbound plain BL at
+      0x08055ac4 to the already ported indexed_payload_lookup and no predicated
+      BLs. Loads record word 10 and word 0, looks up the entry at index
+      base+0xc0, logically halves the optional encoded length even on failure,
+      and preserves the backend status in r0 (despite Ghidra's void return).
+      The caller compares two records for selector 1, gating string comparison
+      on flag byte +0x15 bit 3; no stronger field identity is assumed.
+      Target pointer fields remain u32 on hosts and output pointers use native
+      width. Real-backend host tests cover odd/even and maximal live lengths,
+      empty entries, signed-invalid/out-of-range entries, dead lengths,
+      inactive indices, output clearing, and independently NULL outputs.
+      match.py shows fourteen instructions on both sides: the word-10 load,
+      +0xc0 adjustment, backend BL, and conditional logical shift/store remain;
+      LLVM uses a larger frame and different register shuffle.
+
+  # --- record indexed payload lookup wrapper (app) ---
   - address: 0x08055810
     ghidra: FUN_08055810
     name: record_indexed_payload_lookup_at_0x118_word15
