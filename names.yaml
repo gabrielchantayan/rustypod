@@ -247557,3 +247557,30 @@ functions:
       actual-source smoke returns 254 for byte 0xfe. match.py exits 1:
       three original versus five Rust instructions retain both loads and
       offsets; LLVM adds frame setup/teardown. No intentional symbol fold.
+
+  - address: 0x08054e08
+    ghidra: FUN_08054e08
+    name: ft_service_metadata_word_at_af8
+    size: 12
+    sig: "u32 ft_service_metadata_word_at_af8(const u8 *service_context)"
+    module: ft/service/metadata
+    status: ported
+    renames:
+      param_1/r0: service_context
+      return/r0: metadata_word
+    notes: >-
+      Raw words e5900f00 e5900af8 e12fff1e establish the true extent
+      [0x08054e08,0x08054e14); the next separately called function is
+      the b43 accessor. Whole-image aligned A32 decoding finds two plain
+      inbound BLs at 0x08172e14 and 0x08172e28, zero predicated inbound
+      BLs, and zero outgoing BLs. Follow the aligned metadata pointer at
+      context+0xf00 and return the complete word at metadata+0xaf8.
+      The caller compares it with a byte at caller+0x41 and caches its
+      low byte there; higher-level meaning remains unrecovered.
+      Reuses the existing metadata module with no new callee seam,
+      NULL guard, or bounds check. Native host pointers preserve the
+      field offset; ARM pointers remain four bytes. Host tests cover
+      full-word boundary patterns and pointer replacement. Host suite
+      and ARM build-std release build pass. Actual-source smoke returns
+      0x89abcdef. match.py exits 1 with both loads and offsets retained;
+      LLVM adds frame setup/teardown. No intentional symbol fold.
