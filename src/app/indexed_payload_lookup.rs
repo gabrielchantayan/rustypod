@@ -375,6 +375,42 @@ pub unsafe extern "C" fn record_indexed_payload_lookup_at_0xc0(
     status
 }
 
+/// record_nested_payload_lookup_at_0x8a8 — `FUN_0805596c` @ `0x0805596c`.
+///
+/// True size: 64 bytes, ending at the next wrapper at `0x080559ac`.
+/// Raw words verify two inbound plain BLs (0x08045b2c, 0x08045b3c),
+/// one outbound plain BL to indexed_payload_lookup, and no predicated BLs.
+/// Reads the entry from word 4 of the descriptor in record word 4, looks
+/// it up at the owner in record word 0 plus 0x8a8, then logically halves
+/// the optional encoded length even on failure. Returns status unchanged.
+///
+/// Deliberate deviations: target pointer fields remain u32 on hosts;
+/// output payload pointers use native width. Calls the existing Rust backend.
+/// Ghidra's void return is corrected: raw ARM preserves the status in r0.
+///
+/// # Safety
+/// Record and descriptor must each contain five aligned readable target
+/// words. Record word 0 must address an owner with a valid lookup index at
+/// +0x8a8. Optional outputs obey the backend contract and must not alias
+/// the record, descriptor, or index storage.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn record_nested_payload_lookup_at_0x8a8(
+    record: *const u32,
+    payload_out: *mut *mut u8,
+    encoded_length_out: *mut u32,
+) -> u32 {
+    let descriptor = record.add(4).read() as usize as *const u32;
+    let owner = record.read();
+    let entry = descriptor.add(4).read();
+    let index = owner.wrapping_add(0x8a8) as usize as *mut u8;
+    let status = indexed_payload_lookup(index, entry, payload_out, encoded_length_out);
+    if !encoded_length_out.is_null() {
+        encoded_length_out.write(encoded_length_out.read() >> 1);
+    }
+    status
+}
+
 /// record_nested_payload_lookup — `FUN_08055b18` @ `0x08055b18`.
 ///
 /// True extent: 88 bytes, `0x08055b18..0x08055b70`, ending at the next
@@ -466,6 +502,64 @@ mod tests {
     use crate::testing::{hints, note_missing_u32_fixture, try_map_u32_slab};
     use crate::util::crts_tag::CRTS_TAG;
     use core::ptr;
+
+    #[test]
+    fn nested_8a8_decodes_live_lengths_and_clears_failed_lookups() {
+        unsafe {
+            let slab = try_map_u32_slab(hints::RECORD_NESTED_PAYLOAD_LOOKUP_8A8, 4096)
+                .expect("target-width nested lookup fixture");
+            ptr::write_bytes(slab, 0, 4096);
+            let record = slab.cast::<u32>();
+            let descriptor = record.add(8);
+            let owner = slab.add(0x100);
+            let index = owner.add(0x8a8).cast::<u32>();
+            let handles = record.add(32);
+            let entries = record.add(40);
+            record.write(owner as usize as u32);
+            record.add(4).write(descriptor as usize as u32);
+            descriptor.add(3).write(u32::MAX); // Neighbor is not the entry.
+            index.write(CRTS_TAG);
+            index.add(2).write(handles as usize as u32);
+            index.add(4).write(handles.add(1) as usize as u32);
+            index.add(7).write(1);
+            index.add(12).write(1);
+            handles.write(entries as usize as u32);
+            handles.add(1).write(slab.add(0xc00) as usize as u32);
+            entries.write(3);
+            for encoded in [1, 2, 3, 0x7fff_fffe] {
+                descriptor.add(4).write(1);
+                entries.add(1).write(encoded);
+                let mut payload = ptr::null_mut();
+                let mut length = u32::MAX;
+                assert_eq!(record_nested_payload_lookup_at_0x8a8(record, &mut payload, &mut length), 0);
+                assert_eq!(payload, slab.add(0xc03));
+                assert_eq!(length, encoded >> 1);
+            }
+            for entry in [0, 2, u32::MAX, 0x8000_0000] {
+                descriptor.add(4).write(entry);
+                let mut payload = 1usize as *mut u8;
+                let mut length = 99;
+                let expected = if entry == 0 { 0 } else { (-50i32) as u32 };
+                assert_eq!(record_nested_payload_lookup_at_0x8a8(record, &mut payload, &mut length), expected);
+                assert!(payload.is_null());
+                assert_eq!(length, 0);
+            }
+            descriptor.add(4).write(1);
+            entries.add(1).write(7);
+            let mut length = 99;
+            assert_eq!(record_nested_payload_lookup_at_0x8a8(record, ptr::null_mut(), &mut length), 0);
+            assert_eq!(length, 3);
+            let mut payload = ptr::null_mut();
+            assert_eq!(record_nested_payload_lookup_at_0x8a8(record, &mut payload, ptr::null_mut()), 0);
+            assert_eq!(payload, slab.add(0xc03));
+            entries.write(0x8000_0000); // Dead entry must clear both outputs.
+            assert_eq!(record_nested_payload_lookup_at_0x8a8(record, &mut payload, &mut length), (-50i32) as u32);
+            assert!(payload.is_null());
+            assert_eq!(length, 0);
+            index.write(0);
+            assert_eq!(record_nested_payload_lookup_at_0x8a8(record, ptr::null_mut(), ptr::null_mut()), (-50i32) as u32);
+        }
+    }
 
     #[test]
     fn record_220_decodes_lengths_and_preserves_lookup_errors() {
