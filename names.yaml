@@ -244535,3 +244535,42 @@ functions:
       firmware pointers remain 32-bit. ARM match.py shows the same call
       and byte store with a frame-pointer prologue, r4 instead of r2, and
       a relocation placeholder for the resolver call (structural diff exit 1).
+  - address: 0x08066e68
+    ghidra: FUN_08066e68
+    name: rtc_context_set_configuration_b78
+    size: 28
+    sig: "void rtc_context_set_configuration_b78(RtcContextOwner *owner, u32 value)"
+    module: time/rtc
+    status: ported
+    renames:
+      param_1/r0: owner
+      param_2/r1: value
+      r2: context
+      r3: previous_configuration_byte
+      owner+0xf00: rtc_context
+      context+0xb78: configuration_b78
+      context+0xb90: dirty
+      FUN_0805e66c: rtc_context_mark_dirty
+    notes: >-
+      Raw words e5902f00 e5d23b78 e1530001 15c21b78 15900f00
+      1affddfa e12fff1e establish [0x08066e68,0x08066e84), 28 bytes;
+      the next real function starts with LDR at 0x08066e84. Independent
+      whole-image aligned A32 decoding verifies two incoming plain BLs
+      at 0x08170c78 and 0x08172878, zero predicated incoming BLs, zero
+      outgoing BLs of either kind, and one conditional tail BNE to
+      canonical rtc_context_mark_dirty at 0x0805e66c. Compare unsigned
+      context byte +0xb78 with full u32; on mismatch store low byte,
+      reload owner context and mark +0xb90 dirty. Equality preserves
+      existing dirty state; high bits trigger dirty even if low byte matches.
+      Both raw callers supply normalized boolean values in r1; Ghidra
+      omits the second argument in the event caller. Product meaning is
+      unrecovered. Reuse registered time/rtc module, canonical dirty port
+      and target-correct owner layout; host pointers widen only its tail.
+      Host suite and ARM build-std release build pass. Regression covers
+      all prior byte values, equal and changed inputs, high-bit mismatch,
+      u32::MAX, dirty preservation and every surrounding byte. Actual-source
+      executable smoke verifies equal, truncated-equal and changed paths.
+      match.py exits 1 with ten versus seven instructions: LLVM adds frame
+      setup and an equal early return, retaining full-width comparison,
+      byte store, owner-pointer reload and dirty tail branch. R_ARM_JUMP24
+      relocation verifies rtc_context_mark_dirty as the generated target.

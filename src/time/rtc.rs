@@ -484,6 +484,41 @@ pub unsafe extern "C" fn rtc_context_set_configuration_word(
     1
 }
 
+/// rtc_context_set_configuration_b78 — original `FUN_08066e68` @
+/// 0x08066e68; true extent [0x08066e68, 0x08066e84), 28 bytes.
+/// Raw words `e5902f00 e5d23b78 e1530001 15c21b78 15900f00
+/// 1affddfa e12fff1e` establish the next real function boundary.
+/// Whole-image aligned A32 decoding verifies two incoming plain BLs
+/// (0x08170c78, 0x08172878), zero incoming predicated BLs, zero outgoing
+/// BLs of either kind, and one conditional tail B to [`rtc_context_mark_dirty`].
+///
+/// Compare the unsigned context byte at +0xb78 against the full u32.
+/// On mismatch, store the low byte, reload the owner's context pointer,
+/// and mark that context dirty. Equality preserves all storage, including
+/// dirty; values above 255 mark dirty even if their low byte matches.
+/// Deliberate deviations: the field's product role is unrecovered, so the
+/// configuration name retains its offset. Native host pointers widen only
+/// the owner's tail; Rust calls the canonical dirty port directly.
+///
+/// # Safety
+/// Owner must contain a valid context pointer at +0xf00, writable through
+/// +0xb90. No NULL or bounds checks are added.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn rtc_context_set_configuration_b78(
+    owner: *mut RtcContextOwner,
+    value: u32,
+) {
+    let context = unsafe { (*owner).rtc_context as *mut RtcContext };
+    let configuration = unsafe { context.cast::<u8>().add(0xb78) };
+    if unsafe { configuration.read() } as u32 != value {
+        unsafe {
+            configuration.write(value as u8);
+            rtc_context_mark_dirty((*owner).rtc_context as *mut RtcContext);
+        }
+    }
+}
+
 /// rtc_context_set_configuration_b8a — original `FUN_08067ad8` @
 /// 0x08067ad8; true size 28 bytes, next function at 0x08067af4.
 /// Raw words `e5902f00 e5d23b8a e1530001 15c21b8a 15900f00
@@ -1343,6 +1378,38 @@ mod tests {
                             expected[0xb90] = 1;
                         }
                         assert_eq!(rtc_context_set_configuration_b35(&mut owner, value), 0);
+                        assert_eq!(core::slice::from_raw_parts(bytes, 0xb91), &expected);
+                        assert_eq!(owner.reserved, [0x19; 0xf00]);
+                        assert!(core::ptr::eq(owner.rtc_context, &context));
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn configuration_b78_preserves_equal_values_and_compares_before_truncating() {
+        let mut context: RtcContext = unsafe { core::mem::zeroed() };
+        let mut owner = RtcContextOwner {
+            reserved: [0x19; 0xf00],
+            rtc_context: &context,
+        };
+        for old in 0..=255u32 {
+            for value in [old, (old + 1) & 255, old | 0x100, u32::MAX] {
+                for dirty in [0, 1, 0x7e] {
+                    unsafe {
+                        let bytes = (&mut context as *mut RtcContext).cast::<u8>();
+                        core::ptr::write_bytes(bytes, 0xa5, 0xb91);
+                        bytes.add(0xb78).write(old as u8);
+                        bytes.add(0xb90).write(dirty);
+                        let mut expected = [0xa5; 0xb91];
+                        expected[0xb78] = old as u8;
+                        expected[0xb90] = dirty;
+                        if old != value {
+                            expected[0xb78] = value as u8;
+                            expected[0xb90] = 1;
+                        }
+                        rtc_context_set_configuration_b78(&mut owner, value);
                         assert_eq!(core::slice::from_raw_parts(bytes, 0xb91), &expected);
                         assert_eq!(owner.reserved, [0x19; 0xf00]);
                         assert!(core::ptr::eq(owner.rtc_context, &context));
