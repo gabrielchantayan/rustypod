@@ -245243,3 +245243,48 @@ functions:
       reversed equivalent signed compare, two direct BLs and a volatile
       indirect BLX copy. Error arguments, prefix clearing, right-aligned
       copy and returned length remain intact. No intentional symbol fold.
+
+  - address: 0x080628f0
+    ghidra: FUN_080628f0
+    name: rsa_padding_copy_exact
+    size: 84
+    sig: "i32 rsa_padding_copy_exact(u8 *dst, i32 dst_len, const u8 *src, i32 src_len)"
+    module: crypto/rsa_padding_copy_exact
+    status: ported
+    vars:
+      param_1/r0: dst
+      param_2/r1/ip: dst_len
+      param_3/r2/r1: src
+      param_4/r3/r2: src_len
+      uVar1/r2: reason
+    renames:
+      FUN_08049a84: diag_ring_record
+      thunk_EXT_FUN_22000020: __rt_memcpy
+    notes: >-
+      Raw A32 words establish [0x080628f0,0x08062944), 84 instruction
+      bytes with no literal pool; the next function starts with PUSH.
+      Two outbound plain BL instructions at 0x0806292c and 0x08062938,
+      zero predicated BL instructions. Independent whole-image word
+      decoding finds two inbound plain BL calls at 0x080c70f0 and
+      0x080cbc0c, zero predicated calls. RSA exact-length no-padding
+      encoding: signed src_len > dst_len records (4,0x6b,0x6e,0,0);
+      signed src_len < dst_len records (4,0x6b,0x7a,0,0). Both return
+      zero without buffer access. Equality copies src_len as u32 bytes
+      and returns one, including empty input. Negative equal lengths
+      remain large unsigned copy counts; no added validation. Both
+      callers select this path for padding mode three. Existing Rust
+      diag_ring_record and __rt_memcpy are reused, with no new seams.
+      Veneer words e51ff004/22000020 verify the IRAM mirror of the
+      0x08000020 copy body. Deliberate deviations: native host pointers
+      and volatile copy function pointer preventing builtin substitution.
+      Semantic name avoids collision with the existing rsa_padding_add_none
+      entry at 0x08062da4; no additional function is changed. Host tests
+      cover lengths 0..64, all byte alignments, source and neighboring
+      byte preservation, signed mismatch extremes, exact diagnostic
+      contents and zero-length NULL success. Full host suite and ARM
+      release build pass. Executable actual-port smoke passes misaligned
+      copy, sentinels, both signed error tags and empty success. match.py
+      exits 1: 21 stock versus 25 Rust entries, extra frame setup and
+      literal, equivalent signed branches, one direct diagnostic BL and
+      volatile indirect copy BLX. Return zero/one and all five diagnostic
+      arguments remain intact. No intentional symbol fold.
