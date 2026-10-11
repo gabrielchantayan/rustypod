@@ -16,6 +16,39 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080557c4
+    ghidra: FUN_080557c4
+    name: record_indexed_payload_lookup_at_0x380
+    size: 56
+    sig: "u32 record_indexed_payload_lookup_at_0x380(const u32 *record, void **payload_out, u32 *encoded_length_out)"
+    module: app/indexed_payload_lookup
+    status: ported
+    renames:
+      param_1/r0: record
+      param_2/r1: payload_out
+      param_3/r2: encoded_length_out
+      record_word_0: index_base
+      record_word_19: entry
+      FUN_0809e3d0: indexed_payload_lookup (ported)
+    notes: >-
+      Raw A32 words prove the 56-byte extent [0x080557c4,0x080557fc).
+      The next mov r2,r1 begins the separately entered counted-string wrapper.
+      Whole-image aligned decoding finds two inbound plain BLs at 0x0804593c
+      and 0x0804594c, zero predicated BLs, and one outbound plain BL at
+      0x080557e4 to indexed_payload_lookup. Load record word 19 and look up
+      the entry at word 0 plus 0x380; logically halve the optional encoded
+      length even on failure. Raw epilogue preserves backend status in r0,
+      correcting Ghidra's void signature. Caller compares two records; no
+      stronger field identity is assumed. Target pointer fields remain u32
+      on hosts and payload outputs use native pointers. Real-backend tests
+      cover odd/even/maximal live lengths, empty and invalid signed indices,
+      dead entries, inactive/tag-invalid indices, and independent NULL outputs.
+      All 15577 host tests pass and the ARM release build succeeds.
+      Standalone real-source smoke verifies length 9 becomes 4 and invalid
+      entry returns -50 with cleared outputs. match.py reports fourteen
+      instructions on both sides: word-19 load, +0x380 adjustment, lookup BL,
+      conditional logical shift/store, and status return are preserved;
+      LLVM uses a larger frame and different register allocation.
   - address: 0x080557fc
     ghidra: FUN_080557fc
     name: record_string_pool_read_counted_at_0x118
