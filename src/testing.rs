@@ -3578,6 +3578,8 @@ pub mod hints {
     pub const OBJECT_LIST_POP_FRONT: usize = 0x53d0_0000;
     // Fixed firmware buffer page used only by app/input_state_status_byte.
     pub const INPUT_STATE_STATUS_BYTE: usize = 0x08a7_7000;
+    // Dedicated secondary resource table fixture; mapping never unmapped.
+    pub const OBJECT_SELECT_SECONDARY_RESOURCE_INDEX: usize = 0x53e0_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span

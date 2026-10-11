@@ -814,6 +814,56 @@ pub unsafe extern "C" fn object_select_resource_index(object: *mut u8, index: i3
     0
 }
 
+/// object_select_secondary_resource_index — `FUN_080669d4` @ `0x080669d4`.
+/// True extent: 152 bytes, ending at the next PUSH at `0x08066a6c`.
+/// Verified calls: one inbound plain BL at `0x0813d9a0`, one inbound BLCC
+/// at `0x0813cdc4`; 12 outbound plain BLs and zero predicated outbound BLs.
+///
+/// Resolve the kind-1 backend or kind-2 proxy, reject negative indices or
+/// indices at/past the unsigned count at +0xf70 with -50, then load the
+/// u32 resource pointer from the table at +0xf6c into object+4. Unlike
+/// object_select_resource_index, object+8 is not changed. Activate with
+/// mode zero, perform the ten stock resets in order, and return zero,
+/// discarding activation and final callback-dispatch status.
+///
+/// Deliberate deviations: reuse existing Rust callees and the existing
+/// volatile operation seam for unported 0x08059700 (no new identity).
+/// Host activation uses the existing selection seam; target activation
+/// calls the canonical plst_resource_activate port directly. Rust preserves
+/// index across the resolver rather than relying on its preservation of r2.
+///
+/// # Safety
+/// `object` must satisfy object_backend_for_kind and all cleanup contracts;
+/// its backend has aligned u32 table/count fields at +0xf6c/+0xf70.
+/// Accepted indices require a readable u32 table entry and valid resource.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn object_select_secondary_resource_index(object: *mut u8, index: i32) -> i32 {
+    let backend = crate::ui::object_state::object_backend_for_kind(object);
+    if index < 0 || (index as u32) >= backend.add(0xf70).cast::<u32>().read() {
+        return RESOURCE_INDEX_OUT_OF_RANGE;
+    }
+    let table = backend.add(0xf6c).cast::<u32>().read() as usize as *const u32;
+    let resource = table.add(index as usize).read();
+    object.add(SELECTED_RESOURCE).cast::<u32>().write(resource);
+    let ops = core::ptr::read_volatile(core::ptr::addr_of!(OBJECT_SELECTION_OPS));
+    #[cfg(target_os = "none")]
+    let _ = crate::ui::plst_resource_activate::plst_resource_activate(resource as usize as *mut u8, 0);
+    #[cfg(not(target_os = "none"))]
+    (ops.activate_resource)(resource as usize as *mut u8, 0);
+    inner_release_buffer_and_reset_cursor(object);
+    inner_release_record_buffer_and_reset_cursor(object);
+    inner_clear_record_cache(object);
+    (ops.call_08059700)(object);
+    inner_clear_selection_cache(object);
+    inner_reset_transient_state(object);
+    inner_clear_16_byte_vector_cache(object);
+    inner_clear_index_cache(object);
+    inner_clear_cached_results(object);
+    let _ = inner_dispatch_selected_resource(object);
+    0
+}
+
 /// The callback-root field of an inner query resource. `repr(C)` preserves
 /// its target offset while using a host-width pointer in host fixtures.
 #[repr(C)]
@@ -2302,6 +2352,65 @@ mod tests {
             assert_eq!(object.add(RESULT_COUNT).cast::<u32>().read(), 0);
             assert_eq!(SELECTED_RESOURCE_RESOLVE_CALLS, 1);
             assert_eq!(SELECTED_RESOURCE_SELECT_CALLS, 0);
+        }
+    }
+
+    #[test]
+    fn secondary_resource_bounds_preserve_every_byte() {
+        let mut words = [0xa5a5_a5a5u32; 0xf74 / 4];
+        let object = words.as_mut_ptr().cast::<u8>();
+        unsafe {
+            object.write(1);
+            object.add(0xf70).cast::<u32>().write(3);
+        }
+        let before = words;
+        for index in [i32::MIN, -1, 3, i32::MAX] {
+            assert_eq!(unsafe { object_select_secondary_resource_index(object, index) }, -50);
+            assert_eq!(words, before);
+        }
+        unsafe { object.add(0xf70).cast::<u32>().write(0) };
+        let before = words;
+        assert_eq!(unsafe { object_select_secondary_resource_index(object, 0) }, -50);
+        assert_eq!(words, before);
+    }
+
+    #[test]
+    fn secondary_resource_selects_first_and_last_without_overwriting_primary_index() {
+        use crate::testing::{hints, note_missing_u32_fixture, try_map_u32_slab};
+        let _selection_guard = OBJECT_SELECTION_TEST_LOCK.lock();
+        let _dispatch_guard = SELECTED_RESOURCE_TEST_LOCK.lock();
+        let _selection_restore = install_object_selection_mocks();
+        let _dispatch_restore = install_selected_resource_mocks();
+        let Some(object) = try_map_u32_slab(hints::OBJECT_SELECT_SECONDARY_RESOURCE_INDEX, 0x2000) else {
+            assert!(note_missing_u32_fixture("util/inner_state::secondary_resource"));
+            return;
+        };
+        unsafe {
+            for index in [0, 2] {
+                core::ptr::write_bytes(object, 0, 0x2000);
+                object.write(1);
+                let table = object.add(0x1000).cast::<u32>();
+                table.write(0x1122_3344);
+                table.add(2).write(0x5566_7788);
+                object.add(0xf6c).cast::<u32>().write(table as usize as u32);
+                object.add(0xf70).cast::<u32>().write(3);
+                object.add(8).cast::<u32>().write(0x7654_3210);
+                object.add(RECORD_CURSOR_BEGIN).cast::<u32>().write(0x1000);
+                object.add(RECORD_CURSOR_END).cast::<u32>().write(0x1030);
+                object.add(RECORD_SELECTION).cast::<u16>().write(0xffff);
+                object.add(RESULT_COUNT).cast::<u32>().write(9);
+                object.add(CACHED_AUXILIARY).cast::<u32>().write(0xfeed_cafe);
+                assert_eq!(object_select_secondary_resource_index(object, index), 0);
+                assert_eq!(object.add(4).cast::<u32>().read(), table.add(index as usize).read());
+                assert_eq!(object.add(8).cast::<u32>().read(), 0x7654_3210);
+                assert_eq!(object.add(RECORD_CURSOR_END).cast::<u32>().read(), 0x1000);
+                assert_eq!(object.add(RECORD_SELECTION).cast::<u16>().read(), 0);
+                assert_eq!(object.add(RESULT_COUNT).cast::<u32>().read(), 0);
+                assert_eq!(object.add(CACHED_AUXILIARY).cast::<u32>().read(), 0xfeed_cafe);
+                for offset in [0xc, 0x14, 0x18, 0x1c, 0x20, 0x24, 0x28] {
+                    assert_eq!(object.add(offset).cast::<u32>().read(), u32::MAX);
+                }
+            }
         }
     }
 }
