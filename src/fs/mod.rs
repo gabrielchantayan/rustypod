@@ -1,5 +1,7 @@
 //! Filesystem-layer helpers (path handling, FAT-facing utilities,
 //! HFS B-tree node access).
+/// Data-backed stream context construction @ 0x0805b764.
+pub mod data_stream_context_create;
 /// Validated backing-stream read @ 0x0805b7cc.
 pub mod validated_file_read;
 /// Validated backing-stream write @ 0x0805b834.
