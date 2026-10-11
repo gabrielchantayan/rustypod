@@ -16,6 +16,40 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08066db4
+    ghidra: FUN_08066db4
+    name: rtc_context_set_configuration_b3c
+    size: 124
+    sig: "void rtc_context_set_configuration_b3c(const RtcContextOwner *owner, i32 value)"
+    module: time/rtc
+    status: ported
+    renames:
+      param_1/r0: owner
+      param_2/r1/r4: value
+      context+0xb3c: signed configuration byte
+      FUN_0805e66c: rtc_context_mark_dirty
+      FUN_0817ceb4: media_player_get
+    notes: >-
+      Raw extent [0x08066db4,0x08066e30), including literal 0xb3c at
+      0x08066e2c. Four outgoing plain BL instructions, zero predicated:
+      one dirty-marker call and three mutually exclusive player getters.
+      Signed byte comparison against full i32 precedes low-byte storage.
+      Reload context, mark dirty, then dispatch player slot +0x90 with
+      255 for -1, 1 for 1, otherwise 0. Product meaning is unrecovered.
+      Reuse canonical callees and existing registered RTC module.
+      Host vtable words widen while preserving target word indices;
+      virtual tail BX becomes a normal call. Canonical singleton's
+      documented constructor limitation is unchanged. Two incoming plain
+      BLs at 0x08113afc and 0x081711e0, zero predicated, independently
+      decoded across the raw image. Host suite and ARM release build pass.
+      Actual-source executable smoke confirms equal signed -1 bypass,
+      changed -1 and 1 notifications, and full-argument 255 mismatch.
+      match.py exits 1: 30 original instructions versus 23 Rust instructions;
+      LLVM combines the three exclusive getter calls and computes the
+      notification using CLZ and conditional MOV. Signed load, compare,
+      store, dirty call, singleton call and +0x90 tail BX are preserved.
+      Ghidra's 120-byte extent omits the literal; its two-call report is
+      not the outgoing instruction count.
   - address: 0x08066f54
     ghidra: FUN_08066f54
     name: rtc_context_set_configuration_index
