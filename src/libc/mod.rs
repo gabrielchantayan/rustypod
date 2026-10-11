@@ -4,6 +4,7 @@ pub mod bcopy_guarded;
 pub mod byte_copy;
 pub mod byte_copy_signed;
 pub mod byte_fill;
+pub mod backward_bool_fill;
 pub mod swap_byte_ranges;
 pub mod byte_ranges_equal;
 pub mod byte_range_is_spaces;
