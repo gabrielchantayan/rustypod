@@ -16,6 +16,31 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08053a8c
+    ghidra: FUN_08053a8c
+    name: ft_service_metadata_flags_at_b84
+    size: 12
+    sig: "u32 ft_service_metadata_flags_at_b84(const u8 *object)"
+    module: ft/service_metadata
+    status: ported
+    renames:
+      param_1/r0: object
+      return/r0: flags
+    notes: >-
+      Raw words e5900f00 e5900b84 e12fff1e establish extent
+      [0x08053a8c,0x08053a98); next function starts with push {r4,r5,r6,lr}.
+      Whole-image aligned A32 decoding counts two plain inbound BLs at
+      0x08172728 and 0x081729d0, zero predicated inbound BLs, and no outgoing
+      BLs. Follow object+0xf00 and return the complete word at metadata+0xb84.
+      Callers test, set, and clear selected bits; concrete bit meanings remain
+      unrecovered. No callee seams, NULL checks, or bounds checks. Native-width
+      host pointers retain the offset; target pointers remain four bytes.
+      Tests cover zero, all bits, sign-bit values, every single bit, live
+      updates, pointer replacement, and unchanged surrounding storage.
+      Host suite and ARM release build pass. Actual-source standalone smoke
+      returns 00000000,80000001,ffffffff. match.py exits 1: both ldr offsets
+      match exactly; LLVM adds frame setup and returns via pop {fp,pc} rather
+      than bx lr. No algorithm changes.
   - address: 0x08053d54
     ghidra: FUN_08053d54
     name: tdat_node_next
