@@ -16,6 +16,28 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08056234
+    ghidra: FUN_08056234
+    name: record_words_to_halfwords
+    size: 60
+    sig: "u32 record_words_to_halfwords(const u32 *words, u16 *halfwords)"
+    module: fs/record_words_to_halfwords
+    status: ported
+    vars: {param_1/r0/r2: words, param_2/r1: halfwords, r3: word, r0_return: status}
+    notes: >-
+      Raw A32 establishes [0x08056234,0x08056270), ending in BX LR;
+      the next real function is MOV r0,#0 / BX LR at 0x08056270.
+      Whole-image aligned BL decoding independently finds two incoming
+      plain calls at 0x0804762c and 0x0806c9c0, zero predicated incoming
+      calls, and zero outgoing calls. Six ordered LDR/STRH pairs narrow
+      aligned words to low halfwords, then return zero. Filesystem callers
+      use twelve-byte output records on their 0x4244 path; a more specific
+      record identity is unproven. No seams or behavioral deviations.
+      Volatile accesses preserve sequential overlapping-buffer behavior.
+      Host tests cover truncation, output guards and both overlap directions.
+      Full host suite and ARM build-std release build pass. Standalone smoke
+      returns zero and the expected six halfwords with guards intact.
+      match.py exits 1: 15 original versus 16 Rust instructions; six ordered
   - address: 0x080562ec
     ghidra: FUN_080562ec
     name: system_mode_enabled
