@@ -16,6 +16,34 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080538b0
+    ghidra: FUN_080538b0
+    name: ft_service_metadata_class_one_mask
+    size: 12
+    sig: "u32 ft_service_metadata_class_one_mask(const u8 *object)"
+    module: ft/service_metadata
+    status: ported
+    renames:
+      param_1/r0: object
+      return/r0: class_one_mask
+    notes: >-
+      Raw words e5900f00 e5900b8c e12fff1e establish the true extent
+      [0x080538b0,0x080538bc); next function starts with push {r4-r10,lr}.
+      Independent whole-image aligned A32 decoding finds two plain inbound
+      BLs at 0x08172588 and 0x0817264c, zero predicated inbound BLs,
+      and zero outgoing BLs of either kind. Follow object+0xf00 and return
+      the full class-one event mask at metadata+0xb8c. Callers inspect and
+      modify selected bits; individual bit meanings remain unrecovered.
+      Reuse the registered ft/service_metadata module and replace the
+      controller query's fixed-address seam with this Rust accessor.
+      Native-width host pointers preserve offsets; ARM pointers remain
+      four bytes. No added NULL or bounds checks. Host edge tests cover
+      zero, all bits, high-bit values, mixed bits, pointer replacement,
+      and unchanged surrounding storage. Actual-source standalone smoke
+      returns 00000000,80000001,ffffffff. Host suite and ARM release build
+      pass. match.py exits 1: both aligned ldr offsets match exactly;
+      LLVM adds push {fp,lr}, mov fp,sp and pop {fp,pc} instead of bx lr.
+      No algorithm changes or callee dependencies.
   - address: 0x080539f0
     ghidra: FUN_080539f0
     name: context_text_to_counted_u16

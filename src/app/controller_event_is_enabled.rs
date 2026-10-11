@@ -9,9 +9,9 @@
 //!
 //! # Deliberate deviations
 //!
-//! Device builds invoke three verified retail addresses and the Rust event
-//! classifier. Host builds use a volatile operation seam for call observation;
-//! the default classifier is shared with device builds.
+//! Device builds invoke two verified retail addresses, the Rust event
+//! classifier, and the Rust class-one mask accessor. Host builds use a volatile
+//! operation seam for call observation; the classifier is shared with device builds.
 
 use core::ptr;
 
@@ -39,8 +39,7 @@ unsafe extern "C" fn firmware_class_zero_mask(input_state: u32) -> u32 {
 
 #[cfg(target_os = "none")]
 unsafe extern "C" fn firmware_class_one_mask(input_state: u32) -> u32 {
-    let function: unsafe extern "C" fn(u32) -> u32 = unsafe { core::mem::transmute(0x0805_38b0usize) };
-    unsafe { function(input_state) }
+    unsafe { crate::ft::service_metadata::ft_service_metadata_class_one_mask(input_state as *const u8) }
 }
 
 #[cfg(not(target_os = "none"))]
