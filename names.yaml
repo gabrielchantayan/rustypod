@@ -16,6 +16,44 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08055718
+    ghidra: FUN_08055718
+    name: record_string_pool_read_counted_at_0x118_word11
+    size: 20
+    sig: "i32 record_string_pool_read_counted_at_0x118_word11(const u32 *record, u16 *counted)"
+    module: util/string_pool
+    status: ported
+    renames:
+      param_1/r0: record
+      param_2/r1: counted
+      record[0]: owner
+      record[11]: entry_id
+      FUN_080bd8bc: string_pool_read_counted (ported)
+    notes: >-
+      Raw words e1a02001 e590102c e5900000 e2800f46 ea01a063 establish
+      the exact 20-byte extent [0x08055718,0x0805572c); the next function
+      starts with push {r4,lr}. Whole-image aligned ARM decoding finds two
+      inbound plain BLs at 0x080462f4 and 0x082a3e58, no predicated BLs,
+      no body BLs, and an inbound conditional tail B at 0x080558bc.
+      Select signed record word 11 in owner word zero's pool at +0x118
+      and tail-call the existing counted reader at 0x080bd8bc. Copy at
+      most 510 bytes after the u16 prefix, store floor(copied_bytes/2),
+      and preserve backend status. Ghidra incorrectly expands the tail
+      callee into a four-argument void function. Deliberate deviation:
+      zero untouched incoming r3, whose initial length the reader clears
+      before validation. Pointer fields remain target-width u32 on hosts.
+      Real-backend regression covers odd lengths, 510-byte clipping, zero
+      and invalid signed IDs, empty/dead entries, invalid tags, untouched
+      trailing bytes, and balanced lock depth. All 15580 host tests pass;
+      ARM build-std release build passes. Standalone real-source smoke
+      verifies status 0/count 2 for five bytes, untouched tail, and status
+      -50/count 0 for ID -1. Full non-test host library compilation fails
+      on four existing E0425 errors unrelated to this port, so the smoke
+      compiles the actual wrapper, reader, tag and live-entry sources in
+      isolation and uses host libc bcopy. match.py exit-1 diff reviewed:
+      five original versus nine Rust instructions preserve word-11 load,
+      +0x118 adjustment and backend tail branch; LLVM adds frame setup,
+      reorders the owner load, and explicitly clears r3. No symbol folding.
   - address: 0x08055778
     ghidra: FUN_08055778
     name: record_indexed_payload_lookup_at_0x3d8
