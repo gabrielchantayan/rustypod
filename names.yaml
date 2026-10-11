@@ -245353,3 +245353,42 @@ functions:
       match.py reports 40 instructions versus 22: LLVM unrolls eight
       entropy reads into aligned word stores, then dispatches, poisons,
       and returns 1. Relocations confirm the reused Rust callee targets.
+
+  - address: 0x08061d1c
+    ghidra: thunk_FUN_08087594
+    name: queue_insert_veneer
+    size: 4
+    sig: "i32 queue_insert_veneer(u8 *owner, i32 index, u8 *entry)"
+    module: app/queue_insert_veneer
+    status: ported
+    vars:
+      param_1/r0: owner
+      param_2/r1: index
+      param_3/r2: entry
+    notes: >-
+      Raw A32 word ea00961c tail-branches to 0x08087594. True extent
+      [0x08061d1c,0x08061d20) ends at the next independent PUSH.
+      Whole-image raw decoding finds two incoming plain BLs at 0x0817a2a0
+      and 0x082268c4, zero predicated incoming BLs and zero outgoing BLs.
+      Ghidra incorrectly presents the target's entire body at this veneer.
+      Preserve all three arguments and the signed result. Verified target
+      0x08087594 has no canonical registry entry or existing Rust port;
+      retain its absolute retail address, not an invented callee identity.
+      Target code rejects unavailable or over-capacity queues with -41,
+      inserts through a stack queue object, optionally notifies the player,
+      sets a dirty byte, destroys the stack object and returns zero.
+      Index -1 selects collection insertion; other indices select one entry.
+      LLVM may replace the stock direct tail B with an absolute-address
+      call and return. Host execution is unsupported; retail globals and
+      virtual dispatch are not simulated. No forwarding-only permanent
+      tests are added. Host suite, ARM release build, mnemonic comparison
+      and compiled-ARM execution smoke are the verification gates.
+      All gates executed: cargo test --target x86_64-unknown-linux-gnu
+      and cargo build -Z build-std=core --release exit zero. Compiled ARM
+      smoke matches the raw branch in 144 boundary combinations: zero,
+      unaligned and full-width pointer bits; index zero, -1, INT_MIN and
+      INT_MAX; result zero, -41, INT_MIN and INT_MAX. SP and callee-saved
+      registers are preserved. This exercises the veneer, not the stock
+      queue implementation. match.py exits 1: original B versus a 24-byte
+      PUSH/MOV/LDR/POP/BX plus target literal. Frame is restored before
+      BX; all arguments and the caller's LR survive. No intentional fold.
