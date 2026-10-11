@@ -246110,3 +246110,39 @@ functions:
       and remove its obsolete seam. Host suite and ARM release build pass.
       Exported-path finite-stream smoke verifies both modes, short-read
       errors, preserved buffer tail, zero length and invalid arguments.
+
+  - address: 0x0805991c
+    ghidra: FUN_0805991c
+    name: linked_list_invalidate_payload
+    size: 96
+    sig: "void linked_list_invalidate_payload(LinkedListHeader *list, u8 *payload)"
+    module: util/linked_list_find_and_promote
+    status: ported
+    renames:
+      param_1: list
+      param_2: payload
+      piVar1: entry
+      piVar2: old_back
+    notes: >-
+      Raw A32 establishes [0x0805991c,0x0805997c), 96 bytes, ending
+      before the next independent PUSH prologue. Whole-image aligned word
+      decoding finds one plain inbound BL at 0x081bff58 and one inbound
+      BLEQ at 0x081c0044; no outbound plain or predicated BLs. Recover
+      the entry at payload minus 20, clear its state at +8 and set its
+      key at +12 to 0xffffffff. If already the back entry, retain links.
+      Otherwise unlink it, repair the next entry's previous link and
+      either the front or previous entry's next link, then append it
+      after the old back. Preserve payload state/data and list accounting.
+      Reuse canonical LinkedListHeader and LinkedListEntry repr(C) layouts
+      and compute the payload offset from the layout for native host
+      pointers. No new callees, seams or deliberate behavioral deviations.
+      Host edge coverage includes singleton and every position in lists
+      of two through four entries, repeated invalidation, bidirectional
+      links, untouched entries and payload preservation. Standalone smoke
+      exercises lookup, invalidation, lookup miss and tail recycling.
+      Full host suite passes (15545 tests), and ARM release build passes.
+      match.py exits 1 with 24 instructions on both sides: LLVM changes
+      register allocation, uses BXEQ for the existing-tail return and a
+      frame-pointer save on the relink path, and reorders independent
+      final link stores. Metadata clearing, tail comparison, conditional
+      front/previous repair and append structure are retained.
