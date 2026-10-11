@@ -16,6 +16,31 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08053e40
+    ghidra: FUN_08053e40
+    name: ft_service_metadata_u16_at_b06
+    size: 16
+    sig: "uint16_t ft_service_metadata_u16_at_b06(const uint8_t *service_context)"
+    module: ft/service/metadata
+    status: ported
+    renames:
+      param_1/r0: service_context
+      return/r0: metadata_halfword
+    notes: >-
+      Raw words e5900f00 e2800c0b e1d000b6 e12fff1e establish the true
+      extent [0x08053e40,0x08053e50), ending at the next push-based function.
+      Whole-image aligned A32 decoding finds two plain inbound BLs at
+      0x08172ce4 and 0x08172cf8, zero predicated inbound BLs, and zero
+      outgoing BLs of either kind. Follow the aligned pointer at context
+      +0xf00 and zero-extend the halfword at metadata+0xb06. FUN_08172c6c
+      compares/caches it at caller+0x4c; higher-level meaning is unknown.
+      No callee seams or NULL/bounds checks. Native-width host pointers
+      preserve the offset; ARM pointers remain four bytes. Tests cover
+      every halfword value, live updates, pointer replacement and decoys.
+      All 15616 host tests and ARM release build pass. Standalone smoke
+      returns 0,4660,32768,65535 for 0000,1234,8000,ffff. match.py exits 1:
+      LLVM adds frame setup/teardown and constructs +0xb06 with mov/orr
+      for register-offset ldrh; both loads retain the original semantics.
   - address: 0x0805413c
     ghidra: thunk_FUN_080865e0
     name: ui_fixed_index_limit

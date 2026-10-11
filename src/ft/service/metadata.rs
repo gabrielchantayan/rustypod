@@ -8,6 +8,8 @@
 pub const SERVICE_CONTEXT_METADATA_OFFSET: usize = 0xf00;
 /// Byte offset of this unsigned halfword in the metadata block.
 pub const METADATA_U16_B1C_OFFSET: usize = 0xb1c;
+/// Byte offset of this unsigned halfword in the metadata block.
+pub const METADATA_U16_B06_OFFSET: usize = 0xb06;
 /// Byte offset of this byte in the metadata block.
 pub const METADATA_BYTE_B1A_OFFSET: usize = 0xb1a;
 /// Byte offset of this signed byte in the metadata block.
@@ -229,6 +231,53 @@ pub unsafe extern "C" fn ft_service_metadata_u16_at_b1c(service_context: *const 
     let metadata = (service_context.add(SERVICE_CONTEXT_METADATA_OFFSET) as *const *const u8).read();
     let metadata_b00 = metadata.add(0xb00);
     (metadata_b00.add(0x1c) as *const u16).read()
+}
+
+/// ft_service_metadata_u16_at_b06 — original: `FUN_08053e40` @ `0x08053e40`.
+///
+/// True extent [0x08053e40, 0x08053e50), 16 bytes, ending at the next
+/// independent push-based function. Raw words are `e5900f00 e2800c0b
+/// e1d000b6 e12fff1e`. Two plain inbound BLs at 0x08172ce4 and 0x08172cf8,
+/// zero predicated inbound BLs, zero outgoing BLs of either kind.
+/// Follow the aligned metadata pointer at context+0xf00 and zero-extend
+/// the halfword at metadata+0xb06. The caller compares/caches it at +0x4c;
+/// its higher-level meaning remains unknown.
+/// Deliberate deviations: native-width host pointers, four-byte ARM pointers;
+/// no additional NULL or bounds checks.
+///
+/// # Safety
+/// `service_context` must contain an aligned readable metadata pointer at
+/// +0xf00, whose pointee has an aligned readable halfword at +0xb06.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn ft_service_metadata_u16_at_b06(service_context: *const u8) -> u16 {
+    let metadata = (service_context.add(SERVICE_CONTEXT_METADATA_OFFSET) as *const *const u8).read();
+    (metadata.add(METADATA_U16_B06_OFFSET) as *const u16).read()
+}
+
+#[cfg(test)]
+mod b06_tests {
+    use super::*;
+
+    #[test]
+    fn unsigned_halfword_live_updates_and_pointer_replacement() {
+        let mut owner = [0usize; 0xf00 / core::mem::size_of::<usize>() + 1];
+        let mut metadata = [0xa55au16; 0xb08 / 2];
+        let other = [0x1234u16; 0xb08 / 2];
+        let context = owner.as_mut_ptr().cast::<u8>();
+        unsafe {
+            context.add(0xf00).cast::<*const u8>().write(metadata.as_ptr().cast());
+            for value in 0..=u16::MAX {
+                metadata[0xb06 / 2] = value;
+                assert_eq!(ft_service_metadata_u16_at_b06(context), value);
+            }
+            context.add(0xf00).cast::<*const u8>().write(other.as_ptr().cast());
+            assert_eq!(ft_service_metadata_u16_at_b06(context), 0x1234);
+            context.add(0xf00).cast::<*const u8>().write(metadata.as_ptr().cast());
+            assert_eq!(ft_service_metadata_u16_at_b06(context), u16::MAX);
+        }
+        assert!(metadata[..0xb06 / 2].iter().all(|&word| word == 0xa55a));
+    }
 }
 
 /// ft_service_metadata_byte_at_b1a — original: `FUN_08054f68` @ `0x08054f68`
