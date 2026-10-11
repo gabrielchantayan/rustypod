@@ -1,5 +1,7 @@
 //! Filesystem-layer helpers (path handling, FAT-facing utilities,
 //! HFS B-tree node access).
+/// Release an HFS/HFS+ extent record @ 0x0806451c.
+pub mod hfs_extent_record_release;
 /// HFS/HFS+ extent-record logical-block lookup @ 0x080660b8.
 pub mod hfs_extent_find_block;
 /// HFS volume encoding bitmap update @ 0x0806d8ac.
