@@ -90,30 +90,19 @@ unsafe fn backing_stream_tell() -> BackingStreamTellFn {
     core::ptr::read_volatile(core::ptr::addr_of!(BACKING_STREAM_TELL))
 }
 
-/// ABI of the unported backing-stream write helper at `0x0805b834`.
+/// ABI of the ported backing-stream write helper at `0x0805b834`.
 pub type BackingStreamWriteFn =
     unsafe extern "C" fn(io_context: u32, transferred: *mut u32, data: u32) -> i32;
 
 /// ABI of the unported backing-stream seek helper at `0x0805b804`.
 pub type BackingStreamSeekFn = unsafe extern "C" fn(io_context: u32, position: u64) -> i32;
 
-#[cfg(target_os = "none")]
 unsafe extern "C" fn firmware_backing_stream_write(
     io_context: u32,
     transferred: *mut u32,
     data: u32,
 ) -> i32 {
-    let write: BackingStreamWriteFn = core::mem::transmute(0x0805b834usize);
-    write(io_context, transferred, data)
-}
-
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn firmware_backing_stream_write(
-    _io_context: u32,
-    _transferred: *mut u32,
-    _data: u32,
-) -> i32 {
-    panic!("ft_buffered_stream_flush requires backing write 0x0805b834")
+    crate::validated_file_write::validated_file_write(io_context as *const u32, transferred, data)
 }
 
 #[cfg(target_os = "none")]
@@ -127,9 +116,8 @@ unsafe extern "C" fn firmware_backing_stream_seek(_io_context: u32, _position: u
     panic!("ft_buffered_stream_flush requires backing seek 0x0805b804")
 }
 
-/// Host-replaceable direct calls retained as volatile seams. The two helpers
-/// are unported in `names.yaml`; target builds invoke their verified retailOS
-/// entries.
+/// Host-replaceable calls retained as volatile seams. The writer invokes its
+/// Rust port; the unported seek invokes its verified retailOS entry on target.
 pub static mut BACKING_STREAM_WRITE: BackingStreamWriteFn = firmware_backing_stream_write;
 pub static mut BACKING_STREAM_SEEK: BackingStreamSeekFn = firmware_backing_stream_seek;
 
@@ -393,10 +381,10 @@ pub(crate) static BUFFERED_STREAM_FINALIZE_TEST_LOCK: parking_lot::Mutex<()> =
 /// resets the buffered cursor range, including after a write error; input mode
 /// resets it only after both backing operations succeed.
 ///
-/// Deliberate deviation: the unported backing write at `0x0805b834` and seek
-/// at `0x0805b804` are volatile dispatch seams on host and indirect calls to
-/// their verified retailOS entries on target. Rust explicitly preserves the
-/// ARM signed comparison and wrapping subtraction for output spans.
+/// Deliberate deviation: backing write and seek are volatile dispatch seams
+/// on host. Target writes use the Rust port; seeks retain the retailOS entry
+/// at `0x0805b804`. Rust explicitly preserves the ARM signed comparison and
+/// wrapping subtraction for output spans.
 ///
 /// # Safety
 ///
