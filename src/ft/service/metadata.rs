@@ -18,6 +18,8 @@ pub const METADATA_SIGNED_BYTE_B52_OFFSET: usize = 0xb52;
 
 /// Byte offset of this byte in the metadata block.
 pub const METADATA_BYTE_B89_OFFSET: usize = 0xb89;
+/// Byte offset of this unsigned byte in the metadata block.
+pub const METADATA_BYTE_B8A_OFFSET: usize = 0xb8a;
 /// Byte offset of this byte in the metadata block.
 pub const METADATA_BYTE_B70_OFFSET: usize = 0xb70;
 
@@ -133,6 +135,30 @@ pub unsafe extern "C" fn ft_service_metadata_byte_at_b89(
     (metadata.add(METADATA_BYTE_B89_OFFSET) as *const u8).read() as u32
 }
 
+/// ft_service_metadata_byte_at_b8a — original: `FUN_08054f90` @ `0x08054f90`
+/// (12 bytes; two plain inbound `bl` call sites, zero predicated inbound
+/// `bl` call sites; zero outgoing BLs).
+///
+/// Raw words `e5900f00 e5d00b8a e12fff1e` decode to
+/// `ldr r0,[r0,#0xf00]; ldrb r0,[r0,#0xb8a]; bx lr`. The next real function
+/// begins at 0x08054f9c with a push and BL. Follow the context's metadata
+/// pointer and zero-extend the byte at +0xb8a into r0. Callers at 0x08173574
+/// and 0x08173588 compare/cache the byte; its meaning remains unrecovered.
+/// Deliberate deviations: native-width pointers on hosts, target-width on
+/// ARM; no additional NULL or bounds checks.
+///
+/// # Safety
+/// `service_context` must contain an aligned readable metadata pointer at
+/// +0xf00, whose pointee is readable through +0xb8a.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn ft_service_metadata_byte_at_b8a(
+    service_context: *const u8,
+) -> u32 {
+    let metadata = (service_context.add(SERVICE_CONTEXT_METADATA_OFFSET) as *const *const u8).read();
+    metadata.add(METADATA_BYTE_B8A_OFFSET).read() as u32
+}
+
 /// ft_service_metadata_byte_at_b70 — original: `FUN_08054fb0` @ `0x08054fb0`
 /// (12 bytes; four unconditional `bl` call sites, zero predicated `bl` call
 /// sites, binary-scanned).
@@ -222,6 +248,31 @@ mod tests {
     struct ServiceContextFixture {
         before_metadata: [u8; SERVICE_CONTEXT_METADATA_OFFSET],
         metadata: *const u8,
+    }
+
+    #[test]
+    fn b8a_returns_every_unsigned_byte_without_touching_neighbors() {
+        use super::{ft_service_metadata_byte_at_b8a, METADATA_BYTE_B8A_OFFSET};
+        let mut metadata = [0xa5u8; METADATA_BYTE_B8A_OFFSET + 1];
+        let mut other = [0x5au8; METADATA_BYTE_B8A_OFFSET + 1];
+        let mut context = ServiceContextFixture {
+            before_metadata: [0x3c; SERVICE_CONTEXT_METADATA_OFFSET],
+            metadata: metadata.as_ptr(),
+        };
+        for value in 0..=255u8 {
+            metadata[METADATA_BYTE_B8A_OFFSET] = value;
+            let result = unsafe {
+                ft_service_metadata_byte_at_b8a((&context as *const ServiceContextFixture).cast())
+            };
+            assert_eq!(result, u32::from(value));
+            assert!(metadata[..METADATA_BYTE_B8A_OFFSET].iter().all(|&byte| byte == 0xa5));
+        }
+        other[METADATA_BYTE_B8A_OFFSET] = 0x81;
+        context.metadata = other.as_ptr();
+        assert_eq!(unsafe {
+            ft_service_metadata_byte_at_b8a((&context as *const ServiceContextFixture).cast())
+        }, 0x81, "follow the current pointer rather than a cached metadata block");
+        assert!(context.before_metadata.iter().all(|&byte| byte == 0x3c));
     }
 
     #[repr(align(4))]
