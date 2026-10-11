@@ -16,6 +16,36 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08067478
+    ghidra: FUN_08067478
+    name: object_backend_set_primary_control_byte
+    size: 20
+    sig: "void object_backend_set_primary_control_byte(void *object, uint32_t value)"
+    module: ui/object_backend_set_control_byte
+    status: ported
+    renames:
+      param_1/r0: object
+      param_2/r1/r2: value
+      FUN_08051dc4: object_backend_for_kind
+    notes: >-
+      Raw words e1a02001 e52de004 ebffaa4f e5c02f4c e49df004 establish
+      [0x08067478,0x0806748c), 20 bytes; next function begins with PUSH.
+      Whole-image A32 decoding finds two plain inbound BLs at 0x08230dac
+      and 0x08230e5c, no predicated callers, one plain outbound BL to
+      canonical object_backend_for_kind at 0x08051dc4 and no predicated BLs.
+      Resolve kind-1 self or kind-2 proxy and unconditionally overwrite
+      backend+0xf4c with the low byte of value. Callers supply 1 and 0.
+      Primary distinguishes this byte from adjacent control byte +0xf4d;
+      higher-level field meaning remains unknown. Rust preserves value via
+      its normal ABI rather than relying on r2 surviving the resolver.
+      Reuse existing resolver and registered module; host proxies follow
+      its aligned host-width pointer seam, target fields remain four bytes.
+      Tests cover truncation, clearing, proxy resolution and preservation
+      of every other byte. Host suite and ARM release build pass.
+      Standalone source smoke verifies truncation, clearing and adjacency.
+      match.py exits 1 with six versus five instructions: LLVM adds frame
+      setup and preserves value in r4 instead of r2; resolver call and
+      unconditional STRB at +0xf4c remain.
   - address: 0x0806748c
     ghidra: FUN_0806748c
     name: clock_state_commit
