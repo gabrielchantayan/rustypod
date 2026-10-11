@@ -16,6 +16,30 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08054f84
+    ghidra: FUN_08054f84
+    name: ft_service_metadata_byte_at_b4f
+    size: 12
+    sig: "uint32_t ft_service_metadata_byte_at_b4f(const uint8_t *service_context)"
+    module: ft/service/metadata
+    status: ported
+    renames:
+      param_1/r0: service_context
+      return/r0: metadata_byte
+    notes: >-
+      Raw words e5900f00 e5d00b4f e12fff1e establish the true extent
+      [0x08054f84,0x08054f90); the next boundary is a separately called
+      metadata accessor. Whole-image aligned decoding finds two plain
+      inbound BLs at 0x08173238 and 0x0817324c, zero predicated inbound
+      BLs, and zero outgoing BLs. Follow the aligned metadata pointer at
+      context+0xf00 and zero-extend its byte at +0xb4f. The caller compares
+      and caches the byte at caller+0x84; its meaning remains unknown.
+      No new seams, NULL guards, or bounds checks. Native host pointers
+      retain the target field offset; ARM pointers remain four bytes.
+      Host tests cover all 256 byte values, adjacent-byte preservation,
+      and replacement of the metadata pointer. Host suite and ARM release
+      build pass; standalone smoke returns 254. match.py exit-1 diff
+      preserves both loads and offsets; LLVM adds frame setup/teardown.
   - address: 0x08054f90
     ghidra: FUN_08054f90
     name: ft_service_metadata_byte_at_b8a
