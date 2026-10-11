@@ -1380,3 +1380,4 @@ pub mod directory_visit;
 pub mod file_descriptor_export;
 pub mod pending_release_get;
 pub mod pending_release_clear;
+pub mod opaque_collection_mask;
