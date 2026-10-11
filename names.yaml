@@ -247949,3 +247949,36 @@ functions:
       vector count call replace conditional tail branch. Relocations
       verify JUMP24 object_collection_size and CALL vector_size_elem24;
       no intentional symbol fold.
+
+  - address: 0x08053afc
+    ghidra: FUN_08053afc
+    name: entry_match_advance
+    size: 24
+    sig: "u32 entry_match_advance(const u8 *container, const u8 *entry)"
+    module: app/entry_match_advance
+    status: ported
+    renames:
+      param_1/r0: container
+      param_2/r1: entry
+      FUN_080522bc: entry_match_first
+      FUN_08053bb8: entry_match_successor
+    notes: >-
+      Raw words e3500000 012fff1e e3510000 11a00001 1a000029 0afff9e9
+      establish the exact 24-byte extent 0x08053afc..0x08053b14; the next
+      real function begins with push {r4,lr}. Whole-image aligned ARM BL
+      decoding finds two inbound plain BLs at 0x081a8d18 and 0x081a8e5c,
+      zero predicated BLs. The body has zero plain or predicated BLs and
+      two predicated tail branches: BNE to entry_match_successor at
+      0x08053bb8 and BEQ to entry_match_first at 0x080522bc. NULL container
+      returns zero without inspecting entry. Otherwise NULL entry selects
+      the first entry; non-NULL entry selects its successor without reading
+      container. Cursor callers 0x081a8cf4 and 0x081a8db0 use this to
+      continue or begin traversal. Ghidra's unreachable blocks are not part
+      of this function. Deliberate deviation: reuse the canonical Rust
+      selector ports rather than stock-address branches. Host edge tests
+      and full host suite pass; ARM build-std release succeeds. Actual-source
+      standalone smoke selects a first entry, returns successor 0x80000001,
+      and returns zero for NULL container and rejected class. match.py exits
+      1: six original versus thirteen Rust instructions; LLVM adds frame
+      setup and explicit zero return while retaining both selector tail
+      branches and the container gate. No device execution.
