@@ -280,6 +280,37 @@ pub unsafe extern "C" fn record_indexed_payload_lookup_at_0x278(
     status
 }
 
+/// record_indexed_payload_lookup_at_0x2d0 — `FUN_08055a58` @ `0x08055a58`.
+///
+/// True size: 56 bytes, ending at the next wrapper's `mov r2,r1` at
+/// 0x08055a90. Raw words verify two inbound plain BLs (0x08045854 and
+/// 0x08045864), one outbound plain BL at 0x08055a78, and no predicated BLs.
+/// Reads record word 17, looks it up at index base +0x2d0, logically halves
+/// the optional encoded length even on failure, and returns lookup status.
+///
+/// Deliberate deviations: target pointer fields remain u32 on hosts; output
+/// pointers use native width. Calls the existing ported backend directly.
+///
+/// # Safety
+/// Record must contain eighteen readable aligned target words. Word zero
+/// must address a base whose +0x2d0 index satisfies the lookup contract.
+/// Optional outputs must be writable and not alias input storage.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn record_indexed_payload_lookup_at_0x2d0(
+    record: *const u32,
+    payload_out: *mut *mut u8,
+    encoded_length_out: *mut u32,
+) -> u32 {
+    let index_base = record.read() as usize as *mut u8;
+    let entry = record.add(17).read();
+    let status = indexed_payload_lookup(index_base.add(0x2d0), entry, payload_out, encoded_length_out);
+    if !encoded_length_out.is_null() {
+        encoded_length_out.write(encoded_length_out.read() >> 1);
+    }
+    status
+}
+
 /// record_indexed_payload_lookup_at_0xc0 — `FUN_08055aa4` @ `0x08055aa4`.
 ///
 /// True size: 56 bytes, ending at the next wrapper's `mov ip,r1` at
@@ -403,6 +434,62 @@ mod tests {
     use crate::testing::{hints, note_missing_u32_fixture, try_map_u32_slab};
     use crate::util::crts_tag::CRTS_TAG;
     use core::ptr;
+
+    #[test]
+    fn record_2d0_live_empty_invalid_and_optional_outputs() {
+        unsafe {
+            let Some(slab) = try_map_u32_slab(hints::RECORD_INDEXED_PAYLOAD_LOOKUP_2D0, 4096) else {
+                note_missing_u32_fixture("record_indexed_payload_lookup_at_0x2d0");
+                return;
+            };
+            ptr::write_bytes(slab, 0, 4096);
+            let index = slab.add(0x2d0).cast::<u32>();
+            let record = slab.add(0x500).cast::<u32>();
+            let handles = slab.add(0x600).cast::<u32>();
+            let table = slab.add(0x700).cast::<u32>();
+            record.write(slab as usize as u32);
+            index.write(CRTS_TAG);
+            index.add(2).write(handles as usize as u32);
+            index.add(4).write(handles.add(1) as usize as u32);
+            index.add(7).write(1);
+            index.add(12).write(1);
+            handles.write(table as usize as u32);
+            handles.add(1).write(slab.add(0x800) as usize as u32);
+            table.write(3);
+            for (entry, length, status, decoded) in [
+                (1, 7, 0, 3), (1, 8, 0, 4), (1, 1, 0, 0),
+                (1, 0x7fff_ffff, 0, 0x3fff_ffff), (0, 7, 0, 0),
+                (2, 7, 0xffff_ffce, 0), (u32::MAX, 7, 0xffff_ffce, 0),
+                (0x8000_0000, 7, 0xffff_ffce, 0),
+                (1, 0, 0xffff_ffce, 0), (1, u32::MAX, 0xffff_ffce, 0),
+            ] {
+                record.add(17).write(entry);
+                table.add(1).write(length);
+                let expected = if entry == 1 && status == 0 { slab.add(0x803) } else { ptr::null_mut() };
+                for omitted in 0..4 {
+                    let mut payload = ptr::dangling_mut::<u8>();
+                    let mut count = u32::MAX;
+                    let payload_out = if omitted & 1 == 0 { &mut payload } else { ptr::null_mut() };
+                    let length_out = if omitted & 2 == 0 { &mut count } else { ptr::null_mut() };
+                    assert_eq!(record_indexed_payload_lookup_at_0x2d0(record, payload_out, length_out), status);
+                    if omitted & 1 == 0 { assert_eq!(payload, expected); }
+                    if omitted & 2 == 0 { assert_eq!(count, decoded); }
+                }
+            }
+            record.add(17).write(1);
+            table.add(1).write(7);
+            for (tag, active, offset) in [(CRTS_TAG, 0, 3), (0, 1, 3), (CRTS_TAG, 1, 0x8000_0000)] {
+                index.write(tag);
+                index.add(12).write(active);
+                table.write(offset);
+                let mut payload = ptr::dangling_mut::<u8>();
+                let mut count = 99;
+                assert_eq!(record_indexed_payload_lookup_at_0x2d0(record, &mut payload, &mut count), 0xffff_ffce);
+                assert_eq!(payload, ptr::null_mut());
+                assert_eq!(count, 0);
+            }
+        }
+    }
 
 
     #[test]

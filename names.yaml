@@ -51726,6 +51726,40 @@ functions:
       signed indices, live entries, output clearing, zero-mode rejection,
       and NULL optional outputs; obsolete mock forwarding tests are removed.
 
+  - address: 0x08055a58
+    ghidra: FUN_08055a58
+    name: record_indexed_payload_lookup_at_0x2d0
+    size: 56
+    sig: "u32 record_indexed_payload_lookup_at_0x2d0(const u32 *record, void **payload_out, u32 *encoded_length_out)"
+    module: app/indexed_payload_lookup
+    status: ported
+    renames:
+      param_1/r0: record
+      param_2/r1: payload_out
+      param_3/r2: encoded_length_out
+      record_word_0: index_base
+      record_word_17: entry
+      FUN_0809e3d0: indexed_payload_lookup
+    notes: >-
+      Raw words prove the 56-byte extent 0x08055a58..0x08055a90; the next
+      mov r2,r1 begins the separately entered counted-string wrapper.
+      Two inbound plain BLs at 0x08045854 and 0x08045864, one outbound
+      plain BL at 0x08055a78 to indexed_payload_lookup, zero predicated BLs.
+      Reads record word 17 and word 0, looks up the entry at base+0x2d0,
+      logically halves the optional encoded length even on failure, and
+      returns backend status unchanged despite Ghidra's void return.
+      Target fields remain u32 on hosts; output pointers use native width.
+      Real-backend tests cover odd/even and maximal live lengths, empty,
+      invalid signed and out-of-range entries, dead lengths/offsets,
+      inactive indices, bad tags, output clearing, and independently NULL
+      outputs.
+      match.py reports fourteen instructions on both sides; LLVM changes
+      the frame and register shuffle while retaining both record loads,
+      +0x2d0 adjustment, conditional logical shift/store, and status return.
+      R_ARM_CALL confirms the BL targets indexed_payload_lookup. Standalone
+      real-code smoke confirms live odd-length decoding and invalid-index
+      status/output clearing.
+
   - address: 0x08055a90
     ghidra: FUN_08055a90
     name: record_string_pool_read_counted_at_0xc0
