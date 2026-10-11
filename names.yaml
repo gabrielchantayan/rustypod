@@ -247771,3 +247771,31 @@ functions:
       byte +8 discriminator, child +12 field and both OR accumulators.
       The leaf mapper is an indirect BLX through literal 0x08057958.
       No intentional symbol fold.
+
+  - address: 0x08053f38
+    ghidra: FUN_08053f38
+    name: object_collection_size
+    size: 56
+    sig: "i32 object_collection_size(u8 *object)"
+    module: ui/object_collection_size
+    status: ported
+    vars:
+      param_1: object
+      param_2: unused_dispatch_input
+    notes: >-
+      Raw extent ends at next real entry 0x08053f70: 52 code bytes
+      plus literal 0x080bf474 at 0x08053f6c. Two inbound plain BLs
+      (0x08054040, 0x08111570), zero predicated BLs. One outbound BL
+      to unported dispatcher 0x0808cec4, conditional tail B to canonical
+      vector_size_elem24 at 0x083d7750. Selector 0x80000000, secondary
+      selector zero, callback 0x080bf474. Nonzero status returns zero;
+      success reads bounds at +0xeb0/+0xeb4 and counts signed 24-byte
+      records with truncation toward zero. Incoming r1 is saved but unused
+      by the dispatcher; pass zero. Host uses an explicit dispatcher and
+      reads target bounds as u32 words before constructing native bounds.
+      Migrated the ARM media-player cache consumer; its host aggregate
+      dependency simulation remains unchanged. All 15610 host tests pass;
+      ARM release build passes. Actual-source consumer smoke returns three
+      records for dispatcher-populated wrapping bounds. match.py exits 1:
+      LLVM adds a native bounds temporary, BLX dispatcher and ordinary BL
+      instead of the conditional vector tail B; failure skips bounds reads.
