@@ -761,6 +761,7 @@ pub mod vtable_slot_1bc_context_dispatch;
 pub mod app_runtime_state_reset;
 pub mod callback_table;
 pub mod callback_table_double_to_i32_dispatch;
+pub mod callback_table_status;
 pub mod global_event_dispatch;
 pub mod global_dispatch_target;
 pub mod deferred_record_table;
