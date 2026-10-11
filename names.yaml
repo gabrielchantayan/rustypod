@@ -16,6 +16,38 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080575f0
+    ghidra: FUN_080575f0
+    name: stream_read_be16_or_zero
+    size: 36
+    sig: "i32 stream_read_be16_or_zero(StreamObject **stream, u16 *out)"
+    module: util/stream_read_be16_or_zero
+    status: ported
+    vars: {param_1/r0: stream, param_2/r1: out, local_10: value}
+    notes: >-
+      Raw A32 words establish extent [0x080575f0,0x08057614), ending
+      with e8bd8038 before the next independent PUSH e92d407c.
+      Whole-image aligned BL decoding finds two plain incoming calls
+      at 0x0805745c and 0x08057470, zero predicated incoming calls,
+      and one outgoing BL at 0x08057604 to stream_read_be16 @ 0x080578c4.
+      Zero a temporary, call the existing reader, unconditionally store
+      its low halfword, and preserve the callee's 0/1 result in r0.
+      Ghidra incorrectly reports void; the caller branches on r0.
+      Failure overwrites the destination with zero even if the backend
+      wrote bytes before returning zero. The caller reads two halfwords
+      of a serialized header. Reuses the ported callee without a new seam.
+      A u16 temporary replaces the original zeroed u32 stack word;
+      no observable behavioral deviation. Host tests cover endian lanes,
+      boundary values, nonzero backend statuses including negatives,
+      exhaustion, failure after backend writes, and adjacent output guards.
+      Full x86_64 host test gate and ARM build-std release build pass.
+      Standalone smoke reads 0x8123 with status 1, then exhaustion writes
+      zero with status 0. match.py exits 1: LLVM emits 12 versus 9
+      instructions, adding frame setup and using a halfword stack slot.
+      Ordered initialization, call, load, store, and preserved r0 agree.
+      ARM relocation confirms the sole BL targets stream_read_be16;
+      the unlinked disassembly's apparent self-call is a relocation.
+
   - address: 0x08057e88
     ghidra: FUN_08057e88
     name: linked_record_slots_at
