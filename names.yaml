@@ -16,6 +16,39 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08054d78
+    ghidra: FUN_08054d78
+    name: context_short_text_to_counted_u16
+    size: 104
+    sig: "void context_short_text_to_counted_u16(u16 *counted)"
+    module: fp/fp_misc
+    status: ported
+    vars: {param_1/r5: counted, iVar1/r4: context, local_10c: byte_count, auStack_10b: staged_utf8}
+    renames: {FUN_08369bec: shared_context, FUN_08392478: strlen, thunk_EXT_FUN_22000020: __rt_memcpy, FUN_08046a88: pascal_utf8_to_counted_u16}
+    notes: >-
+      Raw words establish [0x08054d78,0x08054de0), 104 instruction bytes
+      without literals; the next function starts with ldr r0,[r0,#0xf00].
+      Four outgoing plain BLs at 0x08054d84,0x08054da4,0x08054dc8,
+      0x08054dd4; two incoming plain BLs at 0x0811280c,0x082a1a1c.
+      No predicated incoming or outgoing BLs. Fetch shared context and
+      inspect the C string at +0x18. Leading 0xff clears only the u16
+      count. Otherwise mask strlen to eight bits before clamping to 31,
+      stage that prefix as Pascal UTF-8, and convert to counted UTF-16.
+      All direct callees already ported. Verified 0x08037db0 veneer
+      e51ff004/22000020 targets the osos IRAM mirror, not mask ROM.
+      Deviations: shrink unread stack storage from 256 to 32 bytes,
+      initialize the converter's overwritten initial count to zero,
+      and call Rust ports directly. Replace the obsolete serializer
+      seam in context_short_text_to_cxx_string and remove mock-only tests.
+      Host tests cover unset, empty, 31-byte clamp and modulo-256 length
+      boundaries, unchanged source and neighboring output sentinels.
+      Host suite passes 15598 tests; ARM release build passes. Debugger
+      smoke observes beef/beef/beef becoming beef/0000/beef on unset.
+      match.py prints a structural diff: 28 versus 26 instructions,
+      smaller frame, same sentinel branch, mask-before-clamp and four
+      calls; zero initial count is explicit. Existing converter retains
+      its unported 0x08046c74 firmware seam; host prefix tests use an
+      ASCII reference converter, not a port of that separate function.
   - address: 0x08054de0
     ghidra: FUN_08054de0
     name: ft_service_metadata_action

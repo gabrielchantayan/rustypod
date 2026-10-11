@@ -719,6 +719,72 @@ mod tests {
         }
     }
 
+    // ASCII subset of the firmware converter, exercising the serializer's
+    // actual prefix selection and counted-output behavior through its port.
+    unsafe extern "C" fn ascii_counted_buffer_helper(
+        source: *const u8, source_len: u32, destination: *mut u16,
+        max_codepoints: u32, out_count: *mut u32,
+    ) -> i32 {
+        let count = source_len.min(max_codepoints);
+        for index in 0..count as usize {
+            destination.add(index).write(source.add(index).read() as u16);
+        }
+        out_count.write(count);
+        0
+    }
+
+    struct ShortTextContextReset;
+
+    impl Drop for ShortTextContextReset {
+        fn drop(&mut self) {
+            unsafe { crate::ui::object_state::host_install_shared_context(core::ptr::null_mut()) };
+        }
+    }
+
+    #[test]
+    fn short_text_masks_length_before_clamping_and_preserves_neighbors() {
+        let _context_lock = crate::ui::object_state::SHARED_CONTEXT_TEST_LOCK
+            .lock().unwrap_or_else(|error| error.into_inner());
+        let _context_reset = ShortTextContextReset;
+        let _helper_lock = COUNTED_BUFFER_HELPER_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        let _helper = unsafe { CountedBufferHelperGuard::install(ascii_counted_buffer_helper) };
+        for length in [0usize, 1, 30, 31, 32, 255, 256, 257, 286, 287, 288, 511, 512] {
+            let mut context = std::vec![0u8; 0x18 + length + 1];
+            for index in 0..length {
+                context[0x18 + index] = b'A' + (index % 26) as u8;
+            }
+            let before = context.clone();
+            let mut destination = [0xbeef_u16; 34];
+            unsafe {
+                crate::ui::object_state::host_install_shared_context(context.as_mut_ptr());
+                crate::fp::fp_misc::context_short_text_to_counted_u16(destination.as_mut_ptr().add(1));
+            }
+            let count = (length & 255).min(31);
+            assert_eq!(destination[1], count as u16, "length={length}");
+            for index in 0..count {
+                assert_eq!(destination[2 + index], before[0x18 + index] as u16);
+            }
+            assert_eq!(destination[0], 0xbeef);
+            assert!(destination[2 + count..].iter().all(|&unit| unit == 0xbeef));
+            assert_eq!(context, before);
+        }
+    }
+
+    #[test]
+    fn short_text_unset_clears_only_count_without_scanning() {
+        let _lock = crate::ui::object_state::SHARED_CONTEXT_TEST_LOCK
+            .lock().unwrap_or_else(|error| error.into_inner());
+        let _reset = ShortTextContextReset;
+        // No NUL terminator: the unset path must not call strlen/conversion.
+        let mut context = [0xffu8; 0x19];
+        let mut destination = [0xbeef_u16; 3];
+        unsafe {
+            crate::ui::object_state::host_install_shared_context(context.as_mut_ptr());
+            crate::fp::fp_misc::context_short_text_to_counted_u16(destination.as_mut_ptr().add(1));
+        }
+        assert_eq!(destination, [0xbeef, 0, 0xbeef]);
+    }
+
     #[test]
     fn nul_terminated_buffer_clears_then_rejects_null_source() {
         let _lock = COUNTED_BUFFER_HELPER_LOCK.lock().unwrap_or_else(|error| error.into_inner());
