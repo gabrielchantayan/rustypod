@@ -16,6 +16,40 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080651d0
+    ghidra: FUN_080651d0
+    name: sha1_init_legacy
+    size: 84
+    sig: "u32 sha1_init_legacy(u32 *context)"
+    module: crypto/sha1_init_legacy
+    status: ported
+    vars:
+      param_1/r0: context
+      r1: state_constant_then_zero
+      context+0x00: state
+      context+0x14: bit_count_low
+      context+0x18: bit_count_high
+      context+0x1c: block_buffer
+      context+0x5c: buffered_bytes
+    notes: >-
+      Raw A32 extent [0x080651d0,0x08065224) contains 64 instruction bytes
+      ending in BX LR and five IV literals (20 bytes), before the next PUSH.
+      Ghidra's 64-byte extent excludes the literal pool. Whole-image decoding
+      verifies two incoming plain BLs at 0x08064f7c and 0x0827360c, zero
+      incoming predicated BLs, and zero outgoing plain or predicated BLs.
+      Installs the standard SHA-1 IV, clears low/high bit counts and buffered
+      bytes, preserves all sixteen buffer words, and returns one. Callers
+      supply a 96-byte stack context or an owner's payload at +4. This is
+      not the 352-byte sha1_init layout. Volatile aligned word stores retain
+      write order and prevent builtin substitution; no behavioral deviation.
+      Host tests cover dirty state, counters, reinitialization, buffer and
+      neighbor preservation, and initially uninitialized storage. Executable
+      smoke matches a raw A32 interpreter for four dirty contexts. Host suite
+      and ARM release build pass. LLVM intentionally folds this export with
+      sha1_init_compact: readelf verifies both in the same section at offset
+      zero, size 92. match.py cannot select the alias; the shared-body diff
+      preserves eight stores and return one, adds frame setup/teardown, and
+      displays five literals. No calls or buffer writes are introduced.
   - address: 0x08065698
     ghidra: FUN_08065698
     name: sha1_init_compact
