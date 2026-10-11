@@ -51726,6 +51726,37 @@ functions:
       signed indices, live entries, output clearing, zero-mode rejection,
       and NULL optional outputs; obsolete mock forwarding tests are removed.
 
+  - address: 0x08055920
+    ghidra: FUN_08055920
+    name: record_string_pool_read_counted_at_0x328
+    size: 20
+    sig: "i32 record_string_pool_read_counted_at_0x328(const u32 *record, u16 *counted)"
+    module: util/string_pool
+    status: ported
+    renames:
+      param_1/r0: record
+      param_2/r1: counted
+      record_word_0: owner
+      record_word_18: entry_id
+      FUN_080bd8bc: string_pool_read_counted (ported)
+    notes: >-
+      Raw words e1a02001 e5901048 e5900000 e2800fca ea019fe1 establish
+      the true 20-byte extent 0x08055920..0x08055934, followed by a new
+      push. Reads signed entry id from record word 18, adds 0x328 to owner
+      word zero, and tail-branches to the ported counted reader. Ghidra
+      incorrectly expands the callee body. Independent full-image BL
+      decoding finds two plain inbound calls at 0x0804653c and 0x082a364c,
+      zero predicated calls, and zero body BLs. Copies at most 510 bytes,
+      stores floor(copied_bytes / 2) in the leading u16, and preserves status.
+      Deliberately zeros incoming r3 because the reader clears its length
+      before validation; pointer fields remain target-width u32 on hosts.
+      Behavioral tests cover odd lengths, the cap, empty and invalid ids,
+      invalid lengths, reclaimed entries, invalid tags, untouched tail bytes,
+      and balanced locking. Host smoke copied five bytes and returned count
+      two. ARM build passed. match.py exit-1 structural diff preserves both
+      field loads, +0x328 adjustment, and relocatable tail branch; LLVM adds
+      a frame and explicitly zeros r3.
+
   - address: 0x08055934
     ghidra: FUN_08055934
     name: record_indexed_payload_lookup_at_0x328
