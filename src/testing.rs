@@ -3426,6 +3426,8 @@ pub mod hints {
     pub const UI_FLUSH_PENDING_CELL: usize = 0x6fe0_0000;
     // Dedicated to record_indexed_payload_lookup_at_0xc0; never shared.
     pub const RECORD_INDEXED_PAYLOAD_LOOKUP_C0: usize = 0x3217_0000;
+    // Dedicated to record_string_pool_read_counted_at_0xc0; never shared.
+    pub const RECORD_STRING_POOL_READ_COUNTED_C0: usize = 0x3218_0000;
     // 0x6ff0_0000: dedicated to ui/tdat_element_teardown's target-width
     // element and linked 'plst' node fixture; mappings never unmap.
     pub const TDAT_ELEMENT_TEARDOWN: usize = 0x6ff0_0000;

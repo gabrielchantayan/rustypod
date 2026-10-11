@@ -51726,6 +51726,38 @@ functions:
       signed indices, live entries, output clearing, zero-mode rejection,
       and NULL optional outputs; obsolete mock forwarding tests are removed.
 
+  - address: 0x08055a90
+    ghidra: FUN_08055a90
+    name: record_string_pool_read_counted_at_0xc0
+    size: 20
+    sig: "i32 record_string_pool_read_counted_at_0xc0(const u32 *record, u16 *counted)"
+    module: util/string_pool
+    status: ported
+    renames:
+      param_1/r0: record
+      param_2/r1: counted
+      record_word_0: owner
+      record_word_10: entry_id
+      FUN_080bd8bc: string_pool_read_counted
+    notes: >-
+      Raw words e1a02001 e5901028 e5900000 e28000c0 ea019f85 prove the
+      20-byte extent ending at the next function's push at 0x08055aa4.
+      Loads the signed entry id from record+0x28 and the target-width owner
+      pointer from record+0, then tail-branches to the already ported
+      string_pool_read_counted with pool owner+0xc0. Two inbound plain BLs
+      at 0x0804628c and 0x082a3788, no predicated BLs; body has no BL.
+      Also entered by BEQ at 0x080543b8. Copies at most 510 bytes after
+      the u16 prefix, stores floor(copied_bytes/2), and preserves reader
+      status despite Ghidra's void return. Incoming r3 is unobservable
+      because string_pool_read clears its length output before validation;
+      the Rust two-argument wrapper initializes it to zero. Host tests use
+      target-width record words and a native-layout real pool, covering odd
+      lengths, the 510-byte cap, zero and invalid ids, dead entries, bad
+      tags, status preservation, and untouched output bytes. match.py's
+      reviewed exit-1 structural diff shows nine instructions versus five:
+      LLVM adds a frame and zeroes r3 but retains both record loads, the
+      +0xc0 adjustment, output argument shuffle, and tail branch.
+
   # --- record indexed payload lookup wrapper (app) ---
   - address: 0x08055aa4
     ghidra: FUN_08055aa4
