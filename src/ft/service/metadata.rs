@@ -35,6 +35,34 @@ pub const METADATA_SIGNED_BYTE_B42_OFFSET: usize = 0xb42;
 /// Byte offset of this signed byte in the metadata block.
 pub const METADATA_SIGNED_BYTE_B43_OFFSET: usize = 0xb43;
 
+/// Byte offset of this unsigned word in the metadata block.
+pub const METADATA_WORD_AF8_OFFSET: usize = 0xaf8;
+
+/// ft_service_metadata_word_at_af8 — original: `FUN_08054e08` @
+/// `0x08054e08` (12 bytes; two plain inbound BLs, zero predicated inbound
+/// BLs, zero outgoing plain or predicated BLs).
+///
+/// Raw words `e5900f00 e5900af8 e12fff1e` establish the true extent
+/// [0x08054e08, 0x08054e14), ending at the separately called b43 accessor.
+/// Follow the aligned metadata pointer at context+0xf00 and return the
+/// complete word at metadata+0xaf8. Callers at 0x08172e14 and 0x08172e28
+/// compare it with a byte at caller+0x41 and cache its low byte there.
+/// The field's higher-level meaning is unrecovered.
+/// Deliberate deviations: native-width host pointers, four-byte ARM pointers;
+/// no additional NULL or bounds checks.
+///
+/// # Safety
+/// `service_context` must contain an aligned readable metadata pointer at
+/// +0xf00, whose pointee has an aligned readable word at +0xaf8.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn ft_service_metadata_word_at_af8(
+    service_context: *const u8,
+) -> u32 {
+    let metadata = (service_context.add(SERVICE_CONTEXT_METADATA_OFFSET) as *const *const u8).read();
+    (metadata.add(METADATA_WORD_AF8_OFFSET) as *const u32).read()
+}
+
 /// ft_service_metadata_signed_byte_at_b43 — original: `FUN_08054e14` @
 /// `0x08054e14` (16 bytes; two plain inbound BLs, zero predicated inbound
 /// BLs, zero outgoing plain or predicated BLs).
@@ -552,6 +580,33 @@ mod tests {
     struct ServiceContextFixture {
         before_metadata: [u8; SERVICE_CONTEXT_METADATA_OFFSET],
         metadata: *const u8,
+    }
+
+    #[test]
+    fn af8_preserves_all_bits_and_follows_replaced_metadata() {
+        use super::{ft_service_metadata_word_at_af8, METADATA_WORD_AF8_OFFSET};
+        // The requested word is the last readable word of each fixture.
+        let mut metadata = [0x5a5a_5a5au32; METADATA_WORD_AF8_OFFSET / 4 + 1];
+        let mut alternate = [0xa5a5_a5a5u32; METADATA_WORD_AF8_OFFSET / 4 + 1];
+        let mut context = ServiceContextFixture {
+            before_metadata: [0x3c; SERVICE_CONTEXT_METADATA_OFFSET],
+            metadata: metadata.as_ptr().cast(),
+        };
+        for value in [0u32, 1, 0xff, 0x100, 0x7fff_ffff, 0x8000_0000, 0x1234_5678, u32::MAX] {
+            metadata[METADATA_WORD_AF8_OFFSET / 4] = value;
+            alternate[METADATA_WORD_AF8_OFFSET / 4] = !value;
+            for (pointer, expected) in [
+                (metadata.as_ptr(), value),
+                (alternate.as_ptr(), !value),
+            ] {
+                context.metadata = pointer.cast();
+                assert_eq!(unsafe {
+                    ft_service_metadata_word_at_af8(
+                        (&context as *const ServiceContextFixture).cast(),
+                    )
+                }, expected);
+            }
+        }
     }
 
     #[test]
