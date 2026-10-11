@@ -16,6 +16,35 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08055638
+    ghidra: FUN_08055638
+    name: linked_item_index_find
+    size: 148
+    sig: "int32_t linked_item_index_find(uint32_t *collection, const uint32_t *item)"
+    module: app/linked_item_index_find
+    status: ported
+    vars: {param_1/r4: collection, param_2/r6: item, r5: index, r7: last, r4: position}
+    renames: {FUN_0806aa3c: ui_element_is_tdat_class, FUN_0809d98c: linked_item_index_build}
+    notes: >-
+      Raw A32 extent 0x08055638..0x080556cc is 148 bytes; next real
+      function starts with mov r2,r1. Whole-image decoding finds two
+      incoming plain BLs at 0x0806e6a4 and 0x080b57f0, zero predicated;
+      two outgoing plain BLs at 0x08055644 and 0x08055668, zero predicated.
+      Rejects a non-tdat collection or NULL item with zero. Builds a
+      missing pointer cache at collection+0x900 using the existing port,
+      ignores its status, and returns -1 if the cache remains NULL.
+      Scans entries at cache+12 through signed wrapping count-minus-one
+      from cache+8, returning the first matching item+0x114/+0x110 key
+      pair or -1. Pointer words remain four bytes on hosts. Tests cover
+      rejected inputs, partial-key mismatches, duplicates, misses, empty
+      and negative signed ranges, lazy construction, list-count mismatch
+      and allocation failure. Existing class and builder ports replace
+      stock calls; no new seam or additional validation.
+      Host suite and ARM release build pass. match.py reports 37 stock
+      versus 42 Rust instructions: frame pointer, hoisted item high word,
+      conditional low-word loads and reordered branches; both calls,
+      cache reload, signed bound and first-match behavior are retained.
+
   - address: 0x08055718
     ghidra: FUN_08055718
     name: record_string_pool_read_counted_at_0x118_word11
