@@ -247310,3 +247310,29 @@ functions:
       through formatter address 0x08165a50. LLVM removes the empty destructor
       call and uses a larger register-save frame; no behavioral destructor
       effect is lost.
+  - address: 0x08054e94
+    ghidra: FUN_08054e94
+    name: ft_service_metadata_byte_at_b4d
+    size: 12
+    sig: "u32 ft_service_metadata_byte_at_b4d(const u8 *service_context)"
+    module: ft/service/metadata
+    status: ported
+    renames:
+      param_1/r0: service_context
+      return/r0: metadata_byte
+    notes: >-
+      Raw words e5900f00 e5d00b4d e12fff1e establish the true extent
+      [0x08054e94,0x08054ea0); the next function begins with push.
+      Whole-image aligned A32 decoding finds two plain inbound BLs at
+      0x08173454 and 0x08173468, zero predicated inbound BLs, and zero
+      outgoing BLs. Follow the aligned pointer at context+0xf00 and
+      zero-extend the byte at metadata+0xb4d into r0. The caller compares
+      and caches it at caller+0x70; higher-level meaning remains unknown.
+      Reuses the existing metadata module; no new seam, NULL guard, or
+      bounds check. Native host pointers preserve the field offset; ARM
+      pointers remain four bytes. Tests cover all 256 unsigned byte values,
+      pointer replacement, and neighboring-byte preservation. All 15587
+      host tests pass; ARM build-std release build passes. Standalone
+      actual-source smoke returns 254 for byte 0xfe. match.py exits 1:
+      three original versus five Rust instructions retain both loads and
+      offsets; LLVM adds frame setup/teardown. No intentional symbol fold.
