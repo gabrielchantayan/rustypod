@@ -41054,6 +41054,30 @@ functions:
       retail address. The FixA description derives only from the verified
       literal, not an inferred subsystem identity.
 
+  - address: 0x0805a10c
+    ghidra: FUN_0805a10c
+    name: refcounted_payload_create
+    size: 64
+    sig: "i32 refcounted_payload_create(u8 **slot)"
+    module: heap/refcounted_payload_create
+    status: ported
+    vars: {param_1/r0: slot, r4: slot, r5: status}
+    renames: {FUN_0805b668: payload_handle_allocate, FUN_0809c7ec: payload_u16_be_store}
+    notes: >-
+      Raw words establish [0x0805a10c,0x0805a14c): 60 instruction bytes
+      and the required 0xffff8000 literal at 0x0805a148. Next function
+      begins with CMP at 0x0805a14c. Whole-image aligned BL decoding finds
+      two plain callers at 0x08044658 and 0x080e1e2c, no predicated callers.
+      Outgoing calls are one plain BL to 0x0805b668 and one BLNE to
+      0x0809c7ec. The allocator creates a 32-byte MemH payload handle.
+      Preserve allocator status. On zero status with a non-NULL handle,
+      set payload halfword +0x18 to 1 and BE halfword +8 to 0x8000,
+      ignoring the marker writer return. Deliberate deviations: retain
+      the unported allocator as a resident-address seam and reuse the
+      canonical payload_u16_be_store Rust port. Single pointer fields
+      widen on hosts but remain four bytes on ARM. No extra payload
+      NULL validation is introduced.
+
   # --- MemH handle reference decrement ---
   - address: 0x0805a14c
     ghidra: FUN_0805a14c
