@@ -16,6 +16,35 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0805e93c
+    ghidra: FUN_0805e93c
+    name: registry_initialize
+    size: 84
+    sig: "u32 registry_initialize(void)"
+    module: cxx/object_flags
+    status: ported
+    vars: {piVar1/r4: registry_table_slot, iVar2/r0: table}
+    renames:
+      FUN_08043cc8: recursive_registry_lock_operation
+      FUN_082d7d08: lhash_constructor
+    notes: >-
+      Raw extent [0x0805e93c,0x0805e990) is 84 bytes: 72 code and three
+      literal words at 0x0805e984..0x0805e98c. Next real function begins
+      with PUSH at 0x0805e990. Whole-image aligned A32 decoding finds two
+      incoming plain BLs at 0x0805e7fc and 0x0805e8cc, no predicated BLs.
+      Three outgoing plain BLs at 0x0805e954, 0x0805e960, 0x0805e96c;
+      no predicated outgoing BLs. Return 1 for existing table without locking.
+      Otherwise acquire recursive stock lock with op 3, construct lhash with
+      opaque callback words 0x0807a6c8 and 0x08072234, publish result at
+      0x08a0ea6c, release with op 2, reload slot and normalize to 0 or 1.
+      No recheck after acquire; null allocation remains retryable. Host
+      pointer slots are pointer-sized and lock/constructor services injected.
+      Device insertion now calls this Rust port. Host tests cover existing
+      handles, failure/retry, acquire-side overwrite and release-side reload.
+      All 15508 host tests pass; ARM release build passes. Source-linked
+      executable smoke verifies retry with real allocation, reuse and release.
+      match.py exit 1 reviewed: 18 stock instructions versus 26 Rust listing
+      lines including five literal words. Same conditional construction,
   - address: 0x080604ac
     ghidra: FUN_080604ac
     name: opaque_parameter_descriptor_value
@@ -154942,7 +154971,7 @@ functions:
       0x0804b178, 0x0804b194, 0x0804b1c4, 0x0805f524, 0x0805f534, and
       0x0805f554. There are no predicated bl forms or direct tail branches.
       It lazily initializes the lhash at the registry singleton's +0x00
-      word through the unported FUN_0805e93c; allocates and inserts
+      word through the ported registry_initialize; allocates and inserts
       `{ namespace_index & ~0x8000, namespace_index & 0x8000, name, value }`;
       distinguishes lh_insert's successful new-record NULL return from an
       allocation failure through lhash +0x5c error; and, on replacement,
