@@ -9,6 +9,7 @@ pub mod owner_entry_append;
 pub mod owner_entry_create;
 pub use owner_entry_append::{owner_entry_append, OwnerEntry};
 pub mod linked_item_index_build;
+pub mod linked_item_index_find;
 pub mod pixel_format_bits_per_pixel;
 pub mod ancestor_order_byte;
 pub mod global_mailbox_post;
