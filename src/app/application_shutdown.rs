@@ -22,6 +22,7 @@ pub type ShutdownConfigure = unsafe extern "C" fn(*mut u8, u32);
 pub type ShutdownPoolConsumer = unsafe extern "C" fn(*mut u8);
 
 const STATE_SLOT: usize = 0xf00;
+#[cfg(test)]
 const PENDING_RELEASE: usize = 0xb91;
 const PENDING_NOTIFICATION: usize = 0xb92;
 
@@ -124,7 +125,7 @@ pub unsafe extern "C" fn application_shutdown(owner: *mut u8) {
 
     if super::pending_release_get::pending_release_get(state) != 0 {
         (ops.pending_release_cleanup)(owner);
-        state.add(PENDING_RELEASE).write(0);
+        super::pending_release_clear::pending_release_clear(state);
     }
     if state.add(PENDING_NOTIFICATION).read() != 0 {
         (ops.pending_notification_cleanup)(owner, 0);

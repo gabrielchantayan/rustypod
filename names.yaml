@@ -641,6 +641,36 @@ functions:
       the owner tail. Host suite, ARM release build and actual-source
       standalone smoke pass. match.py exits 1: LLVM adds a frame,
       uses an equal early return and retains store, reload and tail B.
+  - address: 0x080648fc
+    ghidra: FUN_080648fc
+    name: pending_release_clear
+    size: 12
+    sig: "void pending_release_clear(u8 *state)"
+    module: app/pending_release_clear
+    status: ported
+    vars:
+      param_1/r0: state
+      r1: zero
+      state+0xb91: pending_release
+    notes: >-
+      Raw words e3a01000 e5c01b91 e12fff1e establish extent
+      [0x080648fc,0x08064908), twelve bytes. The next boundary resumes
+      slot_request_release's disjoint tail; it is not part of this helper.
+      Whole-image aligned A32 decoding finds two incoming plain BLs at
+      0x08068e2c and 0x0806e740, zero predicated incoming BLs and zero
+      outgoing BLs. Clear only byte +0xb91 in the state loaded from
+      owner+0xf00 after release cleanup. Reuse the pending_release field
+      name and migrate application_shutdown's inline clear to this port.
+      No callees, seams, allocation, null guard or semantic deviations.
+      The void ABI does not expose unchanged r0. Host tests cover every
+      original byte value, neighboring storage, idempotence, unaligned
+      bases and the last allocated byte. Actual-source executable smoke
+      passes sixteen raw-operation comparisons across four alignments
+      and initial byte values 0, 1, 128 and 255.
+      Full host suite passes 15488 tests; ARM release build passes.
+      match.py exits 1: LLVM adds PUSH/MOV frame setup and POP PC in
+      place of BX LR; MOV zero and STRB at +0xb91 are unchanged.
+      The export remains a real symbol with no outgoing calls.
   - address: 0x0806b438
     ghidra: FUN_0806b438
     name: pending_release_get
