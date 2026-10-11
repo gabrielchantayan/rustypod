@@ -37069,6 +37069,44 @@ functions:
       byte-length output before it can be observed. Host tests cover
       negative/out-of-range rejection and the second valid 20-byte record.
 
+  - address: 0x080532f4
+    ghidra: FUN_080532f4
+    name: object_resource_vector16_pool850_counted_string
+    size: 112
+    sig: "i32 object_resource_vector16_pool850_counted_string(const void *object, i32 index, u16 *counted)"
+    module: ui/object_resource_vector16_pool850_counted_string
+    status: ported
+    renames:
+      param_1/r0/r3: object
+      param_2/r1/r4: index
+      param_3/r2/r5: counted
+      r6: backend
+      r7: resource_vector
+      FUN_08051dc4: object_backend_for_kind (ported)
+      FUN_083d7674: vector_size_elem16 (ported byte-identical copy)
+      FUN_080bd8bc: string_pool_read_counted (ported)
+    notes: >-
+      Raw ARM establishes [0x080532f4,0x08053364), 112 bytes: push
+      e92d41f0 through tail branch ea01a955, followed by the next real
+      function push e92d4070. Two outbound plain BLs at 0x08053310
+      and 0x08053334 resolve backend and vector count; zero predicated
+      BLs. Whole-image word decoding finds two inbound plain BLs at
+      0x080669b0 and 0x0813bdc0, zero predicated callers. Clears count
+      before validation, rejects negative indices and unsigned index >=
+      arithmetic-shift vector count with -50, selects the first word of
+      a 16-byte record in object+0xed4, then tail-calls the counted
+      reader through backend+0xf60 plus inline pool offset 0x850.
+      Ghidra incorrectly inlines the reader and misidentifies its arguments.
+      Rust reuses canonical ports without new address-backed seams.
+      Deviations: zero replaces the dead r3 object pointer; the redundant
+      null check after unconditional output store is omitted. Host vector
+      words are widened for the existing vector seam. Tests cover empty,
+      negative and boundary indices, stride, proxy/self resolution, zero
+      and invalid IDs, invalid tag, and untouched payload. Host suite and
+      ARM release build pass. match.py exits 1 with 28 stock and 28 Rust
+      instructions, preserving both BLs, unsigned bounds, field loads and
+      reader tail branch; register allocation and frame setup differ.
+
   # --- retailOS UI 12-byte resource-table counted-string reader ---
   - address: 0x08052e1c
     ghidra: FUN_08052e1c
