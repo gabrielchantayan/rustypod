@@ -1,5 +1,7 @@
 //! retailOS UI / graphics layer — the geometry primitives the drawing
 //! and view code is built on.
+pub mod object_collection20_size;
+pub use object_collection20_size::*;
 pub mod object_collection_size;
 pub use object_collection_size::*;
 pub mod fixed_index_limit;

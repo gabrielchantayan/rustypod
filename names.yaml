@@ -247799,3 +247799,34 @@ functions:
       records for dispatcher-populated wrapping bounds. match.py exits 1:
       LLVM adds a native bounds temporary, BLX dispatcher and ordinary BL
       instead of the conditional vector tail B; failure skips bounds reads.
+
+  - address: 0x08053ea0
+    ghidra: FUN_08053ea0
+    name: object_collection20_size
+    size: 60
+    sig: "i32 object_collection20_size(u8 *object)"
+    module: ui/object_collection20_size
+    status: ported
+    vars: {param_1: object, param_2: unused_dispatch_input, return/r0: record_count}
+    notes: >-
+      Raw A32 words establish extent [0x08053ea0,0x08053edc): 56 code
+      bytes plus callback literal 0x080c6b4c at 0x08053ed8, followed by
+      the next real prologue. One outbound plain BL to the unported
+      dispatcher at 0x0808cec4, zero predicated BLs; conditional tail B
+      at 0x08053ecc to vector_size_elem20 at 0x083d7640. Full-image
+      inbound BL census finds two plain sites (0x08111538,0x0813e540),
+      zero predicated sites. Dispatch with selector 4, secondary zero
+      and callback 0x080c6b4c; nonzero status returns zero without bounds
+      access. Success counts the vector at +0xe64/+0xe68 using signed
+      wrapping byte span divided by 20, truncating toward zero. Reuse
+      the canonical vector_size_elem20 port. Discard dead incoming r1,
+      saved but never used by the dispatcher, passing zero instead.
+      Native-pointer temporary bounds preserve target u32 field spacing
+      on hosts; host dispatcher injection follows object_collection_size.
+      The media-player cache caller now uses this Rust port on target.
+      Host tests cover dispatch failure, post-dispatch bounds mutation,
+      empty, partial, reversed, wrapping and signed-extreme spans.
+      ARM match.py structural diff reviewed: BLX to verified dispatcher,
+      failure branch skips bound loads; success loads +0xe64/+0xe68 and
+      calls the canonical size port rather than retail's conditional tail
+      branch. LLVM adds native bounds staging and an ordinary call.
