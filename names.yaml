@@ -247638,3 +247638,54 @@ functions:
       and ARM build-std release build pass. Actual-source smoke returns
       0x89abcdef. match.py exits 1 with both loads and offsets retained;
       LLVM adds frame setup/teardown. No intentional symbol fold.
+
+  - address: 0x08054b0c
+    ghidra: FUN_08054b0c
+    name: opaque_collection_mask
+    size: 152
+    sig: "u64 opaque_collection_mask(u32 *collection)"
+    module: app/opaque_collection_mask
+    status: ported
+    renames:
+      param_1/r8: collection
+      r4/r5: mask
+      r6: entry_index
+      r7: entry_count
+      local_2c: entry
+      FUN_0805c1b4: magic_tagged_object_retain
+      FUN_080470a0: magic_tagged_object_entry_count
+      FUN_08054ba4: opaque_collection_copy_entry
+      FUN_08057958: leaf_tag_mask
+      FUN_0806c044: magic_tagged_object_release
+    notes: >-
+      Raw osos.dec establishes the exact 152-byte extent
+      [0x08054b0c,0x08054ba4), ending before the next independently
+      entered push prologue. Whole-image aligned A32 BL-immediate
+      decoding finds two inbound plain BLs at 0x08054b68 (recursion)
+      and 0x0806792c, zero predicated inbound BLs, six outgoing plain
+      BLs, and zero predicated outgoing BLs. Retain failure returns zero
+      without release. Otherwise snapshot entry count and copy 20-byte
+      entries until exhausted or copy failure; OR leaf-tag masks from
+      0x08057958 or recursive masks for nonzero result byte +8 using
+      the child pointer at +12. Release once after successful retain,
+      ignoring its status. The caller unions this into state +0x1d0/+0x1d4.
+      Reuses existing retain, release, entry-count and copy ports; the leaf
+      mapper stays a stock ARM call with a raw-verified host reference
+      backend. Target pointers remain u32 words; no cycle guard added.
+      Tests cover invalid/empty collections, duplicates, unknown tags,
+      nested children, both mask words, balanced normal reference counts,
+      and early copy failure after MAX refcount wraps to zero. In that
+      overflow case child retains remain outstanding because release
+      rejects the zero root refcount, matching the original callees.
+      Host suite passes all 15600 tests; ARM build-std release passes.
+      Actual-source Rust consumer smoke returns mask 0x0080000100000001
+      and preserves refcount 7. The ordinary host release build is blocked
+      by unrelated missing host helpers in prepare_entry_metadata,
+      shared_payload_select_kind and calendar_schedule; smoke compiles
+      the crate with its existing test configuration instead.
+      match.py exits 1 with 38 ADS versus 49 LLVM instructions. LLVM
+      adds frame setup and initializes the five-word scratch result,
+      preserving retain/count/copy/recursion/release order, early exits,
+      byte +8 discriminator, child +12 field and both OR accumulators.
+      The leaf mapper is an indirect BLX through literal 0x08057958.
+      No intentional symbol fold.
