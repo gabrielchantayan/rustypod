@@ -245288,3 +245288,33 @@ functions:
       literal, equivalent signed branches, one direct diagnostic BL and
       volatile indirect copy BLX. Return zero/one and all five diagnostic
       arguments remain intact. No intentional symbol fold.
+
+  - address: 0x080621e8
+    ghidra: FUN_080621e8
+    name: callback_table_status
+    size: 36
+    sig: "u32 callback_table_status(void)"
+    module: app/callback_table_status
+    status: ported
+    renames:
+      FUN_0806212c: callback_table_get
+      UNRECOVERED_JUMPTABLE/r0: status_callback
+      iVar1/r0: callback_table
+    notes: >-
+      Raw words establish the 36-byte extent 0x080621e8..0x0806220c;
+      the final pop is at 0x08062208 and the next independently entered
+      accessor begins at 0x0806220c. One outgoing plain BL at 0x080621ec
+      calls the already ported callback_table_get; no predicated BL occurs.
+      Full-image aligned ARM BL decoding finds exactly two incoming plain
+      calls at 0x08062268 and 0x0808b2e8, with zero predicated calls.
+      Returns zero when the table or its +0x14 slot is null; otherwise
+      tail-dispatches that slot and preserves the entire returned status.
+      Both callers compare the result against zero. The callback receives
+      its own address in r0 as in the raw BX sequence; no semantic identity
+      is inferred for that incidental argument. Host fixtures use native-width
+      fields; target slot reads remain aligned 32-bit word reads. Tests cover
+      null table, null slot, and changing readiness with a high-bit status.
+      A standalone smoke exercises slot changes on the cached table.
+      match.py confirms identical conditional table/slot guards and final
+      BX r0; LLVM adds a frame-pointer setup and uses an early conditional
+      pop for the zero path instead of the original conditional tail-pop.
