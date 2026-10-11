@@ -152,6 +152,117 @@ pub unsafe extern "C" fn rtc_context_set_configuration_b35(
     0
 }
 
+/// rtc_context_set_configuration_b3c — FUN_08066db4 @ 0x08066db4.
+/// True extent [0x08066db4, 0x08066e30): 124 bytes, including the
+/// literal at +120; next function starts with LDR. Four outgoing plain
+/// BL instructions, zero predicated BLs, and one virtual tail BX.
+/// Two incoming plain BLs at 0x08113afc and 0x081711e0, zero predicated,
+/// independently decoded across the raw image.
+///
+/// Compare the signed byte at +0xb3c against the full signed argument.
+/// On mismatch store its low byte, reload the context and mark it dirty.
+/// Obtain the canonical media player and dispatch slot +0x90 with 255
+/// for -1, 1 for 1, otherwise 0. The field's product meaning is unknown.
+/// Deviations: Rust calls the tail-dispatched method normally; host
+/// vtable words widen to usize while preserving target word indices.
+/// The canonical singleton's documented constructor limitation remains.
+///
+/// # Safety
+/// Owner and context must be valid; context must be writable through +0xb90.
+/// The player must provide a callable +0x90 slot with the ABI below.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn rtc_context_set_configuration_b3c(
+    owner: *const RtcContextOwner, value: i32,
+) {
+    rtc_context_set_configuration_b3c_with(
+        owner, value, || crate::app::singletons::media_player_get(),
+    );
+}
+
+#[inline(always)]
+unsafe fn rtc_context_set_configuration_b3c_with(
+    owner: *const RtcContextOwner, value: i32, get_player: impl FnOnce() -> *mut u8,
+) {
+    use core::ptr;
+    let context = ptr::read(ptr::addr_of!((*owner).rtc_context)) as *mut u8;
+    let field = context.add(0xb3c).cast::<i8>();
+    if field.read() as i32 == value {
+        return;
+    }
+    field.write(value as i8);
+    rtc_context_mark_dirty(ptr::read(ptr::addr_of!((*owner).rtc_context)) as *mut RtcContext);
+    let player = get_player();
+    let table = player.cast::<*const usize>().read();
+    let set: unsafe extern "C" fn(*mut u8, u32) =
+        core::mem::transmute(table.add(0x90 / 4).read());
+    set(player, if value == -1 { 255 } else if value == 1 { 1 } else { 0 });
+}
+
+#[cfg(test)]
+mod configuration_b3c_tests {
+    use super::*;
+
+    #[repr(C)]
+    struct Player {
+        table: *const usize,
+        context: *const u8,
+        expected: u8,
+        calls: u32,
+        value: u32,
+    }
+
+    unsafe extern "C" fn set(player: *mut u8, value: u32) {
+        let player = &mut *player.cast::<Player>();
+        assert_eq!(player.context.add(0xb3c).read(), player.expected);
+        assert_eq!(player.context.add(0xb90).read(), 1);
+        player.calls += 1;
+        player.value = value;
+    }
+
+    #[test]
+    fn signed_comparison_full_argument_and_notification_order() {
+        for previous in [0u8, 1, 127, 128, 255] {
+            for value in [-257, -256, -129, -128, -1, 0, 1, 127, 128, 255, 256, 257,
+                i32::MIN, i32::MAX] {
+                for dirty in [0, 1, 0xa5] {
+                    let mut context: RtcContext = unsafe { core::mem::zeroed() };
+                    let bytes = (&mut context as *mut RtcContext).cast::<u8>();
+                    unsafe {
+                        bytes.add(0xb3b).write(0x5a);
+                        bytes.add(0xb3c).write(previous);
+                        bytes.add(0xb3d).write(0xa5);
+                    }
+                    context.dirty = dirty;
+                    let owner = RtcContextOwner { reserved: [0; 0xf00], rtc_context: &context };
+                    let mut table = [0usize; 0x90 / 4 + 1];
+                    table[0x90 / 4] = set as *const () as usize;
+                    let mut player = Player {
+                        table: table.as_ptr(), context: bytes, expected: value as u8,
+                        calls: 0, value: u32::MAX,
+                    };
+                    let changed = previous as i8 as i32 != value;
+                    unsafe {
+                        rtc_context_set_configuration_b3c_with(&owner, value, || {
+                            assert!(changed, "equal field must not acquire player");
+                            assert_eq!(bytes.add(0xb3c).read(), value as u8);
+                            assert_eq!(bytes.add(0xb90).read(), 1);
+                            (&mut player as *mut Player).cast()
+                        });
+                        assert_eq!(bytes.add(0xb3c).read(), if changed { value as u8 } else { previous });
+                        assert_eq!(bytes.add(0xb3b).read(), 0x5a);
+                        assert_eq!(bytes.add(0xb3d).read(), 0xa5);
+                    }
+                    assert_eq!(context.dirty, if changed { 1 } else { dirty });
+                    assert_eq!(player.calls, changed as u32);
+                    let notification = if value == -1 { 255 } else if value == 1 { 1 } else { 0 };
+                    assert_eq!(player.value, if changed { notification } else { u32::MAX });
+                }
+            }
+        }
+    }
+}
+
 /// rtc_context_set_configuration_index — FUN_08066f54 @ 0x08066f54.
 /// True extent [0x08066f54, 0x08066fac): 88 bytes, followed by MOVS
 /// starting a separate function. Whole-image aligned A32 decoding verifies
