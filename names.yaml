@@ -16,6 +16,33 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08054e14
+    ghidra: FUN_08054e14
+    name: ft_service_metadata_signed_byte_at_b43
+    size: 16
+    sig: "int32_t ft_service_metadata_signed_byte_at_b43(const uint8_t *service_context)"
+    module: ft/service/metadata
+    status: ported
+    renames:
+      param_1/r0: service_context
+      return/r0: metadata_signed_byte
+    notes: >-
+      Raw words e5900f00 e2800c0b e1d004d3 e12fff1e establish the true
+      extent [0x08054e14,0x08054e24), ending at the separately called b42
+      accessor. Whole-image aligned A32 decoding finds two plain inbound
+      BLs at 0x08173410 and 0x08173424, zero predicated inbound BLs, and
+      zero outgoing plain or predicated BLs. Follow the aligned metadata
+      pointer at service_context+0xf00 and sign-extend the byte at +0xb43.
+      The caller compares/caches it at caller+0x65; higher-level meaning
+      remains unrecovered. Reuse the registered ft/service/metadata module
+      without callee seams. Native-width host pointers retain the field
+      offset; ARM pointers remain four bytes. No NULL or bounds checks.
+      Host tests cover all 256 byte values, neighboring-byte decoys, live
+      updates and metadata pointer replacement; all 15596 host tests pass.
+      Standalone smoke maps 0x00,0x7f,0x80,0xff to 0,127,-128,-1.
+      ARM release build passes. match.py exits 1: LLVM adds frame setup,
+      constructs +0xb43 with mov/orr and uses register-offset ldrsb.
+      Both loads preserve the algorithm; the export has no outgoing calls.
   - address: 0x08054e24
     ghidra: FUN_08054e24
     name: ft_service_metadata_signed_byte_at_b42
