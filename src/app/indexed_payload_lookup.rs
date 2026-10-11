@@ -150,6 +150,49 @@ pub unsafe extern "C" fn record_metadata_lookup(
 
     status
 }
+
+/// `record_metadata_lookup_prefer_alternate` — `FUN_080558c8` @ `0x080558c8`.
+///
+/// True extent: 88 bytes, ending at the next wrapper at `0x08055920`.
+/// Raw ARM verifies two inbound plain BLs, one outbound plain BL to
+/// indexed_payload_lookup, zero predicated BLs, and a conditional tail branch
+/// to record_metadata_lookup. If record word 12 is nonzero and the byte at
+/// owner word 2 + 0xb0f is nonzero, look up word 12 at owner + 0x170 and
+/// halve the optional encoded length. Otherwise use word 11 at owner + 0x118.
+/// Return the backend status unchanged, including on failure.
+///
+/// Deliberate deviations: target pointers are u32 fields on hosts; output
+/// pointers use native width. Ghidra's spurious fourth argument is omitted:
+/// r3 is overwritten before use. The existing port supplies the fallback.
+///
+/// # Safety
+/// Record must contain thirteen readable aligned words. Word zero is a valid
+/// owner address satisfying the selected lookup's contract. When word 12 is
+/// nonzero, owner word 2 must address a readable byte at offset 0xb0f.
+/// Optional outputs obey indexed_payload_lookup's contract.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn record_metadata_lookup_prefer_alternate(
+    record: *const u32,
+    payload_out: *mut *mut u8,
+    encoded_length_out: *mut u32,
+) -> u32 {
+    let alternate_entry = record.add(12).read();
+    if alternate_entry != 0 {
+        let owner = record.read() as usize as *mut u8;
+        let settings = owner.cast::<u32>().add(2).read() as usize as *const u8;
+        if settings.add(0xb0f).read() != 0 {
+            let status = indexed_payload_lookup(
+                owner.add(0x170), alternate_entry, payload_out, encoded_length_out,
+            );
+            if !encoded_length_out.is_null() {
+                encoded_length_out.write(encoded_length_out.read() >> 1);
+            }
+            return status;
+        }
+    }
+    record_metadata_lookup(record, payload_out, encoded_length_out)
+}
 /// `record_indexed_payload_lookup_at_0x118_word15` — original:
 /// `FUN_08055810` @ `0x08055810` (56 bytes).
 ///
@@ -534,6 +577,79 @@ mod tests {
     use crate::testing::{hints, note_missing_u32_fixture, try_map_u32_slab};
     use crate::util::crts_tag::CRTS_TAG;
     use core::ptr;
+
+    #[test]
+    fn alternate_metadata_selection_errors_and_optional_outputs() {
+        unsafe {
+            let slab = try_map_u32_slab(hints::RECORD_METADATA_LOOKUP_ALTERNATE, 8192)
+                .expect("target-width alternate metadata fixture");
+            ptr::write_bytes(slab, 0, 8192);
+            let record = slab.cast::<u32>();
+            let owner = slab.add(0x100);
+            let settings = slab.add(0x1000);
+            let handles = slab.add(0x500).cast::<u32>();
+            let entries = slab.add(0x600).cast::<u32>();
+            record.write(owner as usize as u32);
+            owner.cast::<u32>().add(2).write(settings as usize as u32);
+            for (offset, entry_number, blob_offset, encoded) in [
+                (0x118, 1, 3, 8), (0x170, 2, 9, 7),
+            ] {
+                let index = owner.add(offset).cast::<u32>();
+                index.write(CRTS_TAG);
+                index.add(2).write(handles as usize as u32);
+                index.add(4).write(handles.add(1) as usize as u32);
+                index.add(7).write(2);
+                index.add(12).write(1);
+                let entry = entries.add((entry_number - 1) * 2);
+                entry.write(blob_offset);
+                entry.add(1).write(encoded);
+            }
+            handles.write(entries as usize as u32);
+            handles.add(1).write(slab.add(0x800) as usize as u32);
+            record.add(11).write(1);
+            for (alternate, enabled, status, offset, count) in [
+                (0, 1, 0, 3, 4), (2, 0, 0, 3, 4),
+                (2, 1, 0, 9, 3), (2, 255, 0, 9, 3),
+                (3, 1, 0xffff_ffce, 0, 0),
+                (u32::MAX, 1, 0xffff_ffce, 0, 0),
+            ] {
+                record.add(12).write(alternate);
+                settings.add(0xb0f).write(enabled);
+                let mut payload = ptr::dangling_mut::<u8>();
+                let mut length = 99;
+                assert_eq!(record_metadata_lookup_prefer_alternate(record, &mut payload, &mut length), status);
+                assert_eq!(length, count);
+                assert_eq!(payload, if status == 0 { slab.add(0x800 + offset) } else { ptr::null_mut() });
+            }
+            // Zero alternate must not read the settings pointer.
+            record.add(12).write(0);
+            owner.cast::<u32>().add(2).write(0);
+            let mut length = 99;
+            assert_eq!(record_metadata_lookup_prefer_alternate(record, ptr::null_mut(), &mut length), 0);
+            assert_eq!(length, 4);
+            owner.cast::<u32>().add(2).write(settings as usize as u32);
+            record.add(12).write(2);
+            settings.add(0xb0f).write(1);
+            for encoded in [1, 2, 0x7fff_ffff] {
+                entries.add(3).write(encoded);
+                assert_eq!(record_metadata_lookup_prefer_alternate(record, ptr::null_mut(), &mut length), 0);
+                assert_eq!(length, encoded >> 1);
+            }
+            let mut payload = ptr::null_mut();
+            assert_eq!(record_metadata_lookup_prefer_alternate(record, &mut payload, ptr::null_mut()), 0);
+            assert_eq!(payload, slab.add(0x809));
+            assert_eq!(record_metadata_lookup_prefer_alternate(record, ptr::null_mut(), ptr::null_mut()), 0);
+            // A selected invalid index must fail, not silently use the fallback.
+            owner.add(0x170).cast::<u32>().write(0);
+            length = 99;
+            assert_eq!(record_metadata_lookup_prefer_alternate(record, &mut payload, &mut length), 0xffff_ffce);
+            assert!(payload.is_null());
+            assert_eq!(length, 0);
+            settings.add(0xb0f).write(0);
+            record.add(11).write(u32::MAX);
+            assert_eq!(record_metadata_lookup_prefer_alternate(record, &mut payload, &mut length), 0xffff_ffce);
+        }
+    }
 
     #[test]
     fn record_328_live_empty_invalid_and_optional_outputs() {
