@@ -24,6 +24,8 @@ pub const METADATA_SIGNED_BYTE_B3E_OFFSET: usize = 0xb3e;
 pub const METADATA_SIGNED_BYTE_B3D_OFFSET: usize = 0xb3d;
 /// Byte offset of this signed byte in the metadata block.
 pub const METADATA_SIGNED_BYTE_B41_OFFSET: usize = 0xb41;
+/// Byte offset of this signed byte in the metadata block.
+pub const METADATA_SIGNED_BYTE_B40_OFFSET: usize = 0xb40;
 
 /// Byte offset of this byte in the metadata block.
 pub const METADATA_BYTE_B50_OFFSET: usize = 0xb50;
@@ -171,6 +173,31 @@ pub unsafe extern "C" fn ft_service_metadata_byte_at_b89(
 ) -> u32 {
     let metadata = (service_context.add(SERVICE_CONTEXT_METADATA_OFFSET) as *const *const u8).read();
     (metadata.add(METADATA_BYTE_B89_OFFSET) as *const u8).read() as u32
+}
+
+/// ft_service_metadata_signed_byte_at_b40 — original: `FUN_08054e44` @
+/// `0x08054e44` (16 bytes; two plain inbound BLs, zero predicated inbound
+/// BLs, zero outgoing plain or predicated BLs).
+///
+/// Raw words `e5900f00 e2800c0b e1d004d0 e12fff1e` decode to
+/// `ldr; add #0xb00; ldrsb #0x40; bx lr`. The next real function is the
+/// separately called accessor at 0x08054e54. Follow the aligned metadata
+/// pointer at context+0xf00 and sign-extend its byte at +0xb40 into r0.
+/// Callers at 0x081733b0 and 0x081733c4 compare/cache it at caller+0x62;
+/// its higher-level meaning is unknown.
+/// Deliberate deviations: native-width host pointers, four-byte ARM pointers;
+/// no additional NULL or bounds checks.
+///
+/// # Safety
+/// `service_context` must contain an aligned readable metadata pointer at
+/// +0xf00, whose pointee is readable through +0xb40.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn ft_service_metadata_signed_byte_at_b40(
+    service_context: *const u8,
+) -> i32 {
+    let metadata = (service_context.add(SERVICE_CONTEXT_METADATA_OFFSET) as *const *const u8).read();
+    metadata.add(METADATA_SIGNED_BYTE_B40_OFFSET).read() as i8 as i32
 }
 
 /// ft_service_metadata_signed_byte_at_b41 — original: `FUN_08054e54` @
@@ -464,6 +491,35 @@ mod tests {
         assert_eq!(metadata[METADATA_BYTE_B4D_OFFSET + 1], 0xa5);
         assert!(other[..METADATA_BYTE_B4D_OFFSET].iter().all(|&byte| byte == 0x5a));
         assert_eq!(other[METADATA_BYTE_B4D_OFFSET + 1], 0x5a);
+        assert!(context.before_metadata.iter().all(|&byte| byte == 0x3c));
+    }
+
+    #[test]
+    fn b40_sign_extends_every_byte_and_follows_replaced_metadata() {
+        use super::{ft_service_metadata_signed_byte_at_b40, METADATA_SIGNED_BYTE_B40_OFFSET};
+        let mut metadata = [0xa5u8; METADATA_SIGNED_BYTE_B40_OFFSET + 2];
+        let mut other = [0x5au8; METADATA_SIGNED_BYTE_B40_OFFSET + 2];
+        let mut context = ServiceContextFixture {
+            before_metadata: [0x3c; SERVICE_CONTEXT_METADATA_OFFSET],
+            metadata: metadata.as_ptr(),
+        };
+        for value in 0..=255u8 {
+            metadata[METADATA_SIGNED_BYTE_B40_OFFSET] = value;
+            let expected = if value < 128 { i32::from(value) } else { i32::from(value) - 256 };
+            assert_eq!(unsafe {
+                ft_service_metadata_signed_byte_at_b40((&context as *const ServiceContextFixture).cast())
+            }, expected);
+        }
+        other[METADATA_SIGNED_BYTE_B40_OFFSET] = 0x80;
+        context.metadata = other.as_ptr();
+        assert_eq!(unsafe {
+            ft_service_metadata_signed_byte_at_b40((&context as *const ServiceContextFixture).cast())
+        }, -128);
+        assert!(metadata[..METADATA_SIGNED_BYTE_B40_OFFSET].iter().all(|&byte| byte == 0xa5));
+        assert_eq!(metadata[METADATA_SIGNED_BYTE_B40_OFFSET], 255);
+        assert_eq!(metadata[METADATA_SIGNED_BYTE_B40_OFFSET + 1], 0xa5);
+        assert!(other[..METADATA_SIGNED_BYTE_B40_OFFSET].iter().all(|&byte| byte == 0x5a));
+        assert_eq!(other[METADATA_SIGNED_BYTE_B40_OFFSET + 1], 0x5a);
         assert!(context.before_metadata.iter().all(|&byte| byte == 0x3c));
     }
 
