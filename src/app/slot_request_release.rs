@@ -3,7 +3,7 @@
 //! `0x080648e0..0x080648fb` and `0x08064908..0x08064913`). Ghidra's 28-byte
 //! extent stops at the mid-function `b 0x08064908`; the twelve bytes at
 //! `0x080648fc..0x08064907` between that branch and its target are a
-//! separate one-call-site helper (`mov r1,#0; strb r1,[r0,#0xb91]; bx lr`),
+//! separate two-call-site helper (`mov r1,#0; strb r1,[r0,#0xb91]; bx lr`),
 //! and the true function resumes at the branch target. The next separately
 //! linked function begins at `0x08064914`.
 //!
