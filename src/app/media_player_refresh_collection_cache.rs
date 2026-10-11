@@ -73,6 +73,8 @@ pub unsafe extern "C" fn media_player_refresh_collection_cache(
                 crate::ui::object_collection_size::object_collection_size(inner) as u32
             } else if field == 0x3fc {
                 crate::ui::object_collection20_size::object_collection20_size(inner) as u32
+            } else if field == 0x400 {
+                crate::ui::object_collection_size_for_mode::object_collection_size_for_mode(inner) as u32
             } else {
                 let query: unsafe extern "C" fn(*mut u8) -> u32 = core::mem::transmute(address);
                 query(inner)
