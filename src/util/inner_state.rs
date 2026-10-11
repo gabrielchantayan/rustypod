@@ -880,6 +880,72 @@ pub unsafe extern "C" fn object_reset_to_active_plst(object: *mut u8) -> i32 {
     0
 }
 
+/// inner_select_resource_index — `FUN_080667d4` @ `0x080667d4`.
+/// True extent: 128 bytes (124 instruction bytes and the +0x82c literal);
+/// next real entry is the PUSH at 0x08066854. Whole-image ARM decoding finds
+/// two inbound plain BLs (0x081116c8, 0x0813c5f4), four outbound plain BLs
+/// (vector size, counted-string read, cache clear, dispatch), and no
+/// predicated BLs in either direction.
+///
+/// Accept -1 unconditionally; otherwise reject negative indices and indices
+/// at/past the unsigned 16-byte-vector count with -50 without changing state.
+/// Store the index at +0x1c, clear the counted UTF-16 length at +0x82c for -1
+/// or read the selected resource string there, then clear cached results and
+/// dispatch the selected resource. Reader and dispatch errors are ignored.
+/// Deliberate deviation: inline the four-instruction vector-size callee using
+/// wrapping u32 subtraction and arithmetic shift, preserving target layout
+/// on the host. Existing Rust ports implement all other callees; the generic
+/// test driver is monomorphized without allocation or indirect target calls.
+///
+/// # Safety
+/// `object` is a writable, word-aligned inner object satisfying the reader,
+/// cache-clear and selected-resource-dispatch contracts.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn inner_select_resource_index(object: *mut u8, index: i32) -> i32 {
+    select_resource_index_with(
+        object, index,
+        |object, index, counted| {
+            crate::ui::object_resource_counted_string::object_resource_counted_string(
+                object, index, counted,
+            )
+        },
+        |object| inner_clear_cached_results(object),
+        |object| inner_dispatch_selected_resource(object),
+    )
+}
+
+#[inline(always)]
+unsafe fn select_resource_index_with(
+    object: *mut u8,
+    index: i32,
+    read_string: impl FnOnce(*mut u8, i32, *mut u16) -> i32,
+    clear_results: impl FnOnce(*mut u8),
+    dispatch: impl FnOnce(*mut u8) -> i32,
+) -> i32 {
+    if index != -1 {
+        if index < 0 {
+            return -50;
+        }
+        let begin = object.add(BUFFER_CURSOR_BEGIN).cast::<u32>().read();
+        let end = object.add(BUFFER_CURSOR_END).cast::<u32>().read();
+        let count = ((end.wrapping_sub(begin) as i32) >> 4) as u32;
+        if count <= index as u32 {
+            return -50;
+        }
+    }
+    object.add(BUFFER_INDEX).cast::<i32>().write(index);
+    let counted = object.add(BUFFER_SELECTION).cast::<u16>();
+    if index == -1 {
+        counted.write(0);
+    } else {
+        let _ = read_string(object, index, counted);
+    }
+    clear_results(object);
+    let _ = dispatch(object);
+    0
+}
+
 /// object_select_secondary_resource_index — `FUN_080669d4` @ `0x080669d4`.
 /// True extent: 152 bytes, ending at the next PUSH at `0x08066a6c`.
 /// Verified calls: one inbound plain BL at `0x0813d9a0`, one inbound BLCC
@@ -1122,6 +1188,64 @@ mod tests {
     use crate::heap::veneers::tests::{
         alloc_log, free_log, mock_block, mock_heap, set_alloc_ret,
     };
+
+    #[test]
+    fn resource_index_rejection_preserves_entire_object() {
+        for (index, count) in [(-2, 3), (i32::MIN, 3), (0, 0), (3, 3), (i32::MAX, 3)] {
+            let mut object = [0x5a5a_5a5au32; 0x1000 / 4];
+            object[BUFFER_CURSOR_BEGIN / 4] = 0x1000;
+            object[BUFFER_CURSOR_END / 4] = 0x1000 + count * 16;
+            let before = object;
+            let result = unsafe {
+                select_resource_index_with(object.as_mut_ptr().cast(), index,
+                    |_, _, _| panic!("reader on rejected index"),
+                    |_| panic!("clear on rejected index"),
+                    |_| panic!("dispatch on rejected index"))
+            };
+            assert_eq!(result, -50);
+            assert_eq!(object, before);
+        }
+    }
+
+    #[test]
+    fn resource_selection_commits_before_cleanup_and_ignores_errors() {
+        // Include wrapped bounds and negative signed counts: stock compares
+        // the arithmetic-shift result as unsigned, not as a signed length.
+        for (index, begin, end) in [(-1, 0, 0), (0, 0x1000, 0x1010),
+            (2, 0x1000, 0x1030), (0, 0xffff_fff0, 0),
+            (i32::MAX, 0x1000, 0x0ff0)]
+        {
+            let mut object = [0u32; 0x1000 / 4];
+            object[BUFFER_CURSOR_BEGIN / 4] = begin;
+            object[BUFFER_CURSOR_END / 4] = end;
+            object[BUFFER_SELECTION / 4] = 0x9876_abcd;
+            object[RESULT_COUNT / 4] = 7;
+            let result = unsafe {
+                select_resource_index_with(object.as_mut_ptr().cast(), index,
+                    |object, selected, counted| {
+                        assert_ne!(selected, -1);
+                        assert_eq!(object.add(BUFFER_INDEX).cast::<i32>().read(), selected);
+                        counted.write(3);
+                        counted.add(1).write(0x1234);
+                        -50
+                    },
+                    |object| {
+                        assert_eq!(object.add(BUFFER_INDEX).cast::<i32>().read(), index);
+                        assert_eq!(object.add(BUFFER_SELECTION).cast::<u16>().read(),
+                            if index == -1 { 0 } else { 3 });
+                        object.add(RESULT_COUNT).cast::<u32>().write(0);
+                    },
+                    |object| {
+                        assert_eq!(object.add(RESULT_COUNT).cast::<u32>().read(), 0);
+                        -17
+                    })
+            };
+            assert_eq!(result, 0);
+            assert_eq!(object[BUFFER_INDEX / 4] as i32, index);
+            assert_eq!(object[BUFFER_SELECTION / 4],
+                if index == -1 { 0x9876_0000 } else { 0x1234_0003 });
+        }
+    }
 
     const QUERY_CONSTRUCT_RESULT: usize = 0xa110_0048;
     static QUERY_FACTORY_TEST_LOCK: Mutex<()> = Mutex::new(());
