@@ -16,6 +16,41 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080557b0
+    ghidra: FUN_080557b0
+    name: record_string_pool_read_counted_at_0x380
+    size: 20
+    sig: "i32 record_string_pool_read_counted_at_0x380(const u32 *record, u16 *counted)"
+    module: util/string_pool
+    status: ported
+    renames:
+      param_1/r0: record
+      param_2/r1: counted
+      record[0]: owner
+      record[19]: entry_id
+      FUN_080bd8bc: string_pool_read_counted (ported)
+    notes: >-
+      Raw words e1a02001 e590104c e5900000 e2800d0e ea01a03d establish
+      the 20-byte extent [0x080557b0,0x080557c4); the next word is a
+      separately entered push. Whole-image aligned ARM decoding finds
+      two inbound plain BLs at 0x080465a0 and 0x082a41cc, zero predicated
+      BLs, zero inbound B transfers, and zero body BLs. The final plain B
+      targets ported string_pool_read_counted at 0x080bd8bc, not
+      string_pool_read directly as Ghidra suggests. Record word 19 is
+      the signed entry ID; word zero addresses the owner with its pool
+      at +0x380. Copy at most 510 bytes after the u16 prefix, store
+      floor(copied_bytes/2), and preserve backend status. Callers compare
+      or consume the counted string; no stronger field identity is assumed.
+      Deliberate deviation: zero untouched incoming r3, whose initial
+      length the backend clears before validation. Target pointer fields
+      remain u32 on hosts. Real-backend tests cover odd lengths, clipping
+      at 510 bytes, zero and invalid signed IDs, empty/dead entries, invalid
+      pool tags, untouched trailing bytes, and balanced lock depth.
+      Host suite and ARM release build pass. Standalone real-source smoke
+      returns status 0/count 2 for five bytes and -50/count 0 for ID -1.
+      match.py exit-1 structural diff reviewed: word-19 load, +0x380,
+      and backend tail branch remain; LLVM adds frame setup/teardown,
+      reorders the owner load, and explicitly clears r3.
   - address: 0x080557c4
     ghidra: FUN_080557c4
     name: record_indexed_payload_lookup_at_0x380
