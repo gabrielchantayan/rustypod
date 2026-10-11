@@ -1,5 +1,7 @@
 //! Filesystem-layer helpers (path handling, FAT-facing utilities,
 //! HFS B-tree node access).
+/// Validated backing-stream read @ 0x0805b7cc.
+pub mod validated_file_read;
 /// Validated backing-stream write @ 0x0805b834.
 pub mod validated_file_write;
 /// Validated backing-stream seek @ 0x0805b804.
