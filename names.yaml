@@ -16,6 +16,35 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08058c3c
+    ghidra: FUN_08058c3c
+    name: move_entry_to_queue_end
+    size: 68
+    sig: "void move_entry_to_queue_end(u32 *queue, u32 *entry)"
+    module: util/move_entry_to_queue_end
+    status: ported
+    vars: {r0: queue, r1: entry, r2: old_tail, r3: previous, r12: next}
+    notes: >-
+      Raw extent [0x08058c3c,0x08058c80) is 68 bytes; the next real
+      function loads queue +4 and implements the opposite-end operation.
+      Independent aligned A32 decoding finds one incoming plain BL at
+      0x0806b598 and one incoming predicated BL at 0x0806c4f0; zero
+      outgoing plain or predicated BLs. A thunk at 0x0803c1b8 tail-branches
+      here. Queue +4/+8 are head/tail; entry +0/+4 are next/previous.
+      Current tail returns unchanged, including the single-entry case.
+      Otherwise publish tail, unlink entry from successor and predecessor
+      (or update head), clear next, install old tail as previous, and link
+      old tail forward. No callee seams or valid-queue behavioral deviations.
+      Aligned u32 pointer words preserve target offsets on hosts. The existing
+      request_queue_clear_matching_entries caller now uses this port, not a
+      firmware callback. Host tests cover every position in one-to-four-entry
+      queues, bidirectional links, payload preservation and filtered clearing.
+      Full host suite and ARM release build pass. Standalone executable smoke
+      verifies middle-to-tail order A,C,B and repeated tail no-op. match.py
+      exits 1: 17 stock versus 18 Rust instructions; same early return, tail
+      publication, conditional unlink and final STM/link stores. LLVM adds
+      a frame, swaps load order, and eliminates the redundant previous reload.
+
   - address: 0x08059c4c
     ghidra: FUN_08059c4c
     name: scoped_context_contains_playlist
@@ -106880,9 +106909,9 @@ functions:
       predicated BL forms. It scans the global queue from +4, clears each
       entry's request ID (+8) and context (+24) when IDs match and context is
       zero or matches, then calls 0x08058c3c only for a matching entry with a
-      successor. The unported helper is a verified direct retail-call seam on
-      device and an observable host-test seam; entry fields use target-width
-      word indices to avoid host pointer-width layout changes.
+      successor. Tail promotion now calls the Rust move_entry_to_queue_end
+      port on both host and device; integration tests verify the resulting
+      bidirectional links. Entry fields retain target-width word indices.
   - address: 0x082a3dcc
     ghidra: FUN_082a3dcc
     name: scoped_context_is_valid
