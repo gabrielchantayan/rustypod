@@ -51726,6 +51726,43 @@ functions:
       signed indices, live entries, output clearing, zero-mode rejection,
       and NULL optional outputs; obsolete mock forwarding tests are removed.
 
+  - address: 0x08055a44
+    ghidra: FUN_08055a44
+    name: record_string_pool_read_counted_at_0x2d0
+    size: 20
+    sig: "i32 record_string_pool_read_counted_at_0x2d0(const u32 *record, u16 *counted)"
+    module: util/string_pool
+    status: ported
+    renames:
+      param_1/r0: record
+      param_2/r1: counted
+      record_word_0: owner
+      record_word_17: entry_id
+      FUN_080bd8bc: string_pool_read_counted
+    notes: >-
+      Raw words e1a02001 e5901044 e5900000 e2800e2d ea019f98 establish
+      the 20-byte extent 0x08055a44..0x08055a58, ending at the next
+      function's push. Two inbound plain BLs at 0x080464d8 and 0x082a3704,
+      no predicated BLs, and zero body BLs. The final B targets the already
+      ported string_pool_read_counted at 0x080bd8bc, not the expanded
+      string_pool_read call inferred by Ghidra. Reads signed id from record
+      word 17 and target-width owner from word 0; selects owner's +0x2d0
+      pool, copies at most 510 bytes after the u16 prefix, stores
+      floor(copied_bytes/2), and preserves reader status. Deliberately
+      initializes the reader's unobservable incoming r3 to zero, since its
+      length output is cleared before validation. Real-backend host tests
+      cover odd lengths, the 510-byte boundary, zero/invalid ids, dead
+      entries, bad tags, untouched trailing bytes, and status preservation.
+      Standalone smoke using extracted actual port and reader code confirms
+      a five-byte payload and invalid-id prefix clearing. match.py's
+      reviewed exit-1 diff shows nine instructions versus five: LLVM adds
+      a frame and zeroes r3 but preserves both record loads, +0x2d0, and
+      the output shuffle. R_ARM_JUMP24 confirms the tail branch targets
+      string_pool_read_counted. Host non-test crate compilation is blocked
+      by four pre-existing missing functions in unrelated modules; the
+      smoke compiles the real reader, wrapper, tag/live predicates, and
+      bcopy/memmove without replacements.
+
   - address: 0x08055a58
     ghidra: FUN_08055a58
     name: record_indexed_payload_lookup_at_0x2d0
