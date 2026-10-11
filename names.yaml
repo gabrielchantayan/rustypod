@@ -245442,3 +245442,42 @@ functions:
       queue implementation. match.py exits 1: original B versus a 24-byte
       PUSH/MOV/LDR/POP/BX plus target literal. Frame is restored before
       BX; all arguments and the caller's LR survive. No intentional fold.
+  - address: 0x0805edc4
+    ghidra: FUN_0805edc4
+    name: obj_ln2nid
+    size: 136
+    sig: "int obj_ln2nid(const char *long_name)"
+    module: crypto/obj_dat
+    status: identified
+    renames:
+      param_1/r0: long_name
+      local_28: lookup_kind
+      local_24: lookup_object
+      local_20: search_object
+      local_18: search_long_name
+      piVar2/r0: matching_slot
+    notes: >-
+      Identified as OpenSSL OBJ_ln2nid by the long-name field at object
+      offset +4, runtime lookup kind 2, static long-name table, and caller
+      0x08078258 passing "iPod Serial Number". Raw extent is 136 bytes,
+      [0x0805edc4,0x0805ee4c): 120 instruction bytes through the return
+      at 0x0805ee38 and four literal words at 0x0805ee3c-0x0805ee48.
+      The next independent function starts at 0x0805ee4c. Independent
+      whole-image ARM branch decoding finds two incoming plain BLs at
+      0x0805f370 and 0x08078270, no predicated BLs or incoming B branches.
+      The body has two outgoing plain BLs at 0x0805edf8 and 0x0805ee20,
+      zero predicated BLs. It checks the runtime registry at
+      [0x08a0c334+4] through ported lh_retrieve at 0x082d7e0c; a hit
+      returns the object's NID at +8. Otherwise ported obj_bsearch at
+      0x0805eb04 searches 643 four-byte pointer slots at 0x08a0cd48,
+      returning the matching object's NID or zero on a miss.
+      BLOCKED: the fifth obj_bsearch argument is the literal 0x080de478
+      at 0x0805ee40. Raw words at that target are e285a080 (add r10,r5,
+      #128) and ea000090 (b 0x080de6c4); they enter an unrelated body
+      using preexisting r5/r10 and stack state, not a verified two-argument
+      long-name comparator. src/crypto/obj_dat.rs already records this
+      comparator-address anomaly. No canonical names entry exists for
+      0x080de478. Neither an upstream strcmp implementation nor an absolute
+      call seam can establish faithful behavior from these bytes. Need
+      verified comparator code or evidence explaining runtime replacement
+      of this address before porting; no Rust implementation or seam added.
