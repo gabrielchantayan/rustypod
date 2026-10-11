@@ -451,6 +451,28 @@ pub unsafe extern "C" fn operator_new_forwarder(size: usize) -> *mut u8 {
     operator_new(size)
 }
 
+/// operator_new_zeroed — original: `FUN_0805e544` @ 0x0805e544.
+/// True extent [0x0805e544, 0x0805e568): 36 bytes, no literals.
+/// Two plain inbound BL calls; body has one plain BL and one BLNE.
+///
+/// Allocates `size` bytes through tag-2 operator_new, clears exactly that
+/// range through the IRAM memzero veneer only when allocation succeeds,
+/// and returns the original allocation pointer (including NULL).
+/// Zero size still allocates. No deliberate behavioral deviations; Rust
+/// expresses the predicated clear as a branch and reuses both ported callees.
+///
+/// # Safety
+/// The allocator must return NULL or writable storage for `size` bytes.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn operator_new_zeroed(size: usize) -> *mut u8 {
+    let allocation = operator_new(size);
+    if !allocation.is_null() {
+        crate::libc::iram_veneers::iram_memzero_veneer(allocation, size);
+    }
+    allocation
+}
+
 /// allocate_one_byte_leading — original: `FUN_080b3d7c` @ 0x080b3d7c (8
 /// bytes; four plain inbound `bl` calls, none predicated).
 ///
@@ -1804,6 +1826,36 @@ pub(crate) mod tests {
 
             assert_eq!(operator_new_forwarder(usize::MAX), BLOCK_A as *mut u8);
             assert_eq!((ALLOC_CALLS, LAST_ALLOC_SIZE, LAST_ALLOC_TAG), (2, usize::MAX, 2));
+        }
+    }
+
+    #[test]
+    fn operator_new_zeroed_clears_exact_range_for_all_alignments() {
+        let _lock = mock_heap();
+        for offset in 0..4 {
+            for size in 0..=64 {
+                let mut storage = [0xA5u8; 72];
+                unsafe {
+                    let allocation = storage.as_mut_ptr().add(4 + offset);
+                    set_alloc_ret(allocation);
+                    assert_eq!(operator_new_zeroed(size), allocation);
+                }
+                let mut expected = [0xA5u8; 72];
+                expected[4 + offset..4 + offset + size].fill(0);
+                assert_eq!(storage, expected, "offset={offset}, size={size}");
+            }
+        }
+    }
+
+    #[test]
+    fn operator_new_zeroed_returns_null_without_clearing_on_failure() {
+        let _lock = mock_heap();
+        unsafe {
+            set_alloc_ret(core::ptr::null_mut());
+            // A clear of this nonzero range would fault if the NULL guard
+            // were missing; maximum size must not cause arithmetic here.
+            assert!(operator_new_zeroed(usize::MAX).is_null());
+            assert!(operator_new_zeroed(0).is_null());
         }
     }
 

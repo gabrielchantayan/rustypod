@@ -40308,6 +40308,36 @@ functions:
       operator_new seam because it cannot guarantee a tail branch; its
       target-only section preserves the separately linked entry.
 
+  - address: 0x0805e544
+    ghidra: FUN_0805e544
+    name: operator_new_zeroed
+    size: 36
+    sig: "void *operator_new_zeroed(size_t size)"
+    module: heap/veneers
+    status: ported
+    vars: {param_1: size, iVar1: allocation}
+    renames:
+      FUN_082aadd4: operator_new
+      thunk_EXT_FUN_220002d4: iram_memzero_veneer
+    notes: >-
+      Raw A32 words establish [0x0805e544,0x0805e568), 36 bytes with no
+      literals; the next independent PUSH is at 0x0805e568. Body contains
+      one unconditional BL to operator_new @ 0x082aadd4 and one BLNE to
+      the memzero veneer @ 0x08037dc8, whose literal targets 0x220002d4,
+      the IRAM mirror of osos memzero @ 0x080002d4, not mask ROM.
+      Full aligned raw BL decoding finds two plain inbound calls at
+      0x08057ed4 and 0x08058170, and no predicated inbound BL calls.
+      Allocates the requested byte count with tag 2, clears exactly that
+      range on success, and returns the original pointer, including NULL.
+      Zero size still invokes allocation. Both callees are existing ports;
+      Rust uses an explicit NULL branch rather than predicated instructions,
+      with no deliberate behavioral deviations.
+      match.py reports eleven Rust instructions versus nine stock instructions:
+      frame-pointer setup and an explicit branch replace ARM predication.
+      Linked ARM emulation matches stock across 262 cases covering lengths
+      0..64, alignments 0..3, zero/max-size allocation failure, and a clear
+      callee that clobbers r0; allocation/clear callees are intercepted.
+
   - address: 0x082a7818
     ghidra: FUN_082a7818
     name: basic_ostream_construct
