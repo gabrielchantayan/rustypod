@@ -246411,3 +246411,38 @@ functions:
       ARM relocation confirms the BL targets stream_read_core, despite
       match.py displaying the unresolved call as stream_read_cstr.
       Reference C: decomp/c/004/08057698_FUN_08057698.c.
+
+  - address: 0x08057210
+    ghidra: FUN_08057210
+    name: backward_bool_fill
+    size: 32
+    sig: "u8 *backward_bool_fill(u8 *dst, u32 value, u32 len)"
+    module: libc/backward_bool_fill
+    status: ported
+    renames:
+      param_1/r0: dst
+      param_2/r1: value
+      param_3/r2: len_then_cursor
+    notes: >-
+      Raw osos.dec verifies eight ARM words through bx lr at 0x0805722c;
+      the next real function begins at 0x08057230 with push {r3-r11,lr}.
+      Whole-image A32 BL decoding finds one plain incoming BL at 0x08056d98
+      and one predicated BLNE at 0x080571dc; no outgoing BL of either kind.
+      Normalize the full value word to zero or one, form dst plus len,
+      pre-decrement the cursor and store while cursor >= dst unsigned.
+      Preserve dst in r0 and expose it as the return value despite Ghidra's
+      void signature. Both known callers supply zero: stack-buffer clearing
+      and aligned arena allocation. No callee seam is needed. The already
+      ported arena allocator intentionally retains its documented local fill.
+      Deliberate deviations: volatile stores prevent memset substitution;
+      host pointers use native width rather than ARM u32. No NULL guard:
+      NULL plus zero length wraps the cursor and is not a valid no-op.
+      Tests cover lengths 0..64, all byte alignments, full-word nonzero
+      normalization, unchanged guards, preserved destination and zero length
+      at a non-null dangling pointer. Host suite and ARM release build pass;
+      standalone smoke verifies nonzero fill, zero fill and zero length.
+      match.py exits 1 with 8 original versus 13 Rust instructions: LLVM
+      adds a frame, moves the initial unsigned exit outside the loop and
+      uses a post-decrement byte store; normalization, descending stores,
+      unsigned termination and r0 preservation remain intact.
+      Reference C: decomp/c/004/08057210_FUN_08057210.c.
