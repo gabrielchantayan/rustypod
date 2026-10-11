@@ -246146,3 +246146,43 @@ functions:
       frame-pointer save on the relink path, and reorders independent
       final link stores. Metadata clearing, tail comparison, conditional
       front/previous repair and append structure are retained.
+
+  - address: 0x0805945c
+    ghidra: FUN_0805945c
+    name: hfs_btree_insert_offsets
+    module: fs/hfs_btree_insert_offsets
+    status: ported
+    size: 84
+    signature: "void hfs_btree_insert_offsets(const BTreeControlBlock *btree, uint8_t *node, uint32_t index, uint32_t record_size)"
+    args:
+      param_1: btree
+      param_2: node
+      param_3: index
+      param_4: record_size
+    locals:
+      uVar1: old_count
+      uVar2: node_size
+      uVar5: remaining
+      uVar6: previous_remaining
+      psVar4: source
+      psVar7: destination
+    notes: >-
+      Raw A32 confirms [0x0805945c,0x080594b0), 84 bytes, with the next
+      independent PUSH prologue at 0x080594b0. Whole-image aligned ARM word
+      decoding finds two incoming unconditional BLs at 0x08058df8 and
+      0x08059524, zero incoming predicated BLs, and zero outgoing plain or
+      predicated BLs. Increment the node descriptor numRecords halfword
+      modulo 65536. Starting at node + node_size - 2 * old_count - 2,
+      copy (old_count - index) modulo 65536 plus one halfwords one slot
+      toward lower addresses, adding record_size modulo 65536. Includes
+      the end-of-data sentinel and executes once even at index == count.
+      Callers separately relocate record bytes. Reuses BTreeControlBlock
+      and NUM_RECORDS_OFFSET; no callee seams or deliberate deviations.
+      Host tests cover empty nodes, every insertion position, unchanged
+      surrounding data, displacement truncation/wrap and count wrap.
+      Full host test and ARM release gates pass. Standalone smoke verifies
+      consecutive middle insertion and append. match.py exits 1 with
+      21 instructions on each side: LLVM uses a frame pointer, one moving
+      source pointer with destination at -2, and TST against 0xffff instead
+      of explicit loop-counter truncation. Inclusive halfword loop,
+      wrapping arithmetic and count update remain structurally equivalent.
