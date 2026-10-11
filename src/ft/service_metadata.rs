@@ -121,6 +121,64 @@ pub unsafe extern "C" fn ft_service_metadata_flags_at_b84(object: *const u8) -> 
     metadata.add(0xb84).cast::<u32>().read()
 }
 
+/// ft_service_metadata_class_zero_mask — retail `FUN_080538a4` @ `0x080538a4`.
+/// True extent: [0x080538a4, 0x080538b0), 12 bytes; the next function is
+/// the independent class-one accessor. Raw words `e5900f00 e5900b30 e12fff1e`
+/// decode to `ldr r0,[r0,#0xf00]; ldr r0,[r0,#0xb30]; bx lr`.
+/// Whole-image aligned A32 decoding verifies two plain inbound BLs at
+/// 0x081725a0 and 0x08172688, zero predicated inbound BLs, and zero
+/// outgoing plain or predicated BLs.
+///
+/// Follow the metadata pointer at object+0xf00 and return the complete
+/// class-zero event mask at metadata+0xb30. Callers test, set, and clear
+/// selected event bits; individual bit meanings remain unrecovered.
+/// Deliberate deviations: native-width host pointers, four-byte ARM pointers;
+/// unchanged offsets and aligned reads, with no NULL or bounds checks.
+///
+/// # Safety
+/// `object` contains an aligned readable metadata pointer at +0xf00, whose
+/// pointee contains an aligned readable u32 at +0xb30.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn ft_service_metadata_class_zero_mask(object: *const u8) -> u32 {
+    let metadata = object.add(OBJECT_METADATA_OFFSET).cast::<*const u8>().read();
+    metadata.add(0xb30).cast::<u32>().read()
+}
+
+#[cfg(test)]
+mod class_zero_mask_tests {
+    use super::*;
+
+    #[repr(C)]
+    struct Owner {
+        padding: [u8; OBJECT_METADATA_OFFSET],
+        metadata: *const u32,
+    }
+
+    #[test]
+    fn preserves_mask_bits_and_tracks_metadata_replacement_without_writes() {
+        let mut first = [0xa5a5_a5a5u32; 0xb90 / 4];
+        let mut second = [0x5a5a_5a5au32; 0xb90 / 4];
+        let mut owner = Owner { padding: [0xcc; OBJECT_METADATA_OFFSET], metadata: first.as_ptr() };
+        for value in [0, u32::MAX, 0x8000_0000, 1, 0x0123_4567, 0xaaaa_5555] {
+            first[0xb30 / 4] = value;
+            second[0xb30 / 4] = !value;
+            let before_first = first;
+            let before_second = second;
+            owner.metadata = first.as_ptr();
+            assert_eq!(unsafe { ft_service_metadata_class_zero_mask(
+                (&owner as *const Owner).cast()) }, value);
+            owner.metadata = second.as_ptr();
+            assert_eq!(unsafe { ft_service_metadata_class_zero_mask(
+                (&owner as *const Owner).cast()) }, !value);
+            assert_eq!(first, before_first);
+            assert_eq!(second, before_second);
+            assert_eq!(owner.metadata, second.as_ptr());
+            assert!(owner.padding.iter().all(|byte| *byte == 0xcc));
+        }
+    }
+}
+
 /// ft_service_metadata_class_one_mask — retail `FUN_080538b0` @ `0x080538b0`.
 /// True extent: [0x080538b0, 0x080538bc), 12 bytes; the next function
 /// starts with `push {r4-r10,lr}`. Raw words `e5900f00 e5900b8c e12fff1e`

@@ -16,6 +16,33 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080538a4
+    ghidra: FUN_080538a4
+    name: ft_service_metadata_class_zero_mask
+    size: 12
+    sig: "u32 ft_service_metadata_class_zero_mask(const u8 *object)"
+    module: ft/service_metadata
+    status: ported
+    renames:
+      param_1/r0: object
+      return/r0: class_zero_mask
+    notes: >-
+      Raw words e5900f00 e5900b30 e12fff1e establish the true extent
+      [0x080538a4,0x080538b0); the independent class-one accessor follows.
+      Whole-image aligned A32 decoding finds two plain inbound BLs at
+      0x081725a0 and 0x08172688, zero predicated inbound BLs, and zero
+      outgoing BLs of either kind. Follow object+0xf00 and return the
+      complete class-zero event mask at metadata+0xb30. Callers test,
+      set, and clear selected bits; individual bit meanings remain unknown.
+      Reuse the registered ft/service_metadata module and replace the
+      controller query's fixed-address seam with this Rust accessor.
+      Native-width host pointers preserve offsets; ARM pointers remain
+      four bytes. No added NULL or bounds checks. Host edge tests cover
+      zero, all bits, high-bit and mixed values, metadata replacement,
+      and unchanged surrounding storage. Actual-source standalone smoke
+      returns 00000000,80000001,ffffffff. Host suite and ARM release build
+      pass. match.py exits 1: both aligned ldr offsets match exactly;
+      LLVM adds frame setup and pop {fp,pc} instead of bx lr. No device run.
   - address: 0x080538b0
     ghidra: FUN_080538b0
     name: ft_service_metadata_class_one_mask
