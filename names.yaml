@@ -16,6 +16,32 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08054568
+    ghidra: FUN_08054568
+    name: query_navigation_mode
+    size: 92
+    sig: "uint32_t query_navigation_mode(uint8_t *element, uint16_t *previous)"
+    module: ui/navigation_mode
+    status: ported
+    vars: {param_1/r0: element, param_2/r1: previous, r2: allowed}
+    notes: >-
+      Raw A32 extent is [0x08054568,0x080545c4): 84 instruction bytes
+      followed by dev-space and tune literal words at 0x080545bc/c0.
+      Zero outbound plain BLs and zero predicated BLs; two inbound plain
+      BLs at 0x08067310 and 0x0817cef4, zero predicated. NULL or kind
+      +0x198 equal to 0x64657620 or 0x74756e65 clears optional halfword
+      output and returns zero. Otherwise report +0x184 before testing
+      +0x18d bit 6; return one when clear. The register-offset LDRH
+      at 0x08054590 adds r0 to r3=0x184. Only two arguments are used.
+      No algorithm deviations. Output alias ordering is preserved.
+      Existing setter now calls Rust directly, removing its query seam.
+      Host tests cover all halfwords and flag bytes, excluded kinds,
+      NULL, omitted outputs, and aliases that clear or set inhibit.
+      Host suite passes 15606 tests; ARM release build passes. Public
+      API smoke reports allowed=1 blocked=0 excluded=0 excluded_mode=0.
+      match.py shows 21 original versus 25 Rust instructions including
+      two literals: same kind guards, halfword copy before flag read,
+      LLVM frame and bit-extraction differences; no calls. No device run.
   - address: 0x080545c4
     ghidra: FUN_080545c4
     name: element_state_can_change
@@ -99771,7 +99797,7 @@ functions:
       param_1_plus_0x184: navigation_mode
       param_1_plus_0x48: tagged_handler_list
       DAT_08067360: MODE_CHANGED_TAG
-      FUN_08054568: query_mode_change
+      FUN_08054568: query_navigation_mode
       FUN_0805d31c: apply_mode_change
       FUN_08066bb8: notify_mode_change
     notes: >-
@@ -99781,18 +99807,18 @@ functions:
       linked function starts at 0x08067364. Thus the true extent is 100
       bytes, despite Ghidra's 96-byte code-only report. Decoding every ARM
       B/BL word in osos.dec finds 11 direct callers, all plain unconditional
-      bl and zero predicated forms. The unported 0x08054568 reports whether
+      bl and zero predicated forms. The Rust query_navigation_mode reports whether
       the element may change modes and stores the prior halfword through its
       out-pointer. A permitted request only proceeds when mode is in 0..=2
       and differs from that reported halfword: the port stores mode at +0x184,
       calls unported 0x0805d31c, then invokes unported 0x08066bb8 on the
       handler list at +0x48 with literal tag 0x6370726d, context element,
       old mode in r3, and new mode in the stack word. The tag's semantic
-      identity is not recovered. Deliberate deviation: the three unported
-      callees dispatch through NAVIGATION_MODE_OPS; target defaults call
-      their stock addresses, while host recorders prove denied, out-of-range,
-      reported-equal, and accepted-change behavior plus the exact notification
-      tuple.
+      identity is not recovered. The query now calls Rust directly.
+      The two unported side-effect callees dispatch through NAVIGATION_MODE_OPS;
+      target defaults call stock addresses, while host tests exercise the real
+      query with denied, out-of-range, equal, and accepted changes and verify
+      the notification tuple.
 
 
   # --- UI object packed-field non-one predicate (ui/object_packed_field_is_not_one) ---
