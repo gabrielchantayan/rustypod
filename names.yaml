@@ -244687,3 +244687,55 @@ functions:
       bounds checks, indexed word load, +4 store and ordered resets; LLVM
       adds a frame and volatile operation loads, with BLX for the existing
       0x08059700 seam and relocation placeholders for direct Rust calls.
+
+  - address: 0x08066854
+    ghidra: FUN_08066854
+    name: object_reset_to_active_plst
+    size: 196
+    sig: "i32 object_reset_to_active_plst(u8 *object)"
+    module: util/inner_state
+    status: ported
+    renames:
+      param_1/r5: object
+      iVar1/r4: backend
+      iVar2/r0: active_plst
+      DAT_08066914: SELECTED_RESOURCE_CALLBACK
+      FUN_08051dc4: object_backend_for_kind
+      FUN_080522d4: ui_tdat_first_plst
+      FUN_08053bd0: ui_plst_next
+      FUN_080be1c8: inner_release_record_buffer_and_reset_cursor
+      FUN_08059870: inner_clear_record_cache
+      FUN_08059700: unported cleanup (existing firmware seam)
+      FUN_08059820: inner_clear_selection_cache
+      FUN_08059644: inner_reset_transient_state
+      FUN_08059a98: inner_clear_cached_results
+      FUN_08059ad4: inner_dispatch_selected_resource
+      FUN_08067450: set_resource_selected
+      FUN_0806b604: resource_callback_dispatch
+    notes: >-
+      Raw ARM establishes [0x08066854,0x08066918), 196 bytes: 192
+      instruction bytes and literal 0x080d43c4 at 0x08066914, followed
+      by the next real PUSH prologue. Whole-image aligned BL decoding
+      finds two plain incoming sites at 0x081162c8 and 0x0813c520,
+      twelve plain outgoing BLs and zero predicated BLs either way.
+      Resolve backend, walk +0xf60 tdat's plst list for +0x1ac bit 0x10,
+      and cache first match at backend+0xf44. Exhaustion returns
+      0xfffeffff without object writes. Success clears object+4, resets
+      caches in original order, clears the object's selection bit on
+      the active plst, dispatches its target-width +0x40 resource root
+      with callback 0x080d43c4, ignores statuses and returns zero.
+      Reuse canonical Rust callees; only 0x08059700 remains the existing
+      unported cleanup seam. Host final dispatch uses the existing
+      selected-resource operation slot; target uses the real dispatcher
+      preserving the callback continuation's recovered register contract.
+      Omit the unreachable null check after storing a nonnull list item.
+      Host regression covers empty/exhausted lists without writes,
+      first-match precedence, selection-bit isolation, cache reset and
+      ignored dispatch failure. All 15473 host tests pass; ARM release
+      build passes. Standalone host-seam smoke confirms the empty-list
+      error and unchanged object. Non-test host build has four unrelated
+      missing firmware-seam definitions, so smoke was compiled with test
+      seams. match.py exits 1: 48 original instructions versus 54 Rust
+      instructions; loop, flag test, cache store, resets, selection clear
+      and callback dispatch remain; frame setup and volatile cleanup-slot
+      loads/BLX differ. No intentional symbol fold.

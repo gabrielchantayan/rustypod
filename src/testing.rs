@@ -56,6 +56,7 @@ pub mod hints {
     pub const PKCS7_GET_OCTET_STRING: usize = 0x7032_0000;
     pub const PFR_GLYPH_CLOSE_CONTOUR: usize = 0x7031_0000;
     pub const INDEXED_PAYLOAD_BACKEND: usize = 0x436d_0000;
+    pub const OBJECT_RESET_TO_ACTIVE_PLST: usize = 0xb740_0000;
     pub const CRTS_TABLE_TEARDOWN: usize = 0x7020_0000;
     pub const ENABLED_SUBTREE_FIND_IDENTIFIER: usize = 0x7001_0000;
     pub const REMOVE_TASK: usize = 0x436b_0000;
