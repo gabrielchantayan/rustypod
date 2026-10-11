@@ -244639,3 +244639,51 @@ functions:
       setup and an equal early return, retaining full-width comparison,
       byte store, owner-pointer reload and dirty tail branch. R_ARM_JUMP24
       relocation verifies rtc_context_mark_dirty as the generated target.
+
+  - address: 0x080669d4
+    ghidra: FUN_080669d4
+    name: object_select_secondary_resource_index
+    size: 152
+    sig: "i32 object_select_secondary_resource_index(u8 *object, i32 index)"
+    module: util/inner_state
+    status: ported
+    renames:
+      param_1/r0/r4: object
+      param_2/r1/r2: index
+      FUN_08051dc4: object_backend_for_kind
+      FUN_0806cf80: plst_resource_activate
+      FUN_080be134: inner_release_buffer_and_reset_cursor
+      FUN_080be1c8: inner_release_record_buffer_and_reset_cursor
+      FUN_08059870: inner_clear_record_cache
+      FUN_08059820: inner_clear_selection_cache
+      FUN_08059644: inner_reset_transient_state
+      FUN_08059a04: inner_clear_16_byte_vector_cache
+      FUN_0805997c: inner_clear_index_cache
+      FUN_08059a98: inner_clear_cached_results
+      FUN_08059ad4: inner_dispatch_selected_resource
+    notes: >-
+      Raw aligned A32 words establish [0x080669d4,0x08066a6c), 152 bytes,
+      before the next independent PUSH. Independently decoding the complete
+      image finds one inbound plain BL at 0x0813d9a0 and one inbound BLCC
+      at 0x0813cdc4. The body has 12 plain outbound BLs and no predicated
+      BLs. Resolve kind-1 backend or kind-2 proxy; reject negative index or
+      unsigned index at/past backend+0xf70 with -50. Load the u32 entry
+      from backend+0xf6c, store it at object+4, and leave object+8 unchanged.
+      Activate with mode zero and run the ten cleanups in original order;
+      discard activation and final callback status and return zero.
+      Reuse canonical Rust ports. Unported 0x08059700 retains the existing
+      selection operation slot without inventing a callee identity; host
+      activation also uses that existing seam, while target activation is
+      a direct canonical call. Rust preserves index in r5 instead of relying
+      on resolver preservation of r2. Tests cover negative/extreme/boundary
+      indices, empty count, first/last entries, unchanged primary index,
+      real cleanup writes, cursor rewind and NULL-primary auxiliary retention.
+      Host suite passes 15472 tests; ARM build-std release passes. Standalone
+      fixture-enabled host executable confirms rejection leaves all bytes
+      unchanged. Ordinary non-test host library build is blocked by existing
+      missing prepare_metadata, extract_metadata, configure_shared_payload_kind
+      and notify_calendar_change symbols, so smoke uses cfg(test) library.
+      match.py exits 1 with 43 versus 38 instructions: same signed/unsigned
+      bounds checks, indexed word load, +4 store and ordered resets; LLVM
+      adds a frame and volatile operation loads, with BLX for the existing
+      0x08059700 seam and relocation placeholders for direct Rust calls.
