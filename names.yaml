@@ -16,6 +16,46 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080660b8
+    ghidra: FUN_080660b8
+    name: hfs_extent_find_block
+    size: 168
+    sig: "u32 hfs_extent_find_block(const u16 *volume, u32 logical_block, const u32 *extents, u32 first_logical_block, u32 *out_index, u32 *out_end, u8 *out_exhausted)"
+    module: fs/hfs_extent_find_block
+    status: ported
+    vars:
+      param_1/r0: volume
+      param_2/r1: logical_block
+      param_3/r2: extents
+      param_4/r3: first_logical_block
+      param_5: out_index
+      param_6: out_end
+      param_7: out_exhausted
+      volume+2: signature
+      descriptor+4: block_count
+    notes: >-
+      Raw A32 extent [0x080660b8,0x08066160), 168 bytes, ends before
+      the next independent PUSH. Two incoming plain BLs at 0x08065ffc
+      and 0x080660b0; no predicated incoming BLs or outgoing BLs.
+      Scan eight extent pairs for signature 0x482b, otherwise three.
+      Ignore physical start words; add nonzero counts with u32 wrapping
+      to the supplied logical base. Strict unsigned end > requested block
+      returns zero and the containing index. Otherwise return 0x10 and
+      the last nonempty index, or zero for an empty record. A zero count
+      marks exhaustion; a full record leaves the flag clear for overflow.
+      Caller 0x08065f94 retries using overflow extents and a new logical
+      base. No callee seams. Deliberate deviation: omit dead r3 comparison.
+      Volatile aligned accesses retain output and aliasing order; pair
+      word indices preserve target layout on hosts. Tests cover empty,
+      exact boundaries, early terminators, three/eight-slot limits,
+      wrapping sums and signature fallback. Full host suite passes
+      15481 tests; ARM build-std release build passes.
+      Executable source smoke verifies containing-block, exact-boundary
+      and exhausted-record paths. match.py exits 1 with 42 instructions
+      on each side: LLVM changes frame/register allocation and splits
+      exhaustion/full-record returns. Signature-dependent limits, stride
+      eight count loads, wrapping ADD, unsigned BHI and output stores
+      remain intact; no generated calls or intentional symbol folds.
   - address: 0x08066584
     ghidra: FUN_08066584
     name: inner_select_primary_resource_index
