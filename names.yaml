@@ -16,6 +16,32 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08054fcc
+    ghidra: FUN_08054fcc
+    name: current_utc_offset_minutes_negated
+    size: 48
+    sig: "i32 current_utc_offset_minutes_negated(void)"
+    module: time/utc_adjust
+    status: ported
+    renames:
+      local_c/sp+4: base_utc_offset_minutes
+      local_10/sp+0: daylight_saving_minutes
+      r4: negated_offset_minutes
+      FUN_080ab558: current_utc_offset_query
+    notes: >-
+      Raw A32 extent is 0x08054fcc..0x08054ffc, exactly 48 bytes; the next
+      function starts with ldr r0,[r0,#0xf00], ldr r0,[r0,#0xb74], bx lr.
+      Whole-image decoding finds two plain inbound BLs at 0x0805be84 and
+      0x0806ba68, zero predicated inbound BLs; one outgoing plain BL at
+      0x08054fdc to ported current_utc_offset_query, zero predicated BLs.
+      No arguments: Ghidra's four parameters reflect saved r2/r3 stack slots.
+      Returns zero for zero validity, otherwise negates the signed i16 base
+      plus signed i8 daylight-saving minute sum. Both timestamp ports now
+      reuse this adapter. Typed initialized locals replace saved stack words.
+      LLVM adds a frame, initialization and unconditional signed loads;
+      R_ARM_CALL targets current_utc_offset_query; conditional negation remains.
+      Host tests cover signed extrema, cancellation and noncanonical validity.
+      ARM match.py structural diff reviewed; no behavioral deviations.
   - address: 0x08055638
     ghidra: FUN_08055638
     name: linked_item_index_find
@@ -126621,7 +126647,7 @@ functions:
     status: ported
     renames:
       param_1/r0/r4: seconds
-      FUN_08054fcc: current_utc_offset_minutes_negated (unported)
+      FUN_08054fcc: current_utc_offset_minutes_negated (ported, time/utc_adjust)
       FUN_080ab558: current_utc_offset_query (ported, time/utc_offset)
     notes: >-
       Raw extent is exactly 32 bytes, 0x0806ba5c..0x0806ba7c: the next
@@ -126630,14 +126656,14 @@ functions:
       exactly 9 direct unconditional plain BL callers at 0x0806c61c,
       0x0806c628, 0x0806c634, 0x0806c6a0, 0x0806c6b0, 0x0806c6c0,
       0x080b44ec, 0x080bdc0c, and 0x080e8510; no predicated BL callers.
-      The zero input branch returns without calling the 48-byte unported
+      The zero input branch returns without calling the 48-byte ported
       helper FUN_08054fcc. Otherwise that helper calls the ported
       current_utc_offset_query, returns zero when its validity result is
       zero, and returns the negated signed (i16 base + i8 daylight) minute
       sum otherwise. The main sub r0,r0,r0,lsl#4 / add r4,r4,r0,lsl#2
       arithmetic therefore adds that signed sum times 60 seconds, modulo
-      2^32. The port directly calls current_utc_offset_query instead of
-      adding a target seam for the fully decoded unported adapter; a private
+      2^32. The port calls the shared current_utc_offset_minutes_negated
+      adapter, which calls current_utc_offset_query; a private
       host-only volatile seam provides valid, invalid, signed-daylight, and
       zero-input test coverage without changing device dispatch.
 
@@ -156125,7 +156151,7 @@ functions:
     status: ported
     renames:
       param_1/r0/r4: seconds
-      FUN_08054fcc: current_utc_offset_minutes_negated (unported)
+      FUN_08054fcc: current_utc_offset_minutes_negated (ported, time/utc_adjust)
       FUN_080ab558: current_utc_offset_query (ported, time/utc_offset)
       r0(after rsb): negated_offset_minutes_times_15
     notes: >-
@@ -156136,14 +156162,13 @@ functions:
       exactly six inbound direct calls, all unconditional plain bl at
       0x0804602c, 0x0804603c, 0x0804604c, 0x0804609c, 0x080460a8, and
       0x080460b4; there are no predicated bl callers. Zero returns without
-      querying the calendar. Otherwise the unported 48-byte adapter
+      querying the calendar. Otherwise the ported 48-byte adapter
       FUN_08054fcc returns zero for an invalid query or the negated signed
       (i16 base plus i8 daylight) minute sum. The rsb/add arithmetic adds
       that adapter result times 60, equivalently subtracting the live UTC
-      offset from seconds modulo 2^32. Deliberate deviation: the fully
-      decoded adapter is bypassed in favor of the existing ported
-      current_utc_offset_query, with equivalent validity gating and signed
-      arithmetic. Host tests cover zero query avoidance, successful
+      offset from seconds modulo 2^32. The port calls the shared minute
+      adapter, preserving validity gating and signed arithmetic.
+      Host tests cover zero query avoidance, successful
       base-plus-daylight subtraction, signed daylight, failed-query
       preservation, and u32 underflow.
 
