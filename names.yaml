@@ -47911,6 +47911,42 @@ functions:
       and zero-on-reject shape match. Reference C:
       decomp/c/003/080522bc_FUN_080522bc.c.
 
+  - address: 0x08053ba0
+    ghidra: FUN_08053ba0
+    name: liti_container_successor
+    size: 24
+    sig: "u32 liti_container_successor(const u8 *container)"
+    module: app/liti_container_successor
+    status: ported
+    renames:
+      param_1/r0/r2: container
+      uVar2/r0: successor
+      iVar1/r0: class_matches
+      FUN_08057bdc: nested_liti_class_check
+    notes: >-
+      Raw words e1a02000 e52de004 eb00100b e1b00000 15920000 e49df004
+      establish the exact 24-byte extent 0x08053ba0..0x08053bb8. The next
+      function begins with mov r2,r0 at 0x08053bb8. Calls the already-ported
+      nested_liti_class_check and conditionally loads word zero from the
+      original container; rejected inputs return zero. The word is a
+      successor link: callers 0x0805e350 and 0x08064120 use it to advance
+      container-list traversals. Independent raw ARM decoding finds two
+      inbound unconditional plain BL calls and zero predicated BL; the body
+      contains one unconditional BL to 0x08057bdc and zero predicated BL.
+      Deliberate deviation is direct reuse of the canonical Rust predicate
+      rather than a stock-address seam. Target-width aligned loads and opaque
+      u32 return preserve firmware behavior on hosts with wider pointers.
+      Host tests cover NULL container, NULL database, rejected class tags,
+      zero and extreme successor words, and distinguish word zero from the
+      adjacent word without dereferencing successor values.
+      Full host suite passed (15619 tests); ARM release build passed.
+      Executable smoke verified a two-container traversal and rejected-class
+      termination. match.py reports six original versus eight Rust
+      instructions: LLVM adds a callee-saved frame, uses cmp plus moveq zero,
+      and retains the predicate call and conditional word-zero load.
+      Object relocation R_ARM_CALL confirms nested_liti_class_check as the
+      BL target despite match.py displaying the unresolved call as self.
+
   - address: 0x080522d4
     ghidra: FUN_080522d4
     name: ui_tdat_first_plst
