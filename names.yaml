@@ -245903,3 +245903,47 @@ functions:
       instructions versus 29 original, with inlined byte reads replacing
       four read BLs, preserved increment and swapped low-halfword store,
       NULL error synthesis replacing the literal load, and an fp frame.
+
+  - address: 0x0805ae18
+    ghidra: FUN_0805ae18
+    name: file_write
+    size: 84
+    sig: "i32 file_write(u32 descriptor, u32 data, u32 requested, u32 flags, u32 *transferred)"
+    module: fs/file_write
+    status: ported
+    vars:
+      param_1/r4: descriptor
+      param_2: data
+      param_3: requested
+      param_4/r5: flags
+      param_5: transferred
+    renames:
+      FUN_0827899c: stream_write
+      FUN_08278938: platform_file_flush
+      FUN_0809da3c: map_status_code
+    notes: >-
+      Raw A32 extent is [0x0805ae18,0x0805ae6c), 84 bytes; POP to PC
+      at 0x0805ae68 precedes the next function's PUSH. One plain outbound
+      BL at 0x0805ae48 targets stream_write; one BLNE at 0x0805ae60
+      targets platform_file_flush. BNE at 0x0805ae54 tail-calls
+      map_status_code, whose verified constants differ from Ghidra's
+      inlined pseudocode. Reject descriptor -1 or zero data with -50.
+      Forward descriptor, requested, data, transferred to the writer.
+      Nonzero write statuses are translated; on success flags bit zero
+      requests a flush, whose status is deliberately ignored. Zero-length
+      writes still call the writer. Reuse the Rust mapper and flush port;
+      device writes call the canonical retail stream_write because its
+      Rust core is unwired, while hosts use its replaceable core.
+      Migrate validated_file_write's target call to this Rust wrapper.
+      Host tests cover rejection without count access, partial progress
+      across mapped and signed statuses, zero/maximal counts, bit-zero
+      precedence, write-before-flush ordering and ignored flush errors.
+      Standalone exported-wrapper smoke observes invalid=-50,
+      short=-38 with count=3, and success=0 despite flush error 14.
+      Whole-image BL decode finds two plain inbound calls at 0x0805b864
+      and 0x0806e55c, no predicated inbound calls. Host suite and ARM
+      release build pass. match.py reports 29 Rust instructions versus
+      21 original: a larger frame, literal-loaded BLX for the retail
+      writer and explicit conditional flush replace the ADS frame and
+      BLNE. Rejection, argument shuffle, error tail branch, bit-zero
+      flush gate and forced zero success return are preserved.
