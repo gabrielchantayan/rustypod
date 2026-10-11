@@ -563,3 +563,4 @@ pub mod ring_buffer_construct;
 pub mod masked_djb2_hash;
 pub mod payload_counter_decrement;
 pub mod payload_counter_increment;
+pub mod initialize_zero_word;
