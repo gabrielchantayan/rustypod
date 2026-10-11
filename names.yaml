@@ -246340,3 +246340,42 @@ functions:
       source pointer with destination at -2, and TST against 0xffff instead
       of explicit loop-counter truncation. Inclusive halfword loop,
       wrapping arithmetic and count update remain structurally equivalent.
+
+  - address: 0x08057698
+    ghidra: FUN_08057698
+    name: stream_read_cstr
+    size: 56
+    sig: "i32 stream_read_cstr(StreamObject **stream, u32 requested, u8 *dst, u32 capacity)"
+    module: util/stream_read_cstr
+    status: ported
+    renames:
+      param_1/r0: stream
+      param_2/r1: requested
+      param_3/r2: dst
+      param_4/r3: capacity
+      local_10: count
+      FUN_0805e754: stream_read_core
+    notes: >-
+      Raw A32 words establish [0x08057698,0x080576d0), 56 bytes; the next
+      independent PUSH begins at 0x080576d0. Whole-image aligned BL decoding
+      finds two incoming plain BLs at 0x080e6600 and 0x080e6684, zero
+      predicated BLs. One outgoing plain BL at 0x080576b8 targets the existing
+      stream_read_core seam at 0x0805e754; zero outgoing predicated BLs.
+      Clamp requested to capacity minus one using unsigned wrapping
+      arithmetic. Read through the stream handle, ignore the core status,
+      write NUL at dst plus the raw returned count, and return that count.
+      No deliberate behavioral deviations: capacity zero wraps to u32::MAX;
+      negative results are not filtered and require a writable signed offset.
+      Reuses StreamObject and StreamVtable, preserving target slot layout
+      while widening pointers structurally on hosts. Host tests cover full,
+      clamped, short, empty, zero-request, capacity-one, zero-capacity and
+      negative-result reads with untouched surrounding bytes. All 15556
+      host tests and ARM release build pass. Standalone sequential-read smoke
+      returns 3, 2, 0 while the stream position advances 3, 5, 5.
+      match.py exits 1: original 14 instructions versus Rust 16; LLVM adds
+      a frame pointer, stores the initial count explicitly, reverses the
+      unsigned clamp comparison and reuses the returned count register.
+      Clamp, core call, terminator store and count return are preserved.
+      ARM relocation confirms the BL targets stream_read_core, despite
+      match.py displaying the unresolved call as stream_read_cstr.
+      Reference C: decomp/c/004/08057698_FUN_08057698.c.
