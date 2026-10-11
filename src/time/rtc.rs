@@ -964,6 +964,42 @@ pub unsafe extern "C" fn rtc_static_time_pair(
     0
 }
 
+/// rtc_context_reset_time_pair — FUN_08065d08 @ 0x08065d08.
+/// True extent [0x08065d08, 0x08065d54): 76 bytes, next independent push.
+/// Raw A32 decoding verifies two incoming plain BLs (0x08114f9c,
+/// 0x081163ac), no incoming predicated BLs; outgoing calls are one plain
+/// BL to rtc_static_time_pair and one BLNE to rtc_context_mark_dirty.
+///
+/// Fetch the static (days, seconds) pair, compare it with the owner's
+/// nested context words at +0xb7c/+0xb80, and replace both words and mark
+/// dirty if either differs. Equality preserves the existing dirty byte.
+/// Deliberate deviations: omit Ghidra's spurious r1/r2/r3 arguments, since
+/// the fallback overwrites both spilled input words before they are read.
+/// Native host pointers widen only the owner's tail. Reuse both canonical
+/// Rust callees; no new firmware seam.
+///
+/// # Safety
+/// Owner must contain a valid context pointer at +0xf00, aligned and
+/// readable/writable through +0xb90. No null or bounds checks are added.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn rtc_context_reset_time_pair(owner: *mut RtcContextOwner) {
+    let mut days = 0;
+    let mut seconds = 0;
+    unsafe { rtc_static_time_pair(&mut days, &mut seconds) };
+    unsafe {
+        let context = (*owner).rtc_context.cast_mut();
+        let stored_days = context.cast::<u8>().add(0xb7c).cast::<u32>();
+        let stored_seconds = context.cast::<u8>().add(0xb80).cast::<u32>();
+        if stored_days.read() != days || stored_seconds.read() != seconds {
+            stored_days.write(days);
+            let context = (*owner).rtc_context.cast_mut();
+            context.cast::<u8>().add(0xb80).cast::<u32>().write(seconds);
+            rtc_context_mark_dirty((*owner).rtc_context.cast_mut());
+        }
+    }
+}
+
 /// Pre-port default slot, retained for host tests: fail closed with
 /// FUN_0836d698's own bad-bank code 9. The shipped default instead
 /// enters the ported I2C chain and reaches real hardware on target.
@@ -1064,6 +1100,39 @@ mod tests {
     use super::*;
     use crate::time::civil::{bcd_datetime_to_days_secs, bcd_to_bin};
     use std::sync::{Mutex, MutexGuard};
+
+    #[test]
+    fn reset_time_pair_compares_both_words_and_preserves_unrelated_state() {
+        let expected = [0x7461_4400, 0x6d69_5465];
+        for initial in [
+            expected,
+            [expected[0] ^ 0x8000_0000, expected[1]],
+            [expected[0], expected[1] ^ 1],
+            [0, u32::MAX],
+        ] {
+            for dirty in [0u8, 1, 0xa5] {
+                let mut words = [0x5a5a_5a5au32; 0xb94 / 4];
+                words[0xb7c / 4] = initial[0];
+                words[0xb80 / 4] = initial[1];
+                unsafe { words.as_mut_ptr().cast::<u8>().add(0xb90).write(dirty) };
+                let mut expected_words = words;
+                expected_words[0xb7c / 4] = expected[0];
+                expected_words[0xb80 / 4] = expected[1];
+                if initial != expected {
+                    unsafe {
+                        expected_words.as_mut_ptr().cast::<u8>().add(0xb90).write(1);
+                    }
+                }
+                let mut owner = RtcContextOwner {
+                    reserved: [0x19; 0xf00],
+                    rtc_context: words.as_mut_ptr().cast(),
+                };
+                unsafe { rtc_context_reset_time_pair(&mut owner) };
+                assert_eq!(words, expected_words);
+                assert_eq!(owner.reserved, [0x19; 0xf00]);
+            }
+        }
+    }
     /// The ported FUN_0809e3e8 through its raw-pointer ABI, returning
     /// the (days, seconds) pair.
     fn convert(buf: &[u8; 8]) -> (u32, u32) {
