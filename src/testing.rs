@@ -67,6 +67,7 @@ pub mod hints {
     pub const PACKED_SURFACE_BOUNDS_CLIP: usize = 0x5fa1_0000;
     pub const CURVE_SCAN_REFLECTED: usize = 0x5fa2_0000;
     pub const PLST_TASK_COMPLETE_TREE: usize = 0x4368_0000;
+    pub const PLST_COMPLETE_ITEM_AT: usize = 0x5fa3_0000;
     pub const LINKED_ITEMS_HAVE_CLEAR_ASSOCIATED_FLAG: usize = 0x4366_0000;
     pub const RING_READ: usize = 0x4364_0000;
     pub const RING_READ_ALIAS: usize = 0x4365_0000;
