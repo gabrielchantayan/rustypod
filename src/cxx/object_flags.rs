@@ -1718,8 +1718,8 @@ pub type RegistryNameHash = unsafe extern "C" fn(name: *const u8) -> u32;
 /// +0x08 word [`registry_key_hash`] reads for the namespace-providers
 /// array: the literal pool word @ 0x080855f4 holds 0x08a0ea6c. The
 /// singleton's +0x00 word is the registry's hash map (lazily created
-/// by FUN_0805e93c through FUN_082d7d08); its +0x08 providers array
-/// is shared with the registry insert FUN_0805e7dc, which notifies
+/// by [`registry_initialize`] through the stock lhash constructor); its
+/// +0x08 providers array is shared with registry insert FUN_0805e7dc, which notifies
 /// vtable slot +0x08 of the same entry [`registry_key_hash`] hashes
 /// through.
 #[cfg(target_os = "none")]
@@ -1896,25 +1896,17 @@ pub unsafe extern "C" fn registry_lookup_default_namespace(name: *const u8) -> u
     registry_lookup(name, 1)
 }
 
-/// ABI of the still-unported singleton initializer `FUN_0805e93c`.
+/// ABI of the singleton initializer.
 type RegistryInsertInitialize = unsafe extern "C" fn() -> u32;
 
 #[cfg(target_os = "none")]
 #[inline(always)]
 unsafe fn registry_insert_initialize() -> u32 {
-    let initialize: RegistryInsertInitialize = core::mem::transmute(0x0805_e93cusize);
-    initialize()
+    registry_initialize()
 }
 
 #[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_registry_insert_initialize() -> u32 {
-    0
-}
-
-/// Host injection for the unported initializer. Its default return follows
-/// the retail initialization-failure path.
-#[cfg(not(target_os = "none"))]
-static mut REGISTRY_INSERT_INITIALIZE: RegistryInsertInitialize = missing_registry_insert_initialize;
+static mut REGISTRY_INSERT_INITIALIZE: RegistryInsertInitialize = registry_initialize;
 
 #[cfg(not(target_os = "none"))]
 #[inline(always)]
@@ -1935,6 +1927,68 @@ unsafe fn registry_hash_table_word() -> *mut *mut Lhash {
     }
 }
 
+#[cfg(not(target_os = "none"))]
+#[derive(Clone, Copy)]
+pub struct RegistryInitializeOps {
+    pub lock: unsafe extern "C" fn(u32) -> u32,
+    pub create: unsafe extern "C" fn(u32, u32) -> usize,
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_registry_lock(_operation: u32) -> u32 {
+    panic!("registry_initialize requires installed host lock service")
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_registry_create(_hash: u32, _compare: u32) -> usize {
+    panic!("registry_initialize requires installed host constructor")
+}
+
+#[cfg(not(target_os = "none"))]
+pub static mut REGISTRY_INITIALIZE_OPS: RegistryInitializeOps = RegistryInitializeOps {
+    lock: missing_registry_lock,
+    create: missing_registry_create,
+};
+
+/// Lazily create the string registry hash table. Original `FUN_0805e93c` at
+/// 0x0805e93c: true extent 84 bytes (72 code, 12 literals), next function
+/// 0x0805e990. Raw words verify two incoming plain BLs, three outgoing plain
+/// BLs, and no predicated BLs in either direction.
+///
+/// A nonnull table returns 1 without locking. Otherwise acquire the stock
+/// recursive lock with operation 3, construct with callback words 0x0807a6c8
+/// and 0x08072234, publish even a null result, release with operation 2, then
+/// reload the slot and return exactly 0 or 1. There is intentionally no second
+/// null check after acquisition; failures remain retryable.
+///
+/// Deliberate deviations: host pointer slots are pointer-sized and host
+/// services replace the unported recursive lock and lhash constructor.
+/// Target calls their verified stock entries; callback identities stay opaque.
+///
+/// # Safety
+/// The singleton and lock/constructor services must be valid and mutually
+/// synchronized according to the firmware's calling discipline.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn registry_initialize() -> u32 {
+    let slot = registry_hash_table_word();
+    if !slot.read_volatile().is_null() {
+        return 1;
+    }
+    #[cfg(target_os = "none")]
+    let (lock, create) = (
+        core::mem::transmute::<usize, unsafe extern "C" fn(u32) -> u32>(0x0804_3cc8),
+        core::mem::transmute::<usize, unsafe extern "C" fn(u32, u32) -> usize>(0x082d_7d08),
+    );
+    #[cfg(not(target_os = "none"))]
+    let RegistryInitializeOps { lock, create } =
+        core::ptr::addr_of!(REGISTRY_INITIALIZE_OPS).read_volatile();
+    lock(3);
+    slot.write_volatile(create(0x0807_a6c8, 0x0807_2234) as *mut Lhash);
+    lock(2);
+    (!slot.read_volatile().is_null()) as u32
+}
+
 /// registry_insert_and_notify — original: `FUN_0805e7dc` @ `0x0805e7dc`
 /// (200 instruction bytes, `0x0805e7dc..0x0805e8a3`, followed by its
 /// singleton literal pool word @ `0x0805e8a4`; the separately linked next
@@ -1952,10 +2006,10 @@ unsafe fn registry_hash_table_word() -> *mut *mut Lhash {
 /// slot +0x08 receives `(old.name, old.namespace_index, old.value)`. It then
 /// releases the old record through [`traced_free`], regardless of notification.
 ///
-/// Deliberate host deviation: the unported initializer is a volatile host
-/// injection whose default reports failure; device builds call
-/// `FUN_0805e93c` directly. Pointer-valued target words use `usize` host
-/// slots, preserving target offsets on ARM while keeping host fields disjoint.
+/// Deliberate host deviation: initialization can be overridden for isolated
+/// insertion tests; the default and device builds use [`registry_initialize`].
+/// Pointer-valued target words use `usize` host slots, preserving target offsets
+/// on ARM while keeping host fields disjoint.
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn registry_insert_and_notify(
@@ -4757,6 +4811,84 @@ mod tests {
                 crate::crypto::obj_dat::LHASH_GETRN = self.getrn;
                 registry_hash_table_word().write_volatile(self.hash_table);
                 registry_providers_word().write_volatile(self.providers);
+            }
+        }
+    }
+
+    static mut INIT_RESULT: usize = 0;
+    static mut INIT_ACQUIRE_VALUE: usize = 0;
+    static mut INIT_RELEASE_VALUE: Option<usize> = None;
+    static mut INIT_PUBLISHED: usize = 0;
+    static mut INIT_PHASE: u32 = 0;
+
+    unsafe extern "C" fn initialize_lock(op: u32) -> u32 {
+        if op == 3 {
+            assert_eq!(INIT_PHASE, 0);
+            INIT_PHASE = 1;
+            registry_hash_table_word().write_volatile(INIT_ACQUIRE_VALUE as *mut Lhash);
+        } else {
+            assert_eq!(op, 2);
+            assert_eq!(INIT_PHASE, 2);
+            INIT_PHASE = 3;
+            INIT_PUBLISHED = registry_hash_table_word().read_volatile() as usize;
+            if let Some(value) = INIT_RELEASE_VALUE {
+                registry_hash_table_word().write_volatile(value as *mut Lhash);
+            }
+        }
+        0
+    }
+
+    unsafe extern "C" fn initialize_create(hash: u32, compare: u32) -> usize {
+        assert_eq!((hash, compare), (0x0807_a6c8, 0x0807_2234));
+        assert_eq!(INIT_PHASE, 1);
+        INIT_PHASE = 2;
+        INIT_RESULT
+    }
+
+    #[test]
+    fn registry_initialize_retry_lock_boundary_and_release_reload() {
+        let _guard = REGISTRY_KEY_HASH_TEST_LOCK.lock().unwrap();
+        unsafe {
+            let old_ops = REGISTRY_INITIALIZE_OPS;
+            let old_slot = registry_hash_table_word().read_volatile();
+            struct Reset(RegistryInitializeOps, *mut Lhash);
+            impl Drop for Reset {
+                fn drop(&mut self) {
+                    unsafe {
+                        REGISTRY_INITIALIZE_OPS = self.0;
+                        registry_hash_table_word().write_volatile(self.1);
+                    }
+                }
+            }
+            let _reset = Reset(old_ops, old_slot);
+            REGISTRY_INITIALIZE_OPS = RegistryInitializeOps {
+                lock: initialize_lock, create: initialize_create,
+            };
+            // Existing handles skip all services, including the all-ones word.
+            for value in [1usize, u32::MAX as usize] {
+                INIT_PHASE = 0;
+                registry_hash_table_word().write_volatile(value as *mut Lhash);
+                assert_eq!(registry_initialize(), 1);
+                assert_eq!(INIT_PHASE, 0);
+                assert_eq!(registry_hash_table_word().read_volatile() as usize, value);
+            }
+            registry_hash_table_word().write_volatile(core::ptr::null_mut());
+            // Failure then retry; acquire-side publication is deliberately
+            // overwritten, and release-side changes determine the return.
+            for (allocated, acquired, released) in [
+                (0usize, 0usize, None),
+                (0x1234, 0x5678, None),
+                (0x1234, 0, Some(0)),
+                (0, 0, Some(0x5678)),
+            ] {
+                INIT_PHASE = 0;
+                INIT_RESULT = allocated;
+                INIT_ACQUIRE_VALUE = acquired;
+                INIT_RELEASE_VALUE = released;
+                assert_eq!(registry_initialize(), (released.unwrap_or(allocated) != 0) as u32);
+                assert_eq!(INIT_PUBLISHED, allocated);
+                assert_eq!(INIT_PHASE, 3);
+                registry_hash_table_word().write_volatile(core::ptr::null_mut());
             }
         }
     }
