@@ -16,6 +16,32 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08059c4c
+    ghidra: FUN_08059c4c
+    name: scoped_context_contains_playlist
+    size: 20
+    sig: "u32 scoped_context_contains_playlist(const u8 *context, const u8 *playlist)"
+    module: app/scoped_context_contains_playlist
+    status: ported
+    vars: {r0: context, r1: playlist}
+    notes: >-
+      Raw ARM extent [0x08059c4c,0x08059c60) is 20 instruction bytes,
+      with no literals; next function is LDRB/BX LR. Independently decoded
+      incoming plain BLs at 0x080bed30 and 0x080bed4c, no predicated BLs.
+      One outgoing plain BL at 0x08059c50 to 0x08050c48, none predicated.
+      Both callers supply context in r0 and playlist in r1; Ghidra's
+      zero-argument signature is incorrect. The unported lookup validates
+      playlist plst class and context tdat owner, scans context word +0x24,
+      compares entry word zero with playlist, and follows entry word +0x28.
+      Preserve that lookup as a firmware seam without porting another function.
+      Return zero for NULL and exactly one for every nonzero entry pointer.
+      No target behavioral deviations; host calls require an installed lookup.
+      Tests cover NULL, low-byte-zero, high-bit and all-ones lookup results.
+      Host suite and ARM release build pass. Exported-wrapper executable smoke
+      verifies present/missing playlist results with a host lookup implementation.
+      match.py exits 1: five stock versus nine Rust listing lines; preserves
+      CMP/MOVNE normalization, adds frame pointer and volatile seam load/BLX.
+
   - address: 0x0805acb8
     ghidra: FUN_0805acb8
     name: path_fragment_extract
