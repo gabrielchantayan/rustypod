@@ -55,15 +55,15 @@ pub unsafe extern "C" fn configured_path_prefix_matches(path: *const u8) -> i32 
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     extern crate std;
 
     use super::*;
     use parking_lot::Mutex;
 
-    static TEST_LOCK: Mutex<()> = Mutex::new(());
+    pub(crate) static TEST_LOCK: Mutex<()> = Mutex::new(());
 
-    unsafe fn set_prefix(prefix: *const u8, length: usize) {
+    pub(crate) unsafe fn set_prefix(prefix: *const u8, length: usize) {
         HOST_CONFIGURED_PATH_PREFIX = prefix;
         HOST_CONFIGURED_PATH_PREFIX_LENGTH = length;
     }

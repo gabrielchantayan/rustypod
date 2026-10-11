@@ -16,6 +16,38 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0805acb8
+    ghidra: FUN_0805acb8
+    name: path_fragment_extract
+    size: 136
+    sig: "i32 path_fragment_extract(const u8 *path, u8 *output, u32 selector)"
+    module: app/path_fragment_extract
+    status: ported
+    vars: {param_1/r4: counted_path, param_2/r5: output, param_3/r6: selector}
+    renames: {FUN_080310d4: strncpy, FUN_08392478: strlen, FUN_080a83c0: configured_path_prefix_matches, FUN_080ccac8: configured_path_prefix_rewrite}
+    notes: >-
+      Raw ARM extent [0x0805acb8,0x0805ad40) is 136 instruction bytes,
+      ending before the next PUSH prologue, with no literals. Whole-image
+      aligned decoding finds incoming plain BLs at 0x0806a610 and 0x080df364,
+      no incoming predicated BLs. Five outgoing plain BLs at 0x0805ace4,
+      0x0805acec, 0x0805ad04, 0x0805ad1c and 0x0805ad30; none predicated.
+      NULL arguments return -50 without writes. Selector zero copies 35
+      payload bytes at +2 with strncpy, unless the configured prefix matches;
+      then call the unported configured-prefix rewrite at 0x080ccac8 with
+      capacity 36, ignoring its return. Nonzero selectors copy from +21
+      before checking strlen(payload) >35, so failure leaves copied bytes
+      but preserves the selector field. Success writes selector's low byte
+      at output+36; output+35 remains untouched on direct-copy paths.
+      No target behavioral deviations. Host prefix rewrite requires an
+      installed implementation rather than silently faking firmware behavior.
+      Tests cover NULLs, zero-selector padding/truncation, lengths 35/36,
+      failed-copy side effects, selector truncation and adjacent guards.
+      All 15534 host tests pass; ARM release build passes. Executable host
+      smoke confirms copy-before-error and selector 256 truncation. match.py
+      exits 1 with 34 stock versus 44 Rust listing lines: same branches,
+      offsets, calls and byte store; LLVM adds a frame pointer and a volatile
+      seam load/BLX instead of the stock direct prefix-rewrite BL.
+
   - address: 0x0805b764
     ghidra: FUN_0805b764
     name: data_stream_context_create
