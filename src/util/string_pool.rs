@@ -782,6 +782,40 @@ pub unsafe extern "C" fn string_pool_read_counted(
     status
 }
 
+/// record_string_pool_read_counted_at_0xc0 — `FUN_08055a90` @ `0x08055a90`.
+///
+/// True extent: 20 bytes, ending before the next function's push at
+/// `0x08055aa4`. Raw words e1a02001 e5901028 e5900000 e28000c0 ea019f85
+/// decode as mov r2,r1; ldr r1,[r0,#0x28]; ldr r0,[r0]; add r0,r0,#0xc0;
+/// b 0x080bd8bc. Verified two inbound plain BLs at 0x0804628c and
+/// 0x082a3788, no inbound predicated BLs, and zero body BLs. An additional
+/// BEQ at 0x080543b8 enters this wrapper.
+///
+/// Reads the signed entry id in record word 10 from the owner's pool at
+/// +0xc0, copies at most 510 bytes after the output's leading u16, stores
+/// floor(copied_bytes / 2) there, and returns the reader status unchanged.
+/// Calls the already ported counted reader directly.
+///
+/// Deliberate deviation: the untouched incoming r3 is replaced with zero
+/// for the reader's initial byte length, which string_pool_read clears
+/// before validation. Thus this wrapper needs only the two caller-supplied
+/// arguments; target pointer fields remain u32 even on hosts.
+///
+/// # Safety
+/// `record` must contain eleven readable aligned target words. Word zero
+/// must address an owner with a valid StringPool at +0xc0. `counted` must
+/// have writable space for its u16 prefix and 510 payload bytes.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn record_string_pool_read_counted_at_0xc0(
+    record: *const u32,
+    counted: *mut u16,
+) -> i32 {
+    let entry_id = record.add(10).cast::<i32>().read();
+    let owner = record.read() as usize as *mut u8;
+    string_pool_read_counted(owner.add(0xc0).cast(), entry_id, counted, 0)
+}
+
 /// string_pool_read_counted_from_context — original: `FUN_080556cc` @
 /// `0x080556cc` (20 bytes; **7 direct `bl` call sites** — five plain `bl`,
 /// two `blne`; no tail branches or data-word references).
@@ -892,6 +926,43 @@ mod tests {
         fixture.payload = payload;
         fixture.payload_cell = fixture.payload.as_mut_ptr();
         fixture
+    }
+
+    #[test]
+    fn record_counted_reader_caps_bytes_halves_odd_lengths_and_preserves_failures() {
+        let slab = crate::testing::try_map_u32_slab(
+            crate::testing::hints::RECORD_STRING_POOL_READ_COUNTED_C0, 4096,
+        ).expect("target-width owner fixture");
+        unsafe {
+            let mut f = payload_fixture((0..600).map(|i| (i % 251) as u8).collect());
+            let pool = slab.add(0xc0).cast::<StringPool>();
+            // Host-native pool pointer fields; only the record uses target words.
+            pool.write(ptr::read(&f.pool));
+            let mut record = [0u32; 11];
+            record[0] = slab as usize as u32;
+            for (id, length, tag, status, copied) in [
+                (1i32, 1, CRTS_TAG, 0, 1usize),
+                (1, 5, CRTS_TAG, 0, 5),
+                (1, 510, CRTS_TAG, 0, 510),
+                (1, 511, CRTS_TAG, 0, 510),
+                (0, 5, CRTS_TAG, 0, 0),
+                (-1, 5, CRTS_TAG, PARAM_ERR, 0),
+                (2, 5, CRTS_TAG, PARAM_ERR, 0),
+                (1, 0, CRTS_TAG, PARAM_ERR, 0),
+                (1, 5, 0, PARAM_ERR, 0),
+            ] {
+                record[10] = id as u32;
+                f.entries[0].length = length;
+                (*pool).tag = tag;
+                let mut output = [0xa5a5u16; 257];
+                assert_eq!(record_string_pool_read_counted_at_0xc0(record.as_ptr(), output.as_mut_ptr()), status);
+                assert_eq!(output[0], (copied / 2) as u16);
+                let bytes = std::slice::from_raw_parts(output.as_ptr().add(1).cast::<u8>(), 512);
+                assert_eq!(&bytes[..copied], &f.payload[..copied]);
+                assert!(bytes[copied..].iter().all(|&byte| byte == 0xa5));
+                assert_eq!((*pool).lock_depth, 0);
+            }
+        }
     }
 
     /// Three live entries of 10, 20 and 30 bytes.
