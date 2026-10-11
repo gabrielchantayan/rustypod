@@ -18,12 +18,9 @@
 //!
 //! # Deliberate deviation
 //!
-//! `FUN_08054fcc` is unported but its 48-byte raw body is fully decoded: it
-//! only adapts the already-ported `current_utc_offset_query` outputs. This port
-//! calls that existing Rust function directly, preserving its validity gate,
-//! signed `i16` base offset, signed `i8` daylight byte, and wrapping arithmetic.
-//! A private host-only volatile seam substitutes that callee for tests; device
-//! builds retain the direct Rust-to-Rust call.
+//! The ported `current_utc_offset_minutes_negated` adapter is shared by both
+//! timestamp conversions. Typed initialized locals replace retail stack slots;
+//! a private host-only volatile seam substitutes the query for tests.
 
 #[cfg(not(test))]
 use super::utc_offset::current_utc_offset_query;
@@ -53,6 +50,30 @@ unsafe fn utc_offset_query(base_utc_offset_minutes: *mut i16, daylight_saving_mi
     }
 }
 
+/// Negated current UTC offset in minutes: `FUN_08054fcc` @ `0x08054fcc`.
+///
+/// Exactly 48 bytes, ending at 0x08054ffc where the next function begins with
+/// `ldr r0, [r0, #0xf00]`. Raw decoding finds two plain inbound BLs
+/// (0x0805be84, 0x0806ba68), no predicated inbound BLs, and one plain outgoing
+/// BL to 0x080ab558 (no predicated outgoing BLs).
+///
+/// Query the base and daylight-saving offsets. On any nonzero validity result,
+/// sign-extend the i16 base and i8 daylight byte, add them, and negate the sum;
+/// otherwise return zero regardless of the written offsets. No arguments.
+/// Deliberate deviation: initialized typed locals replace saved r2/r3 stack
+/// slots; both outputs are overwritten by the provider before successful reads.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub extern "C" fn current_utc_offset_minutes_negated() -> i32 {
+    let mut base_utc_offset_minutes = 0i16;
+    let mut daylight_saving_minutes = 0u8;
+    if unsafe { utc_offset_query(&mut base_utc_offset_minutes, &mut daylight_saving_minutes) } != 0 {
+        -((base_utc_offset_minutes as i32) + (daylight_saving_minutes as i8 as i32))
+    } else {
+        0
+    }
+}
+
 /// `apply_current_utc_offset_seconds` — original: `FUN_0806ba5c` @
 /// `0x0806ba5c` (**32 bytes; 9 unconditional `bl` callers and no predicated
 /// `bl` callers**).
@@ -68,14 +89,7 @@ pub extern "C" fn apply_current_utc_offset_seconds(seconds: u32) -> u32 {
         return 0;
     }
 
-    let mut base_utc_offset_minutes = 0i16;
-    let mut daylight_saving_minutes = 0u8;
-    if unsafe { utc_offset_query(&mut base_utc_offset_minutes, &mut daylight_saving_minutes) } != 0 {
-        let offset_minutes = (base_utc_offset_minutes as i32).wrapping_add((daylight_saving_minutes as i8) as i32);
-        seconds.wrapping_add(offset_minutes.wrapping_mul(60) as u32)
-    } else {
-        seconds
-    }
+    seconds.wrapping_sub(current_utc_offset_minutes_negated().wrapping_mul(60) as u32)
 }
 
 /// `subtract_current_utc_offset_seconds` — original: `FUN_0805be78` @
@@ -88,9 +102,8 @@ pub extern "C" fn apply_current_utc_offset_seconds(seconds: u32) -> u32 {
 /// value times 60, equivalently subtracting the signed minute sum modulo
 /// `2^32`. A failed UTC-offset query therefore leaves the timestamp unchanged.
 ///
-/// Deliberate deviation: `FUN_08054fcc` is unported, but its fully decoded
-/// adapter body only invokes the existing `current_utc_offset_query`; this
-/// implementation calls that port directly and applies its inverse arithmetic.
+/// Uses the shared ported minute adapter; multiplication and addition wrap
+/// modulo 2^32 exactly as in the original.
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub extern "C" fn subtract_current_utc_offset_seconds(seconds: u32) -> u32 {
@@ -98,14 +111,7 @@ pub extern "C" fn subtract_current_utc_offset_seconds(seconds: u32) -> u32 {
         return 0;
     }
 
-    let mut base_utc_offset_minutes = 0i16;
-    let mut daylight_saving_minutes = 0u8;
-    if unsafe { utc_offset_query(&mut base_utc_offset_minutes, &mut daylight_saving_minutes) } != 0 {
-        let offset_minutes = (base_utc_offset_minutes as i32).wrapping_add((daylight_saving_minutes as i8) as i32);
-        seconds.wrapping_sub(offset_minutes.wrapping_mul(60) as u32)
-    } else {
-        seconds
-    }
+    seconds.wrapping_add(current_utc_offset_minutes_negated().wrapping_mul(60) as u32)
 }
 
 #[cfg(test)]
@@ -168,6 +174,34 @@ mod tests {
 
     unsafe fn restore(installed: InstalledQuery) {
         ptr::write_volatile(ptr::addr_of_mut!(UTC_OFFSET_QUERY), installed.previous);
+    }
+
+    unsafe extern "C" fn edge_offset(base: *mut i16, daylight: *mut u8) -> i32 {
+        base.write(EDGE_BASE.load(Ordering::Relaxed) as i16);
+        daylight.write(EDGE_DAYLIGHT.load(Ordering::Relaxed) as u8);
+        EDGE_VALID.load(Ordering::Relaxed) as i32
+    }
+
+    static EDGE_BASE: AtomicU32 = AtomicU32::new(0);
+    static EDGE_DAYLIGHT: AtomicU32 = AtomicU32::new(0);
+    static EDGE_VALID: AtomicU32 = AtomicU32::new(0);
+
+    #[test]
+    fn negated_minutes_respects_signed_boundaries_and_nonzero_validity() {
+        let installed = unsafe { install(edge_offset) };
+        for base in [i16::MIN, -480, -1, 0, 1, 330, i16::MAX] {
+            for daylight in [i8::MIN, -1, 0, 60, i8::MAX] {
+                for valid in [0i32, 1, 2, -1, i32::MIN] {
+                    EDGE_BASE.store(base as u32, Ordering::Relaxed);
+                    EDGE_DAYLIGHT.store(daylight as u32, Ordering::Relaxed);
+                    EDGE_VALID.store(valid as u32, Ordering::Relaxed);
+                    let expected = if valid == 0 { 0 } else { -(i32::from(base) + i32::from(daylight)) };
+                    assert_eq!(current_utc_offset_minutes_negated(), expected,
+                        "base={base}, daylight={daylight}, valid={valid}");
+                }
+            }
+        }
+        unsafe { restore(installed) };
     }
 
     #[test]
