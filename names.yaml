@@ -52223,6 +52223,31 @@ functions:
       callers, and one tail B caller at 0x082d33f8. The Rust port has no
       deliberate deviations.
 
+  - address: 0x08058140
+    ghidra: FUN_08058140
+    name: null_guarded_zero_24
+    size: 16
+    sig: "void null_guarded_zero_24(u8 *dst)"
+    module: libc/null_guarded_zero_24
+    status: ported
+    vars: {param_1: dst}
+    renames: {FUN_0805cfb4: bzero}
+    notes: >-
+      Raw A32 words establish [0x08058140,0x08058150), 16 bytes:
+      CMP r0,#0; MOVNE r1,#24; BNE 0x0805cfb4; BX LR. The next
+      independent function starts with PUSH at 0x08058150. Full-image
+      aligned-word decoding finds two plain inbound BLs at 0x0805ce58
+      and 0x0806d310, zero predicated inbound BLs, and no outgoing BLs.
+      Returns for NULL; otherwise clears exactly 24 bytes via the
+      already-ported bzero. Both callers initialize stack argument records.
+      Deliberate deviation: volatile function-pointer indirection preserves
+      the callee boundary instead of the direct conditional tail branch.
+      Host tests cover NULL, all four alignments, and unchanged canaries.
+      Standalone host smoke confirms the same exact write range. Host suite
+      and ARM release build pass. match.py confirms NULL early return,
+      length 24, and tail dispatch; LLVM adds an ABI frame and indirect
+      callee load (10 displayed instructions versus stock's four).
+
   - address: 0x0805cfb4
     ghidra: FUN_0805cfb4
     name: bzero
