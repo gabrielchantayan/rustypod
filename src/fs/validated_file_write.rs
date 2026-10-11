@@ -7,28 +7,18 @@
 //! Validate the mrts handle, then write its +4 descriptor using the requested
 //! count, data address, flags zero, and the same in/out count pointer.
 //! Return either validation failure or the backend status without translating
-//! errors or requiring a full write. Deliberate deviation: reuse the Rust
-//! validator; the still-retail backend is a volatile host-replaceable seam.
+//! errors or requiring a full write. Reuses the Rust file_write wrapper;
+//! host tests replace its backend to isolate validation behavior.
 
+#[cfg(not(target_os = "none"))]
 use core::ptr::{addr_of, read_volatile};
 
 /// Verified ABI of the retail write/error-translation wrapper at 0x0805ae18.
 pub type FileWriteBackend = unsafe extern "C" fn(u32, u32, u32, u32, *mut u32) -> i32;
 
-#[cfg(target_os = "none")]
-unsafe extern "C" fn firmware_file_write(
-    descriptor: u32, data: u32, requested: u32, flags: u32, transferred: *mut u32,
-) -> i32 {
-    let write: FileWriteBackend = core::mem::transmute(0x0805ae18usize);
-    write(descriptor, data, requested, flags, transferred)
-}
 
 #[cfg(not(target_os = "none"))]
-unsafe extern "C" fn firmware_file_write(_: u32, _: u32, _: u32, _: u32, _: *mut u32) -> i32 {
-    panic!("validated_file_write requires retail backend 0x0805ae18")
-}
-
-pub static mut FILE_WRITE_BACKEND: FileWriteBackend = firmware_file_write;
+pub static mut FILE_WRITE_BACKEND: FileWriteBackend = super::file_write::file_write;
 
 /// # Safety
 /// A non-null handle must be word-aligned and readable for its tag; a valid
@@ -46,8 +36,13 @@ pub unsafe extern "C" fn validated_file_write(
     }
     let requested = transferred.read();
     let descriptor = handle.add(1).read();
-    let write = read_volatile(addr_of!(FILE_WRITE_BACKEND));
-    write(descriptor, data, requested, 0, transferred)
+    #[cfg(target_os = "none")]
+    { super::file_write::file_write(descriptor, data, requested, 0, transferred) }
+    #[cfg(not(target_os = "none"))]
+    {
+        let write = read_volatile(addr_of!(FILE_WRITE_BACKEND));
+        write(descriptor, data, requested, 0, transferred)
+    }
 }
 
 #[cfg(test)]
