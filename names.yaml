@@ -16,6 +16,43 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080586b8
+    ghidra: FUN_080586b8
+    name: kinded_interface_proxy_create
+    size: 60
+    sig: "i32 kinded_interface_proxy_create(u32 backend, u8 **output)"
+    module: app/kinded_interface_proxy_create
+    status: ported
+    vars: {param_1/r5: backend, param_2/r6: output, r4: proxy}
+    renames: {FUN_0805d1dc: calloc_tag4, FUN_080dae7c: kinded_interface_initialize}
+    notes: >-
+      Raw A32 extent [0x080586b8,0x080586f4) is 15 instructions without
+      literals; the next word e92d47f0 starts the next real function.
+      Whole-image aligned BL decoding finds two plain inbound calls at
+      0x0813e4d8 and 0x0813e508, no predicated inbound calls. Two plain
+      outgoing BLs at 0x080586c8 and 0x080586e0, no predicated outgoing calls.
+      Allocate 0xf00 zeroed bytes with calloc_tag4; NULL returns -108 and
+      leaves the output untouched. Initialize and register kind 2, ignore
+      initializer status, store backend at +0xefc, publish proxy, return zero.
+      Caller 0x0813e474 creates a lightweight proxy around its backend.
+      Deviations: reuse both existing Rust ports; backend field stays u32
+      on hosts, while the output pointer uses native width. Shared registry
+      test lock prevents races with initializer tests. Host regression covers
+      failed allocation with untouched output and registry, NULL output on
+      failure, backend zero/high/all-one words, every registry hole and full
+      registry slot-4 overwrite, exact base contents and allocation canaries.
+      All 15549 host tests pass; ARM release build passes. match.py exits 1:
+      15 stock instructions versus 17 Rust instructions, with explicit failure
+      branch and a larger frame; allocation, initialization, backend store,
+      output publication and -108 remain intact. R_ARM_CALL relocations
+      verify both named callees; exported symbol is distinct, no folding.
+      Standalone executable smoke exercises three sequential registrations
+      through the actual constructor and initializer with libc calloc and
+      host zeroing adapters. Full non-test host library build is unavailable
+      due to existing unresolved prepare_metadata, extract_metadata,
+      configure_shared_payload_kind and notify_calendar_change functions.
+      No device execution.
+
   - address: 0x08058c3c
     ghidra: FUN_08058c3c
     name: move_entry_to_queue_end

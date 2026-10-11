@@ -28,6 +28,8 @@ pub mod indexed_resource_word;
 pub use indexed_resource_word::*;
 pub mod kinded_interface_initialize;
 pub use kinded_interface_initialize::*;
+pub mod kinded_interface_proxy_create;
+pub use kinded_interface_proxy_create::*;
 pub mod controller_event_class;
 pub mod pmu_status_notify;
 pub mod lazy_static_object_08ae4848;

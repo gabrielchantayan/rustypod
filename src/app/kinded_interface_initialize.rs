@@ -16,7 +16,10 @@ use core::ptr;
 use crate::libc::bzero::bzero;
 
 #[cfg(not(target_os = "none"))]
-static mut HOST_REGISTRY: [*mut u8; 5] = [ptr::null_mut(); 5];
+pub(crate) static mut HOST_REGISTRY: [*mut u8; 5] = [ptr::null_mut(); 5];
+
+#[cfg(test)]
+pub(crate) static REGISTRY_TEST_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
 
 #[inline(always)]
 unsafe fn registry() -> *mut *mut u8 {
@@ -56,13 +59,10 @@ pub unsafe extern "C" fn kinded_interface_initialize(object: *mut u8, kind: u32)
 mod tests {
     extern crate std;
     use super::*;
-    use parking_lot::Mutex;
-
-    static LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
     fn null_preserves_registry() {
-        let _guard = LOCK.lock();
+        let _guard = REGISTRY_TEST_LOCK.lock();
         unsafe {
             let before = [ptr::dangling_mut::<u8>(); 5];
             ptr::addr_of_mut!(HOST_REGISTRY).write(before);
@@ -74,7 +74,7 @@ mod tests {
 
     #[test]
     fn first_hole_full_registry_and_exact_clear_extent() {
-        let _guard = LOCK.lock();
+        let _guard = REGISTRY_TEST_LOCK.lock();
         for occupied in 0..=4 {
             for kind in [0, 1, 2, 0xff, 0x100, u32::MAX] {
                 for alignment in 0..4 {
