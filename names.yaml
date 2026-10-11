@@ -245017,3 +245017,43 @@ functions:
       independent halfword stores. NULL guard, runtime reads, modulo day
       arithmetic, packed conversion and field expansion are retained.
       No intentional symbol fold or hardware execution.
+  - address: 0x0806478c
+    ghidra: FUN_0806478c
+    name: length_prefixed_record_update
+    size: 148
+    sig: "i32 length_prefixed_record_update(LengthPrefixedRequestOwner **owner_slot, const u8 *name, u32 selection, u32 data, u32 size, u32 *output)"
+    module: app/length_prefixed_record_update
+    status: ported
+    vars:
+      param_1: owner_slot
+      param_2: name
+      param_3: selection
+      param_4: data
+      param_5: size
+      param_6: output
+      FUN_0804491c: length_prefix_validate
+      FUN_08042cbc: bcopy
+      FUN_08041ae4: unported record update consumer
+    notes: >-
+      Raw osos.dec A32 verifies 148 bytes through the return at 0x0806481c;
+      the next real prologue is at 0x08064820. Independently scanning aligned
+      BL words finds two plain inbound calls at 0x0806c870 and 0x0806cb40,
+      zero predicated inbound calls, three plain outbound calls and zero
+      predicated outbound calls. Validate a byte or halfword length prefix
+      using owner context +0x30 bit 1 and +0x1e limit. Seed request +4 with
+      selection, copy prefix and payload to +0x1c, then dispatch the owner,
+      request and three-word data/size/1 descriptor to 0x08041ae4. Publish
+      request +4 after dispatch even on error; validation failure leaves
+      output untouched. Sign-extend the low 16 status bits. Ledger checks
+      found no owner for 0x08041ae4, so its fixed-address device seam asserts
+      no recovered callee identity; existing Rust validator and bcopy are reused.
+      Other request words remain uninitialized. Host tests cover both prefix
+      widths, rejected lower/upper bounds, copied endpoints and selection
+      publication on signed dispatch error. Full host suite and ARM release
+      build pass. Public API smoke observes copied name, -50 dispatch result,
+      output 42 and rejection preserving output. match.py exits 1 with a
+      structural diff: 37 original versus 46 Rust instructions, branch-based
+      width selection, indirect consumer seam, and __aeabi_memcpy lowering
+      for the disjoint stack copy; validation, descriptor, copy length,
+      output timing and status truncation are retained. No intentional symbol
+      fold or device execution.

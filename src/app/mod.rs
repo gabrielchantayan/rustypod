@@ -857,6 +857,7 @@ pub mod managed_entry;
 pub mod managed_entry_request_submit;
 pub mod managed_entry_selector;
 pub mod length_prefix_validate;
+pub mod length_prefixed_record_update;
 pub mod class_6600_byte_at_100;
 pub mod layout_state;
 pub mod layout_recompute_notify;
