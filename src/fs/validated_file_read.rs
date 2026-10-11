@@ -9,28 +9,7 @@
 //! same in/out count pointer to the retail read/error-translation wrapper.
 //! Return its status unchanged, including partial-read errors. Ghidra's void
 //! return is incorrect. Deliberate deviation: reuse the Rust validator and
-//! retain the unported wrapper as a volatile host-replaceable retail seam.
-
-use core::ptr::{addr_of, read_volatile};
-
-/// Raw-code-verified ABI of the wrapper at 0x0805a6e8. Mode bit 2 selects
-/// retail_file_read_mode_2 at 0x08277c74; errors go to map_status_code.
-pub type FileReadBackend = unsafe extern "C" fn(u32, u32, u32, u32, *mut u32) -> i32;
-
-#[cfg(target_os = "none")]
-unsafe extern "C" fn firmware_file_read(
-    descriptor: u32, destination: u32, requested: u32, mode: u32, transferred: *mut u32,
-) -> i32 {
-    let read: FileReadBackend = core::mem::transmute(0x0805a6e8usize);
-    read(descriptor, destination, requested, mode, transferred)
-}
-
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn firmware_file_read(_: u32, _: u32, _: u32, _: u32, _: *mut u32) -> i32 {
-    panic!("validated_file_read requires retail backend 0x0805a6e8")
-}
-
-pub static mut FILE_READ_BACKEND: FileReadBackend = firmware_file_read;
+//! checked-read port; host tests inject a finite stream into the algorithm.
 
 /// # Safety
 /// A non-null handle must be aligned and readable for its tag. A valid handle
@@ -42,13 +21,20 @@ pub static mut FILE_READ_BACKEND: FileReadBackend = firmware_file_read;
 pub unsafe extern "C" fn validated_file_read(
     handle: *const u32, transferred: *mut u32, destination: u32,
 ) -> i32 {
+    validated_read(handle, transferred, destination, super::file_read_checked::file_read_checked)
+}
+
+#[inline(always)]
+unsafe fn validated_read(
+    handle: *const u32, transferred: *mut u32, destination: u32,
+    read: unsafe extern "C" fn(u32, u32, u32, u32, *mut u32) -> i32,
+) -> i32 {
     let status = crate::stream_handle_validate::stream_handle_validate(handle);
     if status != 0 {
         return status;
     }
     let requested = transferred.read();
     let descriptor = handle.add(1).read();
-    let read = read_volatile(addr_of!(FILE_READ_BACKEND));
     read(descriptor, destination, requested, 2, transferred)
 }
 
@@ -71,11 +57,9 @@ mod tests {
     #[test]
     fn invalid_handles_gate_memory_access_and_partial_reads_preserve_status() {
         unsafe {
-            let saved = FILE_READ_BACKEND;
-            FILE_READ_BACKEND = finite_read;
-            assert_eq!(validated_file_read(core::ptr::null(), core::ptr::null_mut(), 0), -50);
+            assert_eq!(validated_read(core::ptr::null(), core::ptr::null_mut(), 0, finite_read), -50);
             for tag in [0, u32::MAX, crate::stream_handle_validate::MRTS_TAG ^ 1] {
-                assert_eq!(validated_file_read(&tag, core::ptr::null_mut(), 0), -50);
+                assert_eq!(validated_read(&tag, core::ptr::null_mut(), 0, finite_read), -50);
             }
             for (remaining, requested, count, status) in [
                 (0, 0, 0, 0), (0, 1, 0, -39), (4, 0, 0, 0),
@@ -84,11 +68,10 @@ mod tests {
             ] {
                 let handle = [crate::stream_handle_validate::MRTS_TAG, remaining];
                 let mut transferred = requested;
-                assert_eq!(validated_file_read(handle.as_ptr(), &mut transferred, 0x1234), status);
+                assert_eq!(validated_read(handle.as_ptr(), &mut transferred, 0x1234, finite_read), status);
                 assert_eq!(transferred, count);
                 assert_eq!(handle, [crate::stream_handle_validate::MRTS_TAG, remaining]);
             }
-            FILE_READ_BACKEND = saved;
         }
     }
 }
