@@ -51892,6 +51892,32 @@ functions:
       mutation, length halving, and NULL optional outputs. Target-width u32
       reads deliberately avoid host pointer-size offsets; indexed_payload_lookup
       supplies the established unported backend seam.
+  - address: 0x080559ac
+    ghidra: FUN_080559ac
+    name: record_string_pool_read_counted_at_0x278
+    size: 20
+    sig: "i32 record_string_pool_read_counted_at_0x278(const u32 *record, u16 *counted)"
+    module: util/string_pool
+    status: ported
+    renames:
+      param_1/r0: record
+      param_2/r1: counted
+      record_word_0: owner
+      record_word_16: entry_id
+      FUN_080bd8bc: string_pool_read_counted (ported)
+    notes: >-
+      Raw osos.dec words e1a02001 e5901040 e5900000 e2800f9e ea019fbe
+      establish the exact 20-byte extent 0x080559ac..0x080559c0, followed
+      by the next function's push. Loads the signed id from record word 16,
+      adjusts the owner in word 0 by 0x278, and tail-branches to the ported
+      counted reader at 0x080bd8bc. Independent decoding of every aligned
+      ARM branch finds two plain inbound BLs at 0x0804647c and 0x082a398c,
+      zero predicated BLs, and zero body BLs. Copies at most 510 bytes,
+      stores floor(copied_bytes / 2) in the leading u16, and preserves status.
+      Deliberately zeros incoming r3's initial length, cleared by the reader
+      before validation; record pointers remain target-width u32 on hosts.
+      Host tests cover odd lengths, the cap, zero/invalid ids, reclaimed entries,
+      invalid tags, untouched tail bytes, and balanced pool locking.
   # --- record indexed payload lookup wrapper (app) ---
   - address: 0x080559c0
     ghidra: FUN_080559c0
