@@ -16,6 +16,35 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08054e34
+    ghidra: FUN_08054e34
+    name: ft_service_metadata_u64_at_b44
+    size: 16
+    sig: "uint64_t ft_service_metadata_u64_at_b44(const uint8_t *service_context)"
+    module: ft/service/metadata
+    status: ported
+    renames:
+      param_1/r0: service_context
+      return/r0:r1: metadata_value
+    notes: >-
+      Raw words e5901f00 e5910b44 e5911b48 e12fff1e establish the true
+      extent [0x08054e34,0x08054e44), ending at the separately called
+      signed-byte accessor. Whole-image aligned A32 decoding finds two
+      plain inbound BLs at 0x08173430 and 0x08173448, zero predicated
+      inbound BLs, and zero outgoing plain or predicated BLs. Follow the
+      aligned metadata pointer at service_context+0xf00; return the word
+      at +0xb44 as the low half and +0xb48 as the high half of a uint64_t.
+      FUN_08172c6c compares/caches both halves at caller+0x68; higher-level
+      meaning remains unknown. Reuse the existing registered metadata
+      module with no callee seams. Native-width host pointers preserve the
+      pointer field offset; ARM pointers remain four bytes. Separate u32
+      loads require only four-byte alignment. No NULL or bounds checks.
+      Host tests cover independent boundary bit patterns in both halves,
+      word ordering, live word updates and metadata pointer replacement.
+      Standalone smoke returns 0xfedcba9876543210. Host suite and ARM
+      release build pass. match.py exits 1: all three loads and offsets
+      match exactly; LLVM adds frame setup and replaces bx lr with pop
+      returning through pc. The exported symbol is present.
   - address: 0x08054e44
     ghidra: FUN_08054e44
     name: ft_service_metadata_signed_byte_at_b40
