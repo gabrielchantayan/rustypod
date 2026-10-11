@@ -51726,6 +51726,37 @@ functions:
       signed indices, live entries, output clearing, zero-mode rejection,
       and NULL optional outputs; obsolete mock forwarding tests are removed.
 
+  - address: 0x08055934
+    ghidra: FUN_08055934
+    name: record_indexed_payload_lookup_at_0x328
+    size: 56
+    sig: "u32 record_indexed_payload_lookup_at_0x328(const u32 *record, void **payload_out, u32 *encoded_length_out)"
+    module: app/indexed_payload_lookup
+    status: ported
+    renames:
+      param_1/r0: record
+      param_2/r1: payload_out
+      param_3/r2: encoded_length_out
+      record_word_0: index_base
+      record_word_18: entry
+      FUN_0809e3d0: indexed_payload_lookup
+    notes: >-
+      Raw A32 words establish the true 56-byte extent 0x08055934..0x0805596c;
+      the next push begins the separately entered nested wrapper. Full-image
+      aligned BL decoding finds two inbound plain BLs at 0x080456c4 and
+      0x080456d4, one outbound plain BL at 0x08055954 to the already ported
+      indexed_payload_lookup, and no predicated BLs. Reads record word 18,
+      looks up the entry at word-0 base+0x328, logically halves the optional
+      encoded length even on failure, and returns backend status unchanged.
+      Ghidra's void return is incorrect. The caller compares records for
+      selector 0x200000; no stronger field identity is assumed. Target fields
+      remain u32 on hosts; payload outputs use native pointers. Real-backend
+      tests cover odd/even/maximal live lengths, empty/invalid/dead entries,
+      invalid tags, inactive indices, output clearing, and NULL outputs.
+      match.py shows fourteen instructions on both sides: word-18 load,
+      +0x328 adjustment, backend BL, and conditional logical shift/store
+      remain; LLVM uses a larger frame and different register shuffle.
+
   - address: 0x08055a44
     ghidra: FUN_08055a44
     name: record_string_pool_read_counted_at_0x2d0
