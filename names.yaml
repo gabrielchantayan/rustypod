@@ -41325,6 +41325,37 @@ functions:
       instructions: the verified guard/resize/zero-tail control flow remains,
       while LLVM expands the existing heap-wrapper dispatch and volatile byte
       loop rather than retaining retail direct branches.
+  - address: 0x0805d31c
+    ghidra: FUN_0805d31c
+    name: plst_enable_tdat
+    size: 36
+    sig: "u32 plst_enable_tdat(const u8 *element)"
+    module: ui/plst_enable_tdat
+    vars:
+      param_1/r0/r2: element
+      element+0x0c: associated_tdat
+      FUN_080613e0: ui_element_is_plst_class
+      FUN_08067b4c: tdat_element_set_flag_20_bit_2
+    status: ported
+    notes: >-
+      Raw words e92d4010 e1a02000 eb00102d e3500000 1592000c
+      18bd4010 13a01001 1a002a03 e8bd8010 prove the 36-byte extent
+      ending at the next push prologue at 0x0805d340. Whole-image
+      aligned A32 decoding finds two inbound plain BLs at 0x08067340
+      and 0x0806743c, zero predicated inbound BLs; one outbound plain
+      BL to 0x080613e0, zero predicated BLs, and a BNE tail call to
+      0x08067b4c with value 1. Rejects NULL or a non-plst element
+      with zero before reading its associated u32 pointer at +0x0c;
+      otherwise returns the setter result without checking that pointer
+      for NULL. Ghidra incorrectly expands the tail callee into this
+      function. Deliberate deviations: calls both existing Rust ports
+      directly; LLVM controls tail-call lowering. Host tests cover
+      rejected classes and already-enabled associated objects,
+      preserving all flag bits and the refcount.
+      match.py shows 12 Rust instructions versus 9 retail instructions:
+      the class-check, guarded +0x0c load, value 1 and setter tail branch
+      remain; LLVM adds a frame and replaces predicated instructions
+      with an explicit zero-return branch.
   - address: 0x0805d270
     ghidra: FUN_0805d270
     name: memh_set_len
