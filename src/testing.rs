@@ -1805,6 +1805,8 @@ pub mod hints {
     pub const RECORD_INDEXED_PAYLOAD_LOOKUP_278: usize = 0xd800_0000;
     // Dedicated indexed_payload_equals fixture; persistent mapping, unique hint.
     pub const INDEXED_PAYLOAD_EQUALS: usize = 0x4e39_0000;
+    // Dedicated nested-record lookup fixture; persistent mapping, unique hint.
+    pub const RECORD_NESTED_PAYLOAD_LOOKUP: usize = 0x4e3a_0000;
     // 0xf600_0000: dedicated to app/string_table's raw-u32 COW value
     // fixture for the signed-decimal getter; mappings never unmap, so no
     // other user may share this hint.

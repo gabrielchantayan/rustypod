@@ -16,6 +16,32 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08055b18
+    ghidra: FUN_08055b18
+    name: record_nested_payload_lookup
+    size: 88
+    sig: "u32 record_nested_payload_lookup(const u32 *record, void **payload_out, u32 *encoded_length_out)"
+    module: app/indexed_payload_lookup
+    status: ported
+    renames:
+      param_1/r4: record
+      param_2: payload_out
+      param_3/r5: encoded_length_out
+      record_word_4: descriptor
+      descriptor_word_3: entry
+      FUN_0805c220: tdat_element_addref_counters
+      FUN_0809e3d0: indexed_payload_lookup
+      FUN_0806c0b8: tdat_element_release_counters
+    notes: >-
+      Raw ARM confirms 88 bytes through 0x08055b6c; the next real function
+      starts at 0x08055b70. Two inbound plain BLs at 0x08045af4 and
+      0x08045b04; three outbound plain BLs; zero predicated BLs. Retains
+      tdat counters, loads descriptor entry at +0x0c through record +0x10,
+      looks up element +0x850, releases counters, halves optional length
+      even on failure, and returns lookup status. Existing Rust callees
+      replace retail calls; target pointer fields remain u32 on hosts.
+      Host tests cover live/empty/invalid entries, odd lengths, optional
+      outputs and zero-count retention; ARM diff preserves three calls.
   - address: 0x08056234
     ghidra: FUN_08056234
     name: record_words_to_halfwords
