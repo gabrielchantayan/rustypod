@@ -38,6 +38,61 @@ pub const METADATA_SIGNED_BYTE_B43_OFFSET: usize = 0xb43;
 /// Byte offset of this unsigned word in the metadata block.
 pub const METADATA_WORD_AF8_OFFSET: usize = 0xaf8;
 
+/// ft_service_metadata_action — original: `FUN_08054de0` @ `0x08054de0`.
+///
+/// True size 40 bytes, [0x08054de0, 0x08054e08), ending at the independent
+/// af8 accessor. Raw A32 words verify two plain inbound BLs (0x08172c78,
+/// 0x0817b970), zero predicated inbound BLs, and zero outgoing BLs of either
+/// kind. Follow the aligned pointer at context+0xf00. A zero byte at
+/// metadata+0x1c returns 0 without reading +0x8e; otherwise return 1 for a
+/// zero byte at +0x8e and 2 for any nonzero byte. The playback-action caller
+/// uses the result as nonzero/exactly-two flags; deeper field meanings
+/// remain unrecovered. Deliberate deviations: native-width host pointers,
+/// four-byte ARM pointers; no additional NULL or bounds checks.
+///
+/// # Safety
+/// `service_context` must contain an aligned readable metadata pointer at
+/// +0xf00. Metadata must be readable at +0x1c and, if nonzero, at +0x8e.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn ft_service_metadata_action(service_context: *const u8) -> u32 {
+    let metadata = (service_context.add(SERVICE_CONTEXT_METADATA_OFFSET) as *const *const u8).read();
+    if metadata.add(0x1c).read() == 0 { return 0; }
+    if metadata.add(0x8e).read() == 0 { 1 } else { 2 }
+}
+
+#[cfg(test)]
+mod action_tests {
+    use super::*;
+
+    #[test]
+    fn exhaustive_unsigned_flags_and_pointer_replacement() {
+        let mut owner = [0usize; 0xf00 / core::mem::size_of::<usize>() + 1];
+        let mut metadata = [0xa5u8; 0x8f];
+        let context = owner.as_mut_ptr().cast::<u8>();
+        unsafe {
+            context.add(0xf00).cast::<*const u8>().write(metadata.as_ptr());
+            for gate in 0..=255u8 {
+                for secondary in 0..=255u8 {
+                    metadata[0x1c] = gate;
+                    metadata[0x8e] = secondary;
+                    let expected = if gate == 0 { 0 } else if secondary == 0 { 1 } else { 2 };
+                    assert_eq!(ft_service_metadata_action(context), expected);
+                }
+            }
+            // Only the first byte is valid: the zero path must not read +0x8e.
+            let short = [0u8; 0x1d];
+            context.add(0xf00).cast::<*const u8>().write(short.as_ptr());
+            assert_eq!(ft_service_metadata_action(context), 0);
+            metadata[0x1c] = 0x80;
+            metadata[0x8e] = 0xff;
+            context.add(0xf00).cast::<*const u8>().write(metadata.as_ptr());
+            assert_eq!(ft_service_metadata_action(context), 2);
+        }
+        assert!(metadata.iter().enumerate().all(|(i, b)| i == 0x1c || i == 0x8e || *b == 0xa5));
+    }
+}
+
 /// ft_service_metadata_word_at_af8 — original: `FUN_08054e08` @
 /// `0x08054e08` (12 bytes; two plain inbound BLs, zero predicated inbound
 /// BLs, zero outgoing plain or predicated BLs).

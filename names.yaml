@@ -16,6 +16,29 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08054de0
+    ghidra: FUN_08054de0
+    name: ft_service_metadata_action
+    size: 40
+    sig: "uint32_t ft_service_metadata_action(const uint8_t *service_context)"
+    module: ft/service/metadata
+    status: ported
+    renames:
+      param_1/r0: service_context
+      nested_pointer: metadata
+      return/r0: action
+    notes: >-
+      Raw A32 words establish [0x08054de0,0x08054e08), ending at the
+      independently called af8 accessor. Two unconditional inbound BLs
+      at 0x08172c78 and 0x0817b970; zero predicated inbound BLs and zero
+      outgoing plain or predicated BLs. Follow the aligned pointer at
+      context+0xf00. Byte +0x1c equal to zero returns 0 without reading
+      +0x8e; otherwise byte +0x8e selects 1 for zero or 2 for nonzero.
+      Playback action flags consume nonzero and exactly-two predicates.
+      Deeper field meanings remain unrecovered. Native-width host pointers
+      preserve the pointer field offset; ARM pointers are four bytes.
+      No added NULL or bounds checks. Replace the caller's fixed-address
+      veneer and host callback with this port and real nested fixtures.
   - address: 0x08054e14
     ghidra: FUN_08054e14
     name: ft_service_metadata_signed_byte_at_b43
@@ -167341,16 +167364,15 @@ functions:
     notes: >-
       Raw osos.dec establishes the exact 96-byte extent
       0x0817b958..0x0817b9b8; 0x0817b9b8 begins the next separately linked
-      function. The 24 words contain one plain internal bl to the unported
+      function. The 24 words contain one plain internal bl to the ported
       nested-state selector at 0x08054de0 and no predicated BL calls. A
       whole-image A32 B/BL decode finds four plain inbound BL calls
       (0x0817918c, 0x081799ec, 0x0817b2bc, and 0x0817b3bc), with zero
       predicated inbound BL calls. Command 3 is replaced by the nested-state
       selector result from the target-width word at player+0x9a8; all other
       commands pass through. The function stores action != 0 and action == 2
-      to its two byte outputs. Deliberate deviation: target code uses a
-      fixed-address literal veneer for the unported callee, while host tests
-      install a callback seam.
+      to its two byte outputs. Deliberate deviation: call the Rust
+      ft_service_metadata_action port directly, including in host tests.
   - address: 0x08174714
     ghidra: FUN_08174714
     name: object_set_byte_0x27
@@ -199437,16 +199459,15 @@ functions:
     notes: >-
       Raw osos.dec establishes the exact 96-byte extent
       0x0817b958..0x0817b9b8; 0x0817b9b8 begins the next separately linked
-      function. The 24 words contain one plain internal bl to the unported
+      function. The 24 words contain one plain internal bl to the ported
       nested-state selector at 0x08054de0 and no predicated BL calls. A
       whole-image A32 B/BL decode finds four plain inbound BL calls
       (0x0817918c, 0x081799ec, 0x0817b2bc, and 0x0817b3bc), with zero
       predicated inbound BL calls. Command 3 is replaced by the nested-state
       selector result from the target-width word at player+0x9a8; all other
       commands pass through. The function stores action != 0 and action == 2
-      to its two byte outputs. Deliberate deviation: target code uses a
-      fixed-address literal veneer for the unported callee, while host tests
-      install a callback seam.
+      to its two byte outputs. Deliberate deviation: call the Rust
+      ft_service_metadata_action port directly, including in host tests.
   - address: 0x08174714
     ghidra: FUN_08174714
     name: object_set_byte_0x27
