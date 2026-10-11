@@ -408,6 +408,7 @@ pub mod empty_destructor_08297568;
 pub mod empty_destructor_166a3c;
 pub mod empty_destructor_165bfc;
 pub mod version_info_construct;
+pub mod version_info_text;
 pub mod empty_destructor_1070b4;
 pub mod empty_destructor_083d8008;
 pub mod input_cursor_next_byte;
