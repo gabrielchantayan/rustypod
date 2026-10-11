@@ -16,6 +16,32 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0805382c
+    ghidra: FUN_0805382c
+    name: resource_slot_value
+    size: 36
+    sig: "u32 resource_slot_value(const u32 *controller, u32 slot_index)"
+    module: app/resource_slot_value
+    status: ported
+    renames:
+      param_1/r0: controller
+      param_2/r1: slot_index
+      iVar1/r0: handle
+      return/r0: value
+    notes: >-
+      Raw words establish the true extent [0x0805382c,0x08053850), ending
+      with bx lr before the next function's push {r4,r5,lr}. Independent
+      whole-image aligned A32 decoding finds two plain inbound BLs at
+      0x08112404 and 0x08112424, zero predicated inbound BLs, and zero
+      outgoing BLs. Unsigned indices below four select a four-byte handle
+      entry at controller+0xf7c; a nonzero handle returns its aligned +8
+      word. Invalid indices and null handles return zero. The caller compares
+      slot zero with one; finer value semantics remain unrecovered. No
+      algorithm deviations or callee seams; host storage retains u32 pointers.
+      Host suite passes 15627 tests; actual-source smoke checks zero, one,
+      high-bit, all-bit, absent and invalid values; ARM release build passes.
+      match.py exits 1: guards and load offsets match, while LLVM adds a
+      non-null-path frame and emits 13 instructions versus nine. No device run.
   - address: 0x080538a4
     ghidra: FUN_080538a4
     name: ft_service_metadata_class_zero_mask
