@@ -99,6 +99,28 @@ pub unsafe extern "C" fn ft_service_metadata_signed_status_at_b3c(object: *const
     (metadata.add(METADATA_SIGNED_STATUS_B3C_OFFSET) as *const i8).read() as i32
 }
 
+/// ft_service_metadata_flags_at_b84 — retail `FUN_08053a8c` @ `0x08053a8c`.
+/// True extent: [0x08053a8c, 0x08053a98), 12 bytes, ending at the next push.
+/// Raw words: `e5900f00 e5900b84 e12fff1e` (`ldr; ldr; bx lr`).
+/// Whole-image A32 decoding verifies two plain inbound BLs at 0x08172728
+/// and 0x081729d0, zero predicated inbound BLs, and no outgoing BLs.
+///
+/// Follow the pointer at object+0xf00 and return the full flag word at
+/// metadata+0xb84. Callers test, set, and clear selected bits; their concrete
+/// meanings remain unrecovered. No callee seams or NULL/bounds checks.
+/// Deliberate deviations: the host pointer is native-width, while ARM retains
+/// the four-byte pointer slot; field offsets and aligned reads are unchanged.
+///
+/// # Safety
+/// `object` has an aligned readable metadata pointer at +0xf00. Its pointee
+/// has an aligned readable u32 at +0xb84.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn ft_service_metadata_flags_at_b84(object: *const u8) -> u32 {
+    let metadata = object.add(OBJECT_METADATA_OFFSET).cast::<*const u8>().read();
+    metadata.add(0xb84).cast::<u32>().read()
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -278,5 +300,42 @@ mod tests {
             core::mem::offset_of!(MetadataSignedStatusAtB3c, status),
             METADATA_SIGNED_STATUS_B3C_OFFSET
         );
+    }
+}
+
+#[cfg(test)]
+mod flags_b84_tests {
+    use super::*;
+
+    #[repr(C)]
+    struct Object {
+        padding: [u8; OBJECT_METADATA_OFFSET],
+        metadata: *const u32,
+    }
+
+    #[test]
+    fn preserves_every_bit_and_follows_replaced_metadata() {
+        let mut first = [0xa5a5_a5a5u32; 0xb88 / 4];
+        let mut second = [0x5a5a_5a5au32; 0xb88 / 4];
+        let mut object = Object {
+            padding: [0xcc; OBJECT_METADATA_OFFSET],
+            metadata: first.as_ptr(),
+        };
+        for value in [0, u32::MAX, 0x8000_0000, 0x7fff_ffff, 0x1234_5678]
+            .into_iter().chain((0..32).map(|bit| 1u32 << bit))
+        {
+            first[0xb84 / 4] = value;
+            assert_eq!(unsafe {
+                ft_service_metadata_flags_at_b84((&object as *const Object).cast())
+            }, value);
+        }
+        second[0xb84 / 4] = 0x89ab_cdef;
+        object.metadata = second.as_ptr();
+        assert_eq!(unsafe {
+            ft_service_metadata_flags_at_b84((&object as *const Object).cast())
+        }, 0x89ab_cdef);
+        assert!(first[..0xb84 / 4].iter().all(|word| *word == 0xa5a5_a5a5));
+        assert!(second[..0xb84 / 4].iter().all(|word| *word == 0x5a5a_5a5a));
+        assert_eq!(object.padding, [0xcc; OBJECT_METADATA_OFFSET]);
     }
 }
