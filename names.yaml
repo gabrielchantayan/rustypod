@@ -16,6 +16,39 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080557fc
+    ghidra: FUN_080557fc
+    name: record_string_pool_read_counted_at_0x118
+    size: 20
+    sig: "i32 record_string_pool_read_counted_at_0x118(const u32 *record, u16 *counted)"
+    module: util/string_pool
+    status: ported
+    renames:
+      param_1/r0: record
+      param_2/r1: counted
+      record[0]: owner
+      record[15]: entry_id
+      FUN_080bd8bc: string_pool_read_counted (ported)
+    notes: >-
+      Raw words e1a02001 e590103c e5900000 e2800f46 ea01a02a establish
+      the 20-byte extent [0x080557fc,0x08055810); the following push
+      begins a distinct function. Full-image aligned BL decoding finds
+      two plain inbound calls at 0x08046354 and 0x082a4250, zero
+      predicated inbound calls, and zero body BLs. The final plain B
+      targets ported string_pool_read_counted at 0x080bd8bc, not
+      string_pool_read directly as Ghidra suggests. Record word 15
+      supplies the signed ID; word zero supplies the owner with its
+      pool at +0x118. Copy at most 510 bytes after the u16 count,
+      halve copied byte length, and preserve status. Deliberate
+      deviation: zero incoming r3, whose initial length the reader
+      clears before validation. Host records retain target-width u32
+      pointers. Port-specific tests cover odd lengths, clipping,
+      invalid IDs, malformed entries, invalid tags, payload guards,
+      and counter restoration. ARM release build passes. match.py
+      exit-1 diff preserves word-15 selection, owner+0x118, and tail
+      transfer with LLVM frame setup and explicit r3 zeroing.
+      Full host suite encounters an unrelated SIGSEGV in
+      sqlite::error_message::tests::valid_handle_with_no_error_text_maps_its_error_code.
   - address: 0x08055860
     ghidra: FUN_08055860
     name: record_nested_payload_lookup_at_0x7a0
