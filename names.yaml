@@ -16,6 +16,50 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080558c8
+    ghidra: FUN_080558c8
+    name: record_metadata_lookup_prefer_alternate
+    size: 88
+    sig: "u32 record_metadata_lookup_prefer_alternate(const u32 *record, void **payload_out, u32 *encoded_length_out)"
+    module: app/indexed_payload_lookup
+    status: ported
+    renames:
+      param_1/r0: record
+      param_2/r1: payload_out
+      param_3/r2: encoded_length_out
+      record_word_0: owner
+      record_word_11: metadata_entry
+      record_word_12: alternate_entry
+      owner_word_2: settings
+      FUN_0805572c: record_metadata_lookup
+      FUN_0809e3d0: indexed_payload_lookup
+    notes: >-
+      Raw ARM proves the exact 88-byte extent [0x080558c8,0x08055920);
+      the next mov r2,r1 begins a separately entered counted-string wrapper.
+      Whole-image aligned BL decoding finds two plain inbound calls at
+      0x08045720 and 0x08045730, zero predicated inbound calls, one plain
+      outbound BL at 0x08055908 to indexed_payload_lookup, and zero
+      predicated outbound BLs. A conditional tail branch at 0x080558f8
+      invokes record_metadata_lookup. Nonzero record word 12 and nonzero
+      settings byte +0xb0f select owner+0x170 with the alternate entry;
+      otherwise word 11 at owner+0x118 supplies metadata. Halve optional
+      encoded length and preserve backend status, including failure.
+      Ghidra's fourth argument is spurious: r3 is overwritten before use;
+      its void return misses the preserved r0 backend status. Target fields
+      remain u32 on hosts and output pointers use native width; existing
+      Rust ports implement both paths without new seams or semantic changes.
+      Host regression covers short-circuit settings access, zero/nonzero
+      flags, alternate precedence, invalid selected indices without fallback,
+      odd and maximal lengths, failure clearing, and independently NULL outputs.
+      All 15574 host tests pass; ARM release build passes. Isolated executable
+      smoke compiles the actual port and backend sources and proves empty
+      fallback success versus selected out-of-range failure with cleared outputs.
+      Full non-test host library build is blocked by existing unresolved
+      prepare_metadata, extract_metadata, configure_shared_payload_kind and
+      notify_calendar_change functions. match.py exits 1: 22 original versus
+      24 Rust instructions preserve both selection checks, offsets, backend
+      BL, conditional shift/store, status and fallback tail branch; LLVM
+      adds a larger frame and explicit branches instead of predicated loads.
   - address: 0x08055b18
     ghidra: FUN_08055b18
     name: record_nested_payload_lookup
