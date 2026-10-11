@@ -135,6 +135,126 @@ pub unsafe extern "C" fn linked_list_find_or_recycle(
     -123
 }
 
+/// `linked_list_invalidate_payload` — original: `FUN_0805991c` @ 0x0805991c.
+/// True extent: 96 bytes, ending at the next PUSH prologue at 0x0805997c.
+/// Whole-image aligned ARM decoding finds one plain inbound BL at 0x081bff58
+/// and one inbound BLEQ at 0x081c0044; no outbound plain or predicated BLs.
+///
+/// Recover the entry preceding `payload`, clear its state, set its key to
+/// 0xffffffff, and move it to the list back. An existing back entry still
+/// has its state/key invalidated, but its links remain untouched. Otherwise
+/// repair the next entry's previous link and either the front or the previous
+/// entry's next link before appending to the old back. Payload state/data and
+/// list accounting words are preserved.
+///
+/// Deliberate deviations: none. Reuse the canonical repr(C) layouts; the
+/// payload offset is 20 on ARM and follows the wider native links on hosts.
+///
+/// # Safety
+/// `list` must be writable and nonempty; `payload` must be the payload start
+/// of an entry linked into it. All affected links must be valid and writable.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.linked_list_invalidate_payload")]
+#[inline(never)]
+pub unsafe extern "C" fn linked_list_invalidate_payload(
+    list: *mut LinkedListHeader,
+    payload: *mut u8,
+) {
+    let entry = unsafe {
+        payload.sub(core::mem::offset_of!(LinkedListEntry, payload_start))
+            .cast::<LinkedListEntry>()
+    };
+    unsafe {
+        (*entry).state = 0;
+        (*entry).key = u32::MAX;
+        let old_back = (*list).back;
+        if old_back == entry {
+            return;
+        }
+        (*list).back = entry;
+        let next = (*entry).next;
+        (*next).previous = (*entry).previous;
+        let previous = (*entry).previous;
+        if previous.is_null() {
+            (*list).front = (*entry).next;
+        } else {
+            (*previous).next = (*entry).next;
+        }
+        (*entry).previous = old_back;
+        (*entry).next = ptr::null_mut();
+        (*old_back).next = entry;
+    }
+}
+
+#[cfg(test)]
+mod invalidate_tests {
+    extern crate std;
+    use super::*;
+
+    #[repr(C)]
+    struct StoredEntry {
+        entry: LinkedListEntry,
+        data: [u32; 2],
+    }
+
+    #[test]
+    fn invalidation_preserves_bidirectional_links_and_payload_at_every_position() {
+        for count in 1..=4 {
+            for selected in 0..count {
+                let mut entries = core::array::from_fn::<_, 4, _>(|i| StoredEntry {
+                    entry: LinkedListEntry {
+                        next: ptr::null_mut(), previous: ptr::null_mut(),
+                        state: 0x100 + i as u32, key: i as u32,
+                        payload_state: 0x200 + i as u32, payload_start: [],
+                    },
+                    data: [0x300 + i as u32, 0x400 + i as u32],
+                });
+                let nodes = entries.each_mut().map(|e| ptr::addr_of_mut!(e.entry));
+                for i in 0..count {
+                    entries[i].entry.previous = if i == 0 { ptr::null_mut() } else { nodes[i - 1] };
+                    entries[i].entry.next = if i + 1 == count { ptr::null_mut() } else { nodes[i + 1] };
+                }
+                let mut list = LinkedListHeader {
+                    state_0: 11, state_4: 22, state_8: 33,
+                    front: nodes[0], back: nodes[count - 1],
+                };
+                unsafe {
+                    linked_list_invalidate_payload(
+                        &mut list, (*nodes[selected]).payload_start.as_mut_ptr(),
+                    );
+                }
+                let order: std::vec::Vec<_> = (0..count)
+                    .filter(|&i| i != selected).chain(core::iter::once(selected)).collect();
+                assert_eq!(list.front, nodes[order[0]]);
+                assert_eq!(list.back, nodes[selected]);
+                for (position, &i) in order.iter().enumerate() {
+                    assert_eq!(entries[i].entry.previous,
+                        if position == 0 { ptr::null_mut() } else { nodes[order[position - 1]] });
+                    assert_eq!(entries[i].entry.next,
+                        if position + 1 == count { ptr::null_mut() } else { nodes[order[position + 1]] });
+                }
+                for (i, stored) in entries.iter().enumerate() {
+                    assert_eq!(stored.entry.state, if i == selected { 0 } else { 0x100 + i as u32 });
+                    assert_eq!(stored.entry.key, if i == selected { u32::MAX } else { i as u32 });
+                    assert_eq!(stored.entry.payload_state, 0x200 + i as u32);
+                    assert_eq!(stored.data, [0x300 + i as u32, 0x400 + i as u32]);
+                }
+                assert_eq!((list.state_0, list.state_4, list.state_8), (11, 22, 33));
+                // Re-invalidating the new tail must not disturb either link.
+                unsafe {
+                    linked_list_invalidate_payload(
+                        &mut list, (*nodes[selected]).payload_start.as_mut_ptr(),
+                    );
+                }
+                assert_eq!(list.back, nodes[selected]);
+                assert!(entries[selected].entry.next.is_null());
+                assert_eq!(entries[selected].entry.previous,
+                    if count == 1 { ptr::null_mut() } else { nodes[order[count - 2]] });
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod recycle_tests {
     use super::*;
