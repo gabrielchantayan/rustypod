@@ -96,6 +96,34 @@ functions:
       suite and ARM release build pass. match.py exits 1: LLVM adds a restored
       frame and relocates the literal before the tail branch. Raw and compiled
       ARM smoke pass eight cases preserving descriptor, r1/r2/r3, SP, fp and LR.
+  - address: 0x0805dd8c
+    ghidra: FUN_0805dd8c
+    name: paired_buffer_create
+    size: 144
+    sig: "u32 *paired_buffer_create(void)"
+    module: heap/paired_buffer_create
+    status: ported
+    vars:
+      r0: acquired paired buffer or NULL
+      r4: pool state at 0x089cb190
+      DAT_0805de08: buffer size 0x1e9c
+      DAT_0805de0c: registration key 0x080d9448
+      DAT_0805de10: first capacity 0x1460
+      DAT_0805de14: second capacity 0xa3c
+      DAT_0805de18: second capacity offset 0x1464
+    notes: >-
+      Raw extent [0x0805dd8c,0x0805de1c) is 144 bytes: 120 code plus
+      24 literal bytes. Next independent PUSH begins at 0x0805de1c.
+      Whole-image A32 decoding finds two incoming plain BLs at 0x0806cca8
+      and 0x0806cd14, zero predicated incoming BLs; three outgoing plain
+      BLs at 0x0805ddac, 0x0805ddcc, 0x0805dddc, zero predicated outgoing.
+      Lazily create owner via fixa_owner_create with size 0x1e9c and payload
+      three at 0x089cb194; register key 0x080d9448 via word_record_register
+      with remaining arguments zero. Acquire through existing FIXED_POOL_OPS
+      for unported 0x0805de1c. Return NULL on failure; preserve cached owner
+      after registration or acquire failure. Store 0x1460 at buffer +4 and
+      0xa3c at +0x1464. Host state is explicitly supplied; target offsets
+      remain word-sized. Caller 0x0806cc54 uses second half at +0x1460.
   - address: 0x0806430c
     ghidra: FUN_0806430c
     name: word_record_register

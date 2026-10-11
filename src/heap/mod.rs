@@ -68,6 +68,7 @@ pub mod object_base_construct;
 pub mod fixa;
 pub mod fixa_validate;
 pub mod fixa_owner_create;
+pub mod paired_buffer_create;
 pub mod mailbox_receive_gateway;
 pub mod mailbox_receive_timed_gateway;
 pub mod mailbox_send_gateway;

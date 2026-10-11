@@ -2092,6 +2092,8 @@ pub mod hints {
     // slot and owner fixture; mappings never unmap, so no other user may
     // share this hint.
     pub const FIXA_OWNER_CREATE: usize = 0xb000_0000;
+    // Dedicated low-address owner, table, and paired buffer fixture.
+    pub const PAIRED_BUFFER_CREATE: usize = 0xb730_0000;
 
 
     // 0x9300_0000: dedicated to util/inner_state's selected-resource table
