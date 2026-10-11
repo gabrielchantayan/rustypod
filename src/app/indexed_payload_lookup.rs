@@ -280,6 +280,43 @@ pub unsafe extern "C" fn record_indexed_payload_lookup_at_0x278(
     status
 }
 
+/// record_nested_payload_lookup — `FUN_08055b18` @ `0x08055b18`.
+///
+/// True extent: 88 bytes, `0x08055b18..0x08055b70`, ending at the next
+/// function's push. Raw words verify two inbound plain BLs (0x08045af4,
+/// 0x08045b04), three outbound plain BLs, and zero predicated BLs.
+/// Retains the record's tdat counters, reads entry word 3 of the descriptor
+/// addressed by record word 4, looks it up at element +0x850, releases the
+/// counters, and logically halves the optional length even on failure.
+/// Returns the lookup status unchanged.
+///
+/// Deliberate deviations: calls existing Rust ports directly; target pointer
+/// fields stay u32 on hosts, while output payload pointers are native-sized.
+///
+/// # Safety
+/// Record must contain five readable aligned target words. Its word 0 must
+/// address a tdat element valid through +0x8db and an index at +0x850 satisfying
+/// the lookup backend contract. Word 4 must address four readable target words.
+/// Optional outputs must be writable and not alias record/element storage.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn record_nested_payload_lookup(
+    record: *const u32,
+    payload_out: *mut *mut u8,
+    encoded_length_out: *mut u32,
+) -> u32 {
+    crate::ui::tdat_counter_addrefs::tdat_element_addref_counters(record.read() as usize as *mut u8);
+    let descriptor = record.add(4).read() as usize as *const u32;
+    let entry = descriptor.add(3).read();
+    let element = record.read() as usize as *mut u8;
+    let status = indexed_payload_lookup(element.add(0x850), entry, payload_out, encoded_length_out);
+    crate::ui::tdat_counter_releases::tdat_element_release_counters(record.read() as usize as *mut u8);
+    if !encoded_length_out.is_null() {
+        encoded_length_out.write(encoded_length_out.read() >> 1);
+    }
+    status
+}
+
 
 
 /// indexed_payload_lookup_mode_one — original: `FUN_080d6e50` @ `0x080d6e50`
@@ -335,6 +372,64 @@ mod tests {
     use crate::util::crts_tag::CRTS_TAG;
     use core::ptr;
 
+
+    #[test]
+    fn nested_lookup_decodes_lengths_and_balances_counters_on_success_and_failure() {
+        unsafe {
+            let Some(slab) = try_map_u32_slab(hints::RECORD_NESTED_PAYLOAD_LOOKUP, 4096) else {
+                note_missing_u32_fixture("record_nested_payload_lookup");
+                return;
+            };
+            ptr::write_bytes(slab, 0, 4096);
+            let element = slab.cast::<u32>();
+            element.add(1).write(0x7464_6174);
+            let index = slab.add(0x850).cast::<u32>();
+            let descriptor = slab.add(0x900).cast::<u32>();
+            let record = slab.add(0x940).cast::<u32>();
+            let table = slab.add(0x980).cast::<u32>();
+            let handles = slab.add(0x9c0).cast::<u32>();
+            record.write(slab as usize as u32);
+            record.add(4).write(descriptor as usize as u32);
+            // All other embedded counters have invalid tags and remain untouched.
+            index.write(CRTS_TAG);
+            index.add(2).write(handles as usize as u32);
+            index.add(4).write(handles.add(1) as usize as u32);
+            index.add(7).write(1);
+            index.add(12).write(0);
+            handles.write(table as usize as u32);
+            handles.add(1).write(slab.add(0xa00) as usize as u32);
+            table.write(3);
+            for (entry, length, initial_count, expected_status, expected_length) in [
+                (1, 7, 0, 0, 3),
+                (1, 1, 5, 0, 0),
+                (1, 0, 5, 0xffff_ffce, 0),
+                (2, 7, 0, 0xffff_ffce, 0),
+                (u32::MAX, 7, 0, 0xffff_ffce, 0),
+                (0, 7, 0, 0, 0),
+            ] {
+                descriptor.add(3).write(entry);
+                table.add(1).write(length);
+                index.add(12).write(initial_count);
+                let mut payload = ptr::dangling_mut::<u8>();
+                let mut decoded = u32::MAX;
+                assert_eq!(record_nested_payload_lookup(record, &mut payload, &mut decoded), expected_status);
+                assert_eq!(decoded, expected_length);
+                assert_eq!(payload, if entry == 1 && expected_status == 0 { slab.add(0xa03) } else { ptr::null_mut() });
+                assert_eq!(index.add(12).read(), initial_count);
+            }
+            descriptor.add(3).write(1);
+            table.add(1).write(7);
+            index.add(12).write(0);
+            assert_eq!(record_nested_payload_lookup(record, ptr::null_mut(), ptr::null_mut()), 0);
+            assert_eq!(index.add(12).read(), 0);
+            // Without a tdat class, no temporary retain enables zero-mode lookup.
+            element.add(1).write(0);
+            let mut decoded = 99;
+            assert_eq!(record_nested_payload_lookup(record, ptr::null_mut(), &mut decoded), 0xffff_ffce);
+            assert_eq!(decoded, 0);
+            assert_eq!(index.add(12).read(), 0);
+        }
+    }
 
     #[test]
     fn equality_requires_success_exact_encoded_length_and_all_bytes() {
