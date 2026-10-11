@@ -246749,3 +246749,36 @@ functions:
       match.py reports fourteen instructions in both bodies; LLVM changes
       the frame and register shuffle but preserves index adjustment,
       backend call, conditional logical shift/store, and status return.
+
+  - address: 0x0805596c
+    ghidra: FUN_0805596c
+    name: record_nested_payload_lookup_at_0x8a8
+    size: 64
+    sig: "u32 record_nested_payload_lookup_at_0x8a8(const u32 *record, void **payload_out, u32 *encoded_length_out)"
+    module: app/indexed_payload_lookup
+    status: ported
+    renames:
+      param_1/r0: record
+      param_2/r1: payload_out
+      param_3/r2: encoded_length_out
+      record_word_0: owner
+      record_word_4: descriptor
+      descriptor_word_4: entry
+      FUN_0809e3d0: indexed_payload_lookup
+    notes: >-
+      Raw ARM establishes the exact 64-byte extent 0x0805596c..0x080559ac;
+      the next mov r2,r1 begins a separately entered counted-string wrapper.
+      Independent aligned-word decoding finds two inbound plain BLs at
+      0x08045b2c and 0x08045b3c, one outbound plain BL at 0x08055994 to
+      the ported indexed_payload_lookup at 0x0809e3d0, and no predicated
+      BLs or aligned data-word references. Loads owner from record word 0,
+      descriptor from record word 4, and entry from descriptor word 4;
+      looks up at owner+0x8a8 and logically halves the optional length even
+      on failure. Returns backend status unchanged, correcting Ghidras void
+      return. Target pointers remain u32 on hosts; output pointers use native
+      width. Real-backend tests cover odd/even and maximal live lengths,
+      empty and signed-invalid indices, dead entries, invalid tags, clearing
+      failed outputs, and NULL optional outputs. Host suite and ARM release
+      build pass. match.py reports sixteen instructions in both bodies;
+      LLVM changes the frame and register shuffle but preserves both nested
+      loads, index adjustment, backend BL, conditional shift/store, and status.
