@@ -49117,6 +49117,28 @@ functions:
       0x080dc49c has no ledger entry, so its verified address is retained
       as a narrow host-injectable boundary rather than inventing its name;
       its ignored return value matches the raw code.
+  - address: 0x080613b4
+    ghidra: FUN_080613b4
+    name: plst_payload_is_blocked
+    size: 44
+    sig: "u32 plst_payload_is_blocked(const u8 *element)"
+    module: ui/plst_payload_is_blocked
+    status: ported
+    notes: >-
+      Returns 0 only for a plst-class element with zero u16 at +0x1a4,
+      otherwise 1, including NULL and other classes without reading that
+      halfword. Reuses ui_element_is_plst_class at 0x080613e0. Raw extent
+      ends at that next function boundary; 44 bytes agrees with Ghidra.
+      Independently decoded inbound BLs: two plain at 0x0806131c and
+      0x080672dc, zero predicated; one outbound plain at 0x080613bc.
+      Caller 0x08061058 masks a returned 16-byte payload when blocked;
+      0x080672d0 skips copying four words to +0x608 through +0x614.
+      The state halfword's precise meaning remains unknown. No behavioral
+      deviations; aligned unsigned halfword read matches the raw ldrh.
+    rename:
+      param_1: element
+      iVar1: is_plst
+      FUN_080613e0: ui_element_is_plst_class
   - address: 0x080613e0
     ghidra: FUN_080613e0
     name: ui_element_is_plst_class
