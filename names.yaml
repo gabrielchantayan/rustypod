@@ -16,6 +16,57 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080539f0
+    ghidra: FUN_080539f0
+    name: context_text_to_counted_u16
+    size: 156
+    sig: "void context_text_to_counted_u16(u16 *counted)"
+    module: fp/context_text
+    status: ported
+    vars:
+      param_1/r5: counted
+      iVar2/r4: context
+      uStack_18/local_14: temporary_string
+      param_2/param_3/param_4: unused incoming register values
+    renames:
+      FUN_08369bec: shared_context
+      FUN_08068fe8: context_kind_suffix (resident selector)
+      FUN_08277304: string_object_construct_from_cstr
+      FUN_08276a18: string_object_insert_cstr
+      FUN_082770e0: utf8_codepoint_count_safe
+      FUN_08277044: string_object_truncate_codepoints
+      FUN_082a50b0: string_object_c_str
+      FUN_082767fc: utf8_to_utf16_bounded
+      FUN_08277484: string_object_destroy
+    notes: >-
+      Raw A32 establishes [0x080539f0,0x08053a8c), 156 instruction
+      bytes with no literals. Next real function starts with
+      ldr r0,[r0,#0xf00]. Whole-image aligned word decoding finds
+      two inbound plain BLs at 0x08112818 and 0x082a19d4, zero
+      predicated inbound BLs. Body has ten plain BLs and one BLHI
+      at 0x08053a4c to truncate_codepoints. Leading byte 0xff at
+      shared-context+0x98 clears only the count. Otherwise construct
+      a temporary StringObject, append the suffix selected from the
+      full halfword at +0x92, cap at 255 codepoints, decode to output+2,
+      write its remeasured count, and destroy the temporary. Raw suffix
+      selector at 0x08068fe8 tests bits 0xc0 and dispatches to resident
+      short string literals; no guessed identity or extra function port.
+      Preserve resident construction/insertion/truncation/destruction:
+      existing Rust mutation ports have missing virtual allocator defaults.
+      Reuse Rust context getter, counter, accessor, and bounded decoder.
+      Host operations model native-width StringObject fields. Remove
+      obsolete serializer seam in fp_misc and its mock-forwarding tests;
+      context_text_to_cxx_string now calls this Rust port directly.
+      Host edge tests cover sentinel, empty base with suffix, multibyte
+      input, 254/255/256/300 codepoints and untouched output tails.
+      Standalone public-function smoke with native boundary fixtures
+      observes multibyte cap 255 and sentinel count zero; no device run.
+      Its decoder fixtures cover valid UTF-8; permanent tests use the
+      real Rust decoder. match.py reports 39 original versus 57 Rust
+      instructions including three literals: same sentinel, append, cap,
+      conversion and cleanup order; LLVM uses BLX resident calls, larger
+      frame and branches instead of predication. Rust BL relocations
+      print as zero. Host suite and ARM release build pass.
   - address: 0x08053a8c
     ghidra: FUN_08053a8c
     name: ft_service_metadata_flags_at_b84
