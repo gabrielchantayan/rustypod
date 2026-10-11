@@ -16,6 +16,33 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080562ec
+    ghidra: FUN_080562ec
+    name: system_mode_enabled
+    size: 8
+    sig: "u32 system_mode_enabled(void)"
+    module: app/tick_accumulator
+    status: ported
+    vars: {r0: enabled}
+    notes: >-
+      Raw A32 words e3a00001 e12fff1e establish the true eight-byte extent
+      [0x080562ec,0x080562f4); the next independent function opens with
+      PUSH e92d4070. Whole-image aligned BL decoding finds two incoming
+      plain calls at 0x081bb4b4 and 0x081bb4c8, no predicated incoming
+      calls, and no outgoing calls. Return canonical u32 one without
+      reading arguments, globals or hardware. Both calls belong to
+      tick_accumulator_construct and select bounds 17000 and 20000.
+      A more specific system-mode identity is not established. No semantic
+      deviations or new seams. Removed the obsolete target-address query
+      wrapper and host mode seam; constructor tests now exercise actual
+      retail bounds with object mode bytes 0, 1 and 255, wrapping deadlines,
+      maximum divisor/backoff and untouched padding. All 15560 host tests
+      and the ARM release build pass. LLVM folds the exported symbol into
+      always_succeeds (same section, offset and 16-byte extent); match.py
+      cannot find the alias label, but matching always_succeeds exits 1:
+      MOV r0,#1 is preserved, with restored frame setup/teardown replacing
+      BX lr. Instruction execution smoke compares raw and archive code for
+      five boundary register states, checking return, registers and stack.
   - address: 0x080575f0
     ghidra: FUN_080575f0
     name: stream_read_be16_or_zero
