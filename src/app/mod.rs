@@ -1,5 +1,6 @@
 //! retailOS application/UI framework glue — the global application
 //! context and the small helpers its view classes lean on.
+pub mod scoped_context_contains_playlist;
 pub mod queue_insert_veneer;
 pub mod callback_table_random_seed;
 pub mod packet_ring_next_index;
