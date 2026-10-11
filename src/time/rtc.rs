@@ -152,6 +152,129 @@ pub unsafe extern "C" fn rtc_context_set_configuration_b35(
     0
 }
 
+/// rtc_context_set_configuration_index — FUN_08066f54 @ 0x08066f54.
+/// True extent [0x08066f54, 0x08066fac): 88 bytes, followed by MOVS
+/// starting a separate function. Whole-image aligned A32 decoding verifies
+/// two incoming plain BLs (0x080648a8, 0x08170e00), zero predicated BLs,
+/// three outgoing plain BLs, zero predicated BLs, and one virtual BLX.
+///
+/// Map index through retail_word_at, compare the full mapped u32 against
+/// the unsigned halfword at context +0xb64, and on mismatch store its low
+/// halfword, reload the context and mark dirty. Then get the media player
+/// and call virtual slot +0xa0 with the mapped low byte. Always return zero.
+/// High mapped bits force an update even when the stored halfword matches.
+///
+/// Deliberate deviations: discard Ghidra's spurious r2/r3 arguments; the
+/// saved r3 stack word is overwritten by the nonnull-output lookup.
+/// Reuse canonical direct callees. Host vtable slots widen by word index;
+/// tests inject lookup storage and the singleton getter into the inline
+/// algorithm. Product meaning of the configuration and slot is unrecovered.
+///
+/// # Safety
+/// Owner must hold a valid writable RTC context, index must select a readable
+/// retail table word, and the player must have a callable +0xa0 slot.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn rtc_context_set_configuration_index(
+    owner: *const RtcContextOwner, index: u32,
+) -> u32 {
+    rtc_context_set_configuration_index_with(
+        owner, index, |index, output| crate::app::retail_word_at::retail_word_at(index, output),
+        || crate::app::singletons::media_player_get(),
+    )
+}
+
+#[inline(always)]
+unsafe fn rtc_context_set_configuration_index_with(
+    owner: *const RtcContextOwner, index: u32,
+    lookup: impl FnOnce(u32, *mut u32) -> i32,
+    get_player: impl FnOnce() -> *mut u8,
+) -> u32 {
+    use core::ptr;
+    let mut mapped = 0;
+    lookup(index, &mut mapped);
+    let context = ptr::read(ptr::addr_of!((*owner).rtc_context)) as *mut u8;
+    let configuration = context.add(0xb64).cast::<u16>();
+    if configuration.read() as u32 != mapped {
+        configuration.write(mapped as u16);
+        rtc_context_mark_dirty(ptr::read(ptr::addr_of!((*owner).rtc_context)) as *mut RtcContext);
+        let player = get_player();
+        let table = player.cast::<*const usize>().read();
+        let set: unsafe extern "C" fn(*mut u8, u32) =
+            core::mem::transmute(table.add(0xa0 / 4).read());
+        set(player, mapped & 0xff);
+    }
+    0
+}
+
+#[cfg(test)]
+mod configuration_index_tests {
+    use super::*;
+
+    #[repr(C)]
+    struct Player {
+        table: *const usize,
+        context: *const u8,
+        calls: u32,
+        value: u32,
+        expected: u16,
+    }
+
+    unsafe extern "C" fn set(player: *mut u8, value: u32) {
+        let player = &mut *player.cast::<Player>();
+        assert_eq!(player.context.add(0xb64).cast::<u16>().read(), player.expected);
+        assert_eq!(player.context.add(0xb90).read(), 1);
+        player.calls += 1;
+        player.value = value;
+    }
+
+    #[test]
+    fn mapped_full_word_comparison_truncation_and_notification_order() {
+        let table = [0, 0xffff, 0x1234, 0x10000, 0x1001234, u32::MAX];
+        for (index, mapped) in table.iter().copied().enumerate() {
+            for previous in [0, 0x1234, 0xffff, mapped as u16] {
+                for dirty in [0, 1, 0xa5] {
+                    let mut context: RtcContext = unsafe { core::mem::zeroed() };
+                    let bytes = (&mut context as *mut RtcContext).cast::<u8>();
+                    unsafe {
+                        bytes.add(0xb63).write(0x5a);
+                        bytes.add(0xb64).cast::<u16>().write(previous);
+                        bytes.add(0xb66).write(0xa5);
+                    }
+                    context.dirty = dirty;
+                    let owner = RtcContextOwner { reserved: [0; 0xf00], rtc_context: &context };
+                    let mut vtable = [0usize; 0xa0 / 4 + 1];
+                    vtable[0xa0 / 4] = set as *const () as usize;
+                    let mut player = Player {
+                        table: vtable.as_ptr(), context: bytes, calls: 0,
+                        value: u32::MAX, expected: mapped as u16,
+                    };
+                    let changed = previous as u32 != mapped;
+                    let result = unsafe {
+                        rtc_context_set_configuration_index_with(
+                            &owner, index as u32,
+                            |index, output| { output.write(table[index as usize]); 0 },
+                            || {
+                                assert!(changed, "equal configuration must not fetch player");
+                                (&mut player as *mut Player).cast()
+                            },
+                        )
+                    };
+                    assert_eq!(result, 0);
+                    unsafe {
+                        assert_eq!(bytes.add(0xb64).cast::<u16>().read(), mapped as u16);
+                        assert_eq!(bytes.add(0xb63).read(), 0x5a);
+                        assert_eq!(bytes.add(0xb66).read(), 0xa5);
+                    }
+                    assert_eq!(context.dirty, if changed { 1 } else { dirty });
+                    assert_eq!(player.calls, changed as u32);
+                    assert_eq!(player.value, if changed { mapped & 0xff } else { u32::MAX });
+                }
+            }
+        }
+    }
+}
+
 /// rtc_context_set_configuration_mode — FUN_08067678 @ 0x08067678.
 /// True extent [0x08067678, 0x0806770c): 148 bytes. Whole-image raw
 /// decoding finds two incoming plain BLs (0x081709b8, 0x081cfdd0), no
