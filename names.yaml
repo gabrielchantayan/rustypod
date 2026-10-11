@@ -245057,3 +245057,39 @@ functions:
       for the disjoint stack copy; validation, descriptor, copy length,
       output timing and status truncation are retained. No intentional symbol
       fold or device execution.
+
+  - address: 0x0806465c
+    ghidra: FUN_0806465c
+    name: ui_plst_complete_item_at
+    size: 92
+    sig: "i32 ui_plst_complete_item_at(u8 *owner, i32 index)"
+    module: ui/plst_complete_item_at
+    status: ported
+    renames:
+      param_1/r0: owner
+      param_2/r1: index
+      "owner+0xf50": plst_element
+      FUN_08054214: ui_plst_linked_item_count
+      FUN_08052728: ui_plst_slot_item_at
+      FUN_08048a0c: plst_task_complete
+    notes: >-
+      Raw extent is 0x0806465c..0x080646b8, including the -65536 literal
+      at 0x080646b4; next function begins with push {r4,r5,r6,lr}.
+      Two inbound plain BLs at 0x081a31c8 and 0x081a4cac, no predicated
+      BLs. Body contains three plain BLs, no predicated BLs. Reject negative
+      index or index >= linked u16 count with -50. Fetch selector 1 in forward
+      order from owner+0xf50; zero item returns -65536. Complete the task;
+      zero completion result returns zero, every nonzero result maps to -20.
+      Ghidra's two-word return from the count helper is incorrect: raw helper
+      writes only r0 and flags, preserving owner in r2 and index in r1.
+      Explicit locals replace this scratch-register dependency. Volatile ops
+      follow existing completion wrappers and default to all three Rust ports.
+      Target pointer fields remain aligned u32 loads on hosts.
+      Host boundary tests cover negative indices, zero/NULL link counts,
+      count equality, u16 maximum count, missing tasks and signed completion
+      errors. Temporary default-callee smoke observed -65536 for a rejected
+      class and -50 for out-of-range/negative indices. ARM release build
+      passes. match.py exits 1: 22 stock versus 31 Rust instructions, larger
+      register frame and three indirect BLX calls through ops rather than
+      direct BLs; index guard, selector/forward arguments, owner+0xf50 load
+      and all three result paths are retained. No intentional symbol fold.
