@@ -41,6 +41,7 @@
 //! file.
 pub mod add_lock;
 pub mod rsa_padding_add_none;
+pub mod rsa_padding_copy_exact;
 pub mod x509_store_new;
 pub mod attribute_list_upsert;
 pub mod x509_attribute_create;
