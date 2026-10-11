@@ -16,6 +16,29 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08065d08
+    ghidra: FUN_08065d08
+    name: rtc_context_reset_time_pair
+    size: 76
+    sig: "void rtc_context_reset_time_pair(RtcContextOwner *owner)"
+    module: time/rtc
+    vars:
+      param_1: owner
+      local_c: days
+      local_10: seconds
+      FUN_08056130: rtc_static_time_pair
+      FUN_0805e66c: rtc_context_mark_dirty
+    status: ported
+    notes: >-
+      Raw extent [0x08065d08,0x08065d54), ending in POP before the next
+      independent PUSH. Whole-image A32 decoding finds two incoming plain
+      BLs at 0x08114f9c and 0x081163ac, no incoming predicated BLs.
+      Outgoing calls are BL at 0x08065d18 to canonical rtc_static_time_pair
+      and BLNE at 0x08065d4c to canonical rtc_context_mark_dirty. Compare
+      fallback days/seconds with context words +0xb7c/+0xb80; if either
+      differs, replace both and mark +0xb90 dirty. Equality preserves dirtiness.
+      Ghidra's r1/r2/r3 arguments are omitted: spilled r2/r3 are overwritten
+      by the fallback before use. Host owner pointer widens only its tail.
   - address: 0x080660b8
     ghidra: FUN_080660b8
     name: hfs_extent_find_block
