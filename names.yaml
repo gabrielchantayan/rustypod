@@ -51927,6 +51927,39 @@ functions:
       record loads, index adjustment, backend call, conditional shift/store,
       and status return; LLVM uses a larger frame and a different register
       shuffle.
+  - address: 0x080559f8
+    ghidra: FUN_080559f8
+    name: record_string_pool_read_counted_at_0x220
+    size: 20
+    sig: "i32 record_string_pool_read_counted_at_0x220(const u32 *record, u16 *counted)"
+    module: util/string_pool
+    status: ported
+    renames:
+      param_1/r0: record
+      param_2/r1: counted
+      record_word_0: owner
+      record_word_14: entry_id
+      FUN_080bd8bc: string_pool_read_counted
+    notes: >-
+      Raw words e1a02001 e5901038 e5900000 e2800e22 ea019fab establish
+      the exact 20-byte extent 0x080559f8..0x08055a0c, followed by the
+      next function's push. The wrapper loads the signed id at word 14,
+      loads owner word zero, adds 0x220, and tail-branches to the already
+      ported string_pool_read_counted at 0x080bd8bc. Ghidra incorrectly
+      presents the counted reader's implementation as this wrapper.
+      Independent raw BL decoding finds two plain callers at 0x08046418
+      and 0x082a4340, zero predicated BL callers, and zero body BLs.
+      Copies at most 510 bytes, writes floor(copied_bytes / 2) into the
+      leading u16, and preserves the reader status. Deliberate deviation:
+      replace untouched incoming r3 with zero because the backend clears
+      its length output before validation. Record pointer fields remain
+      target-width u32 on hosts. Behavioral tests cover odd lengths,
+      clipping at 510 bytes, empty id, invalid signed ids, invalid entry
+      length, invalid pool tag, untouched output tail, and lock restoration.
+      match.py structural diff (exit 1) retains the two field loads,
+      +0x220 pool adjustment, and tail branch; LLVM adds a frame and
+      explicitly zeros r3. The static archive branch remains relocatable.
+
 
   # --- default selection traversal token (app) ---
   - address: 0x080d6d5c
