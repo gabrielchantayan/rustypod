@@ -16,6 +16,30 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08054e64
+    ghidra: FUN_08054e64
+    name: ft_service_metadata_signed_byte_at_b3d
+    size: 16
+    sig: "int32_t ft_service_metadata_signed_byte_at_b3d(const uint8_t *service_context)"
+    module: ft/service/metadata
+    status: ported
+    renames:
+      param_1/r0: service_context
+      return/r0: signed_metadata_byte
+    notes: >-
+      Raw words e5900f00 e2800c0b e1d003dd e12fff1e establish the true
+      extent [0x08054e64,0x08054e74), ending at the separately called
+      signed accessor. Whole-image aligned A32 decoding finds two plain
+      inbound BLs at 0x08173320 and 0x08173334, zero predicated inbound
+      BLs, and zero outgoing plain or predicated BLs. Follow the aligned
+      pointer at service_context+0xf00 and sign-extend metadata byte +0xb3d.
+      FUN_08172c6c compares/caches it at caller+0x60 and notifies through
+      a virtual method; higher-level meaning remains unknown. Reuses the
+      registered metadata module without new callees or NULL/bounds checks.
+      Native-width host pointers preserve the field offset; ARM pointers
+      remain four bytes. Host tests cover all 256 values, live pointer
+      replacement and neighboring-byte preservation. ARM codegen retains
+      the aligned pointer load and signed byte load with LLVM frame overhead.
   - address: 0x08054e74
     ghidra: FUN_08054e74
     name: ft_service_metadata_signed_byte_at_b3e
