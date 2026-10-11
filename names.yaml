@@ -16,6 +16,38 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08055860
+    ghidra: FUN_08055860
+    name: record_nested_payload_lookup_at_0x7a0
+    size: 60
+    sig: "u32 record_nested_payload_lookup_at_0x7a0(const u32 *record, void **payload_out, u32 *encoded_length_out)"
+    module: app/indexed_payload_lookup
+    status: ported
+    renames:
+      param_1/r0: record
+      param_2/r1: payload_out
+      param_3/r2: encoded_length_out
+      record_word_0: owner
+      record_word_4: descriptor
+      descriptor_word_2: entry
+      FUN_0809e3d0: indexed_payload_lookup
+    notes: >-
+      Raw ARM proves the exact 60-byte extent [0x08055860,0x0805589c);
+      the next mov r2,r1 begins a distinct wrapper. Whole-image aligned A32
+      decoding finds two inbound plain BLs at 0x08045a88 and 0x08045a98,
+      one outbound plain BL at 0x08055884 to the existing ported lookup,
+      and zero predicated BLs. Load descriptor word 2 through record word 4,
+      look up at owner +0x7a0, logically halve the optional length even on
+      failure, and preserve backend status in r0 (Ghidra incorrectly says
+      void). Target fields remain u32 on hosts; output pointers use native width.
+      Host regression covers live odd/even/maximal signed lengths, empty and
+      invalid signed entries, dead offsets and lengths, zero-mode rejection,
+      invalid tags, cleared failure outputs, and independently NULL outputs.
+      All 15575 host tests pass; ARM build-std release build passes. Standalone
+      smoke using actual port/backend sources proves odd length conversion and
+      invalid-entry clearing. match.py exits 1: both have 15 instructions;
+      LLVM changes frame/load order but preserves offsets, one backend call,
+      conditional shift/store and status. R_ARM_CALL names indexed_payload_lookup.
   - address: 0x080558c8
     ghidra: FUN_080558c8
     name: record_metadata_lookup_prefer_alternate

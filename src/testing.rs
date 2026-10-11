@@ -3446,6 +3446,8 @@ pub mod hints {
     pub const RECORD_STRING_POOL_READ_COUNTED_328: usize = 0x3220_0000;
     // Dedicated to record_metadata_lookup_prefer_alternate; never shared.
     pub const RECORD_METADATA_LOOKUP_ALTERNATE: usize = 0x3221_0000;
+    // Dedicated to record_nested_payload_lookup_at_0x7a0; never shared.
+    pub const RECORD_NESTED_PAYLOAD_LOOKUP_7A0: usize = 0x3222_0000;
     // 0x6ff0_0000: dedicated to ui/tdat_element_teardown's target-width
     // element and linked 'plst' node fixture; mappings never unmap.
     pub const TDAT_ELEMENT_TEARDOWN: usize = 0x6ff0_0000;
