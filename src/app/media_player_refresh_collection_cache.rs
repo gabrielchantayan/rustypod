@@ -7,10 +7,11 @@
 //! player +0x3f8/+0x414; reset resource, configure (1,7), then cache four
 //! collection queries at +0x3fc/+0x400/+0x404/+0x40c. Enable the inner
 //! collection mode, cache its final query at +0x408, and reset again.
-//! Deliberate deviations: reuse the existing Rust reset/configuration seams;
-//! unported queries retain verified addresses, without claiming broader
-//! identities. Host operations substitute retail dependencies. Express the
-//! final tail branch as a call. Ghidra's extra arguments are not live inputs.
+//! Deliberate deviations: reuse the existing Rust reset/configuration seams
+//! and object_collection_size port; other unported queries retain verified
+//! addresses, without claiming broader identities. Host operations substitute
+//! retail dependencies. Express the final tail branch as a call. Ghidra's
+//! extra arguments are not live inputs.
 
 #[cfg(not(target_os = "none"))]
 pub struct CollectionCacheOps {
@@ -68,8 +69,12 @@ pub unsafe extern "C" fn media_player_refresh_collection_cache(
         let inner = player.add(0x30 / 4).read() as usize as *mut u8;
         #[cfg(target_os = "none")]
         let value = {
-            let query: unsafe extern "C" fn(*mut u8) -> u32 = core::mem::transmute(address);
-            query(inner)
+            if field == 0x408 {
+                crate::ui::object_collection_size::object_collection_size(inner) as u32
+            } else {
+                let query: unsafe extern "C" fn(*mut u8) -> u32 = core::mem::transmute(address);
+                query(inner)
+            }
         };
         #[cfg(not(target_os = "none"))]
         let value = (ops.query)(inner, address);
