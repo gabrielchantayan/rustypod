@@ -16,6 +16,45 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08055778
+    ghidra: FUN_08055778
+    name: record_indexed_payload_lookup_at_0x3d8
+    size: 56
+    sig: "u32 record_indexed_payload_lookup_at_0x3d8(const u32 *record, void **payload_out, u32 *encoded_length_out)"
+    module: app/indexed_payload_lookup
+    status: ported
+    renames:
+      param_1/r0: record
+      param_2/r1: payload_out
+      param_3/r2: encoded_length_out
+      record_word_0: index_base
+      record_word_20: entry
+      FUN_0809e3d0: indexed_payload_lookup (ported)
+    notes: >-
+      Raw A32 proves the 56-byte extent [0x08055778,0x080557b0);
+      the next mov r2,r1 begins the separately entered counted-string
+      wrapper. Whole-image aligned decoding finds two inbound plain BLs
+      at 0x08045690 and 0x080456a0, one outbound plain BL at 0x08055798
+      to indexed_payload_lookup, and zero predicated BLs. Looks up record
+      word 20 at word zero plus 0x3d8, logically halves the optional
+      encoded length even on failure, and preserves backend status in r0.
+      Ghidra's void return is corrected from the raw epilogue. The caller
+      compares records; no stronger field identity is assumed. Target
+      address fields remain u32 on hosts; payload outputs use native
+      pointers. Real-backend tests cover odd/even/maximal live lengths,
+      zero and invalid signed indices, dead entries, invalid tags,
+      inactive indices, adjacent-field independence, and NULL outputs.
+      All 15579 host tests pass and the ARM release build succeeds.
+      Standalone real-source smoke returns status 0/count 4 for length 9
+      and status -50/count 0 with NULL payload for entry -1. Host non-test
+      crate builds have unrelated missing prepare_metadata, extract_metadata,
+      configure_shared_payload_kind, and notify_calendar_change symbols;
+      smoke compiles the actual wrapper and backend sources independently.
+      match.py exit-1 diff reviewed: both bodies contain fourteen
+      instructions, retaining word-20 load, +0x3d8 adjustment, backend BL,
+      conditional logical shift/store, and status return. LLVM adds a
+      frame pointer and reorders argument preparation; no algorithmic
+      deviation or symbol folding.
   - address: 0x080557b0
     ghidra: FUN_080557b0
     name: record_string_pool_read_counted_at_0x380
