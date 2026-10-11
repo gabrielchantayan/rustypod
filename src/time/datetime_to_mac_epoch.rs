@@ -257,4 +257,57 @@ mod tests {
         assert_eq!(actual, UNIX_TO_MAC_EPOCH_SECONDS);
         unsafe { restore(handlers) };
     }
+
+    unsafe extern "C" fn calendar_unix_seconds(datetime: *mut DateTime) -> i32 {
+        let days = super::super::day_number::datetime_day_number(datetime).wrapping_sub(719163);
+        days.wrapping_mul(86400)
+            .wrapping_add((*datetime).hour as i32 * 3600)
+            .wrapping_add((*datetime).minute as i32 * 60)
+            .wrapping_add((*datetime).second as i32)
+    }
+
+    unsafe extern "C" fn false_calendar_query(record: *mut u8) -> bool {
+        // Calendar at the signed Unix overflow boundary, with false validity.
+        let fields = [0u8, 0, 0, 0, 0, 20, 1, 0, 0xf6, 0x07];
+        ptr::copy_nonoverlapping(fields.as_ptr(), record, fields.len());
+        false
+    }
+
+    unsafe extern "C" fn normalize_overflow_date(day: u32, out: *mut DateTime) {
+        assert_eq!(day, 719163 + 24856);
+        // Model normalization changing the query date to the leap day.
+        (*out).year = 2000;
+        (*out).month = 2;
+        (*out).day = 29;
+        (*out).hour = 23;
+        (*out).minute = 59;
+        (*out).second = 59;
+    }
+
+    unsafe extern "C" fn preserve_overflow_date(day: u32, _out: *mut DateTime) {
+        assert_eq!(day, 719163 + 24856);
+    }
+
+    #[test]
+    fn uncorrected_current_timestamp_uses_normalized_date_despite_false_query_status() {
+        let _query_lock = crate::fp::fp_misc::CURRENT_DATETIME_QUERY_TEST_LOCK.lock().unwrap();
+        let _normalize_lock = super::super::unix_to_datetime::DAY_NUMBER_TO_DATETIME_TEST_LOCK.lock().unwrap();
+        let handlers = unsafe { install(calendar_unix_seconds, unexpected_utc_offset) };
+        unsafe {
+            let query = ptr::replace(ptr::addr_of_mut!(crate::fp::fp_misc::CURRENT_DATETIME_QUERY),
+                false_calendar_query as *const () as usize);
+            let normalize = ptr::replace(ptr::addr_of_mut!(super::super::unix_to_datetime::DAY_NUMBER_TO_DATETIME),
+                normalize_overflow_date);
+            let actual = super::super::current_mac_epoch_seconds_uncorrected::current_mac_epoch_seconds_uncorrected();
+            assert_eq!(actual, (11016i32 * 86400 + 86399).wrapping_add(UNIX_TO_MAC_EPOCH_SECONDS));
+            ptr::write(ptr::addr_of_mut!(super::super::unix_to_datetime::DAY_NUMBER_TO_DATETIME),
+                preserve_overflow_date);
+            let actual = super::super::current_mac_epoch_seconds_uncorrected::current_mac_epoch_seconds_uncorrected();
+            assert_eq!(actual, (24856u32 * 86400).wrapping_add(UNIX_TO_MAC_EPOCH_SECONDS as u32) as i32);
+            assert_eq!(UTC_QUERY_COUNT.load(Ordering::Relaxed), 0);
+            ptr::write(ptr::addr_of_mut!(crate::fp::fp_misc::CURRENT_DATETIME_QUERY), query);
+            ptr::write(ptr::addr_of_mut!(super::super::unix_to_datetime::DAY_NUMBER_TO_DATETIME), normalize);
+            restore(handlers);
+        }
+    }
 }
