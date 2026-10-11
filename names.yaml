@@ -247263,3 +247263,50 @@ functions:
       match.py reports a structural diff: LLVM emits a 15-instruction frame,
       stack initialization and two Rust calls instead of the 2-instruction
       retailOS tail wrapper; this is the intentional composition deviation.
+
+  - address: 0x08054ea0
+    ghidra: FUN_08054ea0
+    name: version_info_to_counted_u16
+    size: 104
+    sig: "void version_info_to_counted_u16(u16 *destination)"
+    module: cxx/version_info_text
+    status: ported
+    renames:
+      param_1/r0/r4: destination
+      auStack_188: version_info
+      auStack_16c: formatted_text
+      auStack_108: counted_utf8
+      FUN_08165b84: version_info_construct
+      FUN_08165a50: version_info_format
+      FUN_08045f14: cstr_to_counted_u8
+      FUN_08046a88: pascal_utf8_to_counted_u16
+      FUN_08165bfc: empty_destructor_165bfc
+    notes: >-
+      Raw osos.dec A32 words establish [0x08054ea0,0x08054f08), 104 bytes
+      without literals; the next real function begins with push at 0x08054f08.
+      Five outgoing plain BLs at 0x08054ec8, 0x08054ed8, 0x08054ee8,
+      0x08054ef4 and 0x08054efc; zero predicated BLs. Two incoming plain BLs
+      at 0x081127ac and 0x082a1a58, zero predicated forms, independently
+      counted from aligned words across the raw image. Constructs a 28-byte
+      version-info object with tag 2, size 4, selector 0x80 and extra 0;
+      formats through the unrecovered firmware formatter 0x08165a50 into
+      a 100-byte C string; stages byte-counted UTF-8 with limit 255; converts
+      to counted UTF-16; destroys the original local object, not any returned
+      constructor pointer. Reuses all four existing Rust callee ports; only
+      the unported formatter gains an explicit host seam. The old serializer
+      seam and its mocked forwarding tests were removed from fp_misc, whose
+      version_info_to_cxx_string now calls this port directly. Deliberate
+      deviations: MaybeUninit storage instead of implicit stack garbage;
+      zero incidental conversion r2/r3 because r2 is ignored and the worker
+      overwrites its count output. Tests exercise empty, release, multibyte
+      and maximum 99-byte formatter payloads using the real counted-copy,
+      codepoint counter and bounded decoder without retail allocation.
+      Host suite: 15586 passed. ARM release build passed. Standalone host
+      smoke executes the serializer with a release-text formatter fixture
+      and reference UTF-16 conversion: count 5, text 2.0.4, tail 0xa55a.
+      Device formatter/allocation behavior is not exercised on host.
+      match.py prints the expected structural diff: same 392-byte frame
+      and three staging regions, constructor/copy/conversion calls, BLX
+      through formatter address 0x08165a50. LLVM removes the empty destructor
+      call and uses a larger register-save frame; no behavioral destructor
+      effect is lost.

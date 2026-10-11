@@ -1233,54 +1233,6 @@ pub unsafe extern "C" fn context_short_text_to_cxx_string(string: *mut *mut u8) 
     counted_u16_deserialize(counted.as_ptr(), string);
 }
 
-/// Host-swappable entry point for the version-text serializer
-/// `FUN_08054ea0` @ 0x08054ea0 (104 bytes, unported; 2 bl call
-/// sites: 0x081127ac in the about/diagnostics record builder and
-/// 0x082a1a58 in [`version_info_to_cxx_string`]): constructs a
-/// 28-byte stack-local version-info object (`FUN_08165b84` @
-/// 0x08165b84 with arguments (2, 4, 0x80, 0), internally through
-/// `FUN_081659cc` and `FUN_082779c4` — the concrete class is NOT
-/// recovered), reads FIVE vtable getters (+0x8..+0x18) off it and
-/// formats a dotted version string into a 100-byte stack buffer
-/// with the ported `snprintf` @ 0x0802f768: "%d.%d.%d" when the
-/// third getter is nonzero, "%d.%d" when it is zero, and each
-/// form gains a "%s%d" suffix (suffix word from an 8-byte-stride
-/// table whose base literal is 0x083e941c, indexed by the fourth
-/// getter) unless the fourth getter is 5 AND the fifth is 0 —
-/// the release form, which matches this firmware's "2.0.4". The
-/// suffix-table base lands INSIDE the __rt_memcpy copy-loop code
-/// region, so the suffixed forms are believed unreachable on
-/// retail units and the suffix strings are NOT recovered. The
-/// formatted text is then staged byte-counted (the ported
-/// `cstr_to_counted_u8` @ 0x08045f14, limit 0xff) and expanded
-/// into `counted` as a u16 codepoint count plus that many u16
-/// code units (`FUN_08046a88` @ 0x08046a88), and the object is
-/// destroyed (`FUN_08165bfc` @ 0x08165bfc, a no-op
-/// `mov r0,#0; bx lr`). The target build calls the fixed
-/// firmware address directly; host tests swap this writable cell
-/// to install recording mocks.
-#[cfg(not(target_os = "none"))]
-pub static mut VERSION_INFO_TO_COUNTED_U16: usize = 0x0805_4ea0;
-
-/// Serializer seam signature: `(counted)` — same contract as
-/// [`ContextTextSerializeFn`], kept as its own alias per this
-/// module's one-alias-per-seam-family convention.
-type VersionInfoSerializeFn = unsafe extern "C" fn(*mut u16);
-
-#[cfg(target_os = "none")]
-#[inline(always)]
-unsafe fn version_info_serialize(counted: *mut u16) {
-    let serialize: VersionInfoSerializeFn = core::mem::transmute(0x0805_4ea0usize);
-    serialize(counted);
-}
-
-#[cfg(not(target_os = "none"))]
-#[inline(always)]
-unsafe fn version_info_serialize(counted: *mut u16) {
-    let address = core::ptr::addr_of!(VERSION_INFO_TO_COUNTED_U16).read_volatile();
-    let serialize: VersionInfoSerializeFn = core::mem::transmute(address);
-    serialize(counted);
-}
 
 /// version_info_to_cxx_string — original: `FUN_082a1a40` @
 /// 0x082a1a40 (48 bytes; NO `bl` call sites in osos.asm and no
@@ -1309,8 +1261,8 @@ unsafe fn version_info_serialize(counted: *mut u16) {
 ///    return value too,
 /// 2. serialize the version text into the 512-byte stack buffer
 ///    as a u16 codepoint count plus that many u16 code units
-///    (`FUN_08054ea0` @ 0x08054ea0, unported, behind the
-///    [`VERSION_INFO_TO_COUNTED_U16`] seam),
+///    ([`crate::cxx::version_info_text::version_info_to_counted_u16`],
+///    ported from `FUN_08054ea0` @ 0x08054ea0),
 /// 3. deserialize the buffer back into `*string`
 ///    (`FUN_082596f4` @ 0x082596f4, unported, behind the
 ///    EXISTING [`COUNTED_U16_TO_CXX_STRING`] seam — the same
@@ -1327,11 +1279,8 @@ unsafe fn version_info_serialize(counted: *mut u16) {
 /// ledger entry).
 ///
 /// Deviations:
-/// - The two text-marshaling callees are unported firmware;
-///   each sits behind a host-swappable seam (this module's
-///   FIXED16_RECIPROCAL pattern): the target build calls the
-///   fixed firmware addresses, host tests install recording
-///   mocks.
+/// - The counted-u16 deserializer remains unported firmware behind the
+///   shared host-swappable seam; the version serializer uses its Rust port.
 /// - The original's `add r1,sp,#0x204` before the constructor
 ///   call is dead — the constructor clobbers r1 with the
 ///   empty-rep pointer it loads (`ldr r1,[0x83d8c2c]`), and no
@@ -1348,7 +1297,7 @@ unsafe fn version_info_serialize(counted: *mut u16) {
 pub unsafe extern "C" fn version_info_to_cxx_string(string: *mut *mut u8) {
     let string = cxx_string_default_ctor(string);
     let mut counted = [0u16; COUNTED_U16_BUFFER_UNITS];
-    version_info_serialize(counted.as_mut_ptr());
+    crate::cxx::version_info_text::version_info_to_counted_u16(counted.as_mut_ptr());
     counted_u16_deserialize(counted.as_ptr(), string);
 }
 
@@ -5165,117 +5114,6 @@ mod tests {
                 let mut slot: *mut u8 = core::ptr::null_mut();
 
                 context_short_text_to_cxx_string(&mut slot);
-
-                assert_eq!(
-                    *core::ptr::addr_of!(CONTEXT_EVENTS),
-                    Vec::from(["serialize", "deserialize"]),
-                    "count={count:#x}"
-                );
-                assert_eq!(OBSERVED_COUNT, count, "count={count:#x}");
-                assert_eq!(slot, crate::cxx::string::empty_rep_data());
-            }
-        }
-    }
-
-    // ---- version_info_to_cxx_string ----
-
-    /// Install guard for the version-text serializer seam. Shares
-    /// the CONTEXT_TEXT_LOCK with the context family (all three
-    /// swap the common COUNTED_U16_TO_CXX_STRING cell) and reuses
-    /// its recording mocks and statics — the serializers have the
-    /// same `(counted)` contract, so `recording_serialize` stands
-    /// in for all of them (the ShortTextMockInstall precedent).
-    struct VersionInfoMockInstall {
-        previous_serialize: usize,
-        previous_deserialize: usize,
-        _seam_lock: MutexGuard<'static, ()>,
-    }
-
-    impl Drop for VersionInfoMockInstall {
-        fn drop(&mut self) {
-            unsafe {
-                core::ptr::addr_of_mut!(VERSION_INFO_TO_COUNTED_U16)
-                    .write_volatile(self.previous_serialize);
-                core::ptr::addr_of_mut!(COUNTED_U16_TO_CXX_STRING)
-                    .write_volatile(self.previous_deserialize);
-            }
-        }
-    }
-
-    /// Installs the recording mocks on the version-text serializer
-    /// seam and the shared deserializer seam, resetting every log.
-    fn install_version_info_mocks() -> VersionInfoMockInstall {
-        let seam_lock = CONTEXT_TEXT_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        unsafe {
-            (*core::ptr::addr_of_mut!(CONTEXT_EVENTS)).clear();
-            SERIALIZE_BUFFER = core::ptr::null_mut();
-            DESERIALIZE_BUFFER = core::ptr::null();
-            DESERIALIZE_STRING = core::ptr::null_mut();
-            SERIALIZE_COUNT = 0;
-            OBSERVED_COUNT = u16::MAX;
-            OBSERVED_UNITS = [0; 8];
-            let previous_serialize =
-                core::ptr::addr_of!(VERSION_INFO_TO_COUNTED_U16).read_volatile();
-            core::ptr::addr_of_mut!(VERSION_INFO_TO_COUNTED_U16)
-                .write_volatile(recording_serialize as usize);
-            let previous_deserialize =
-                core::ptr::addr_of!(COUNTED_U16_TO_CXX_STRING).read_volatile();
-            core::ptr::addr_of_mut!(COUNTED_U16_TO_CXX_STRING)
-                .write_volatile(recording_deserialize as usize);
-            VersionInfoMockInstall {
-                previous_serialize,
-                previous_deserialize,
-                _seam_lock: seam_lock,
-            }
-        }
-    }
-
-    #[test]
-    fn version_info_marshals_in_order_and_threads_the_ctor_result() {
-        let _mocks = install_version_info_mocks();
-        let mut slot: *mut u8 = core::ptr::null_mut();
-
-        unsafe {
-            SERIALIZE_COUNT = 3;
-            version_info_to_cxx_string(&mut slot);
-
-            assert_eq!(
-                *core::ptr::addr_of!(CONTEXT_EVENTS),
-                Vec::from(["serialize", "deserialize"])
-            );
-            // The real default constructor parked the caller's slot on
-            // the shared empty rep before the buffer work; the mocks
-            // never reassign it.
-            assert_eq!(slot, crate::cxx::string::empty_rep_data());
-            // One staging buffer travels through both marshaling calls.
-            assert!(!SERIALIZE_BUFFER.is_null());
-            assert_eq!(DESERIALIZE_BUFFER, SERIALIZE_BUFFER as *const u16);
-            // The deserializer receives the constructor's r0 return
-            // (the original's mov r4,r0 / mov r1,r4 thread), which is
-            // the caller's slot.
-            assert_eq!(DESERIALIZE_STRING, &mut slot as *mut *mut u8);
-            // The counted payload round-trips byte-exactly.
-            assert_eq!(OBSERVED_COUNT, 3);
-            assert_eq!(OBSERVED_UNITS[..3], [0x40, 0x41, 0x42]);
-        }
-    }
-
-    #[test]
-    fn version_info_deserializes_unconditionally_from_empty_to_full() {
-        let _mocks = install_version_info_mocks();
-        // The original's bl 0x082596f4 is unconditional: count 0 is
-        // deserialized too, 0x63 (99) is the serializer's own ceiling
-        // (snprintf bound 100 into the 100-byte stack buffer, so at
-        // most 99 payload chars reach cstr_to_counted_u8), and 0xff
-        // is the byte-counted staging buffer's ceiling.
-        for count in [0u16, 1, 0x63, 0xff] {
-            unsafe {
-                (*core::ptr::addr_of_mut!(CONTEXT_EVENTS)).clear();
-                OBSERVED_COUNT = u16::MAX;
-                SERIALIZE_COUNT = count;
-                let mut slot: *mut u8 = core::ptr::null_mut();
-
-                version_info_to_cxx_string(&mut slot);
 
                 assert_eq!(
                     *core::ptr::addr_of!(CONTEXT_EVENTS),
