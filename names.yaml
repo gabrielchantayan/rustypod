@@ -245868,3 +245868,38 @@ functions:
       setup and indirect volatile BLX replace the fixed backend BL; the
       validation gate, word loads, mode 2, stack argument and status return
       remain structurally equivalent.
+
+  - address: 0x0805b5f0
+    ghidra: FUN_0805b5f0
+    name: payload_counter_increment
+    size: 120
+    sig: "i32 payload_counter_increment(u8 *const *handle)"
+    module: util/payload_counter_increment
+    status: ported
+    vars: {param_1/r4: handle, r5: shifted_counter, r1: swapped_increment}
+    renames:
+      FUN_080ed738: read_u16_le
+      FUN_080eda28: store_u16_le_last_byte
+    notes: >-
+      Raw A32 words establish [0x0805b5f0,0x0805b668), 120 bytes:
+      116 instruction bytes plus the NULL-handle error literal 0xfffff7c5
+      at 0x0805b664, loaded by LDREQ at 0x0805b5f8. The next real function
+      begins with PUSH at 0x0805b668. Whole-image aligned BL decoding finds
+      two incoming plain BLs at 0x0805b1e0 and 0x0805b428, zero predicated
+      incoming BLs. Five outgoing plain BLs, zero predicated: four reads
+      at 0x0805b608, 0x0805b614, 0x0805b620 and 0x0805b630 target the
+      canonical read_u16_le at 0x080ed738; the store at 0x0805b658 targets
+      canonical store_u16_le_last_byte at 0x080eda28. Return -2107 for a
+      NULL handle; otherwise discard the first two reads, assemble the last
+      two reads as a big-endian counter at payload+10, increment, store
+      the low 16 bits big-endian, and return zero. No payload NULL check.
+      Deliberate deviations: typed payload-pointer field widens on hosts
+      while retaining ARM word layout; ordinary non-MMIO reads can be
+      discarded, merged and inlined. Host tests exhaust all 65536 values
+      at four alignments, checking repeated increments, wraparound,
+      surrounding bytes, unchanged handle and NULL error. Standalone smoke
+      observes 0->1, 255->256, 65535->0 and NULL->-2107. Host suite passes
+      15528 tests; ARM release build passes. match.py reports 20 Rust
+      instructions versus 29 original, with inlined byte reads replacing
+      four read BLs, preserved increment and swapped low-halfword store,
+      NULL error synthesis replacing the literal load, and an fp frame.

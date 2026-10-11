@@ -561,3 +561,4 @@ pub mod retail_item_count;
 pub mod ring_buffer_construct;
 pub mod masked_djb2_hash;
 pub mod payload_counter_decrement;
+pub mod payload_counter_increment;
