@@ -3424,6 +3424,8 @@ pub mod hints {
     // 0x6fe0_0000: dedicated to ui/flush_pending_cell's target-width cell
     // record fixture; mappings never unmap, so no other port may share it.
     pub const UI_FLUSH_PENDING_CELL: usize = 0x6fe0_0000;
+    // Dedicated to record_indexed_payload_lookup_at_0xc0; never shared.
+    pub const RECORD_INDEXED_PAYLOAD_LOOKUP_C0: usize = 0x3217_0000;
     // 0x6ff0_0000: dedicated to ui/tdat_element_teardown's target-width
     // element and linked 'plst' node fixture; mappings never unmap.
     pub const TDAT_ELEMENT_TEARDOWN: usize = 0x6ff0_0000;

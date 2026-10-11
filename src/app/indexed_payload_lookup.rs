@@ -280,6 +280,38 @@ pub unsafe extern "C" fn record_indexed_payload_lookup_at_0x278(
     status
 }
 
+/// record_indexed_payload_lookup_at_0xc0 — `FUN_08055aa4` @ `0x08055aa4`.
+///
+/// True size: 56 bytes, ending at the next wrapper's `mov ip,r1` at
+/// `0x08055adc`. Raw words verify two inbound plain BLs (0x08045570 and
+/// 0x08045580), one outbound plain BL to indexed_payload_lookup, and no
+/// predicated BLs. Reads record word 10, looks it up at index base +0xc0,
+/// logically halves the optional encoded length even on failure, and
+/// returns the lookup status unchanged.
+///
+/// Deliberate deviations: target fields remain u32 on hosts; payload output
+/// pointers use native width. Calls the existing ported backend directly.
+///
+/// # Safety
+/// Record must contain eleven readable aligned target words. Word zero must
+/// address an index base whose +0xc0 satisfies indexed_payload_lookup's
+/// contract. Optional outputs must be writable and not alias input storage.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn record_indexed_payload_lookup_at_0xc0(
+    record: *const u32,
+    payload_out: *mut *mut u8,
+    encoded_length_out: *mut u32,
+) -> u32 {
+    let index_base = record.read() as usize as *mut u8;
+    let entry = record.add(10).read();
+    let status = indexed_payload_lookup(index_base.add(0xc0), entry, payload_out, encoded_length_out);
+    if !encoded_length_out.is_null() {
+        encoded_length_out.write(encoded_length_out.read() >> 1);
+    }
+    status
+}
+
 /// record_nested_payload_lookup — `FUN_08055b18` @ `0x08055b18`.
 ///
 /// True extent: 88 bytes, `0x08055b18..0x08055b70`, ending at the next
@@ -372,6 +404,58 @@ mod tests {
     use crate::util::crts_tag::CRTS_TAG;
     use core::ptr;
 
+
+    #[test]
+    fn c0_lookup_decodes_live_lengths_and_clears_failed_or_empty_results() {
+        unsafe {
+            let Some(slab) = try_map_u32_slab(hints::RECORD_INDEXED_PAYLOAD_LOOKUP_C0, 4096) else {
+                note_missing_u32_fixture("record_indexed_payload_lookup_at_0xc0");
+                return;
+            };
+            ptr::write_bytes(slab, 0, 4096);
+            let record = slab.add(0x200).cast::<u32>();
+            let index = slab.add(0xc0).cast::<u32>();
+            let table = slab.add(0x300).cast::<u32>();
+            let handles = slab.add(0x380).cast::<u32>();
+            record.write(slab as usize as u32);
+            index.write(CRTS_TAG);
+            index.add(2).write(handles as usize as u32);
+            index.add(4).write(handles.add(1) as usize as u32);
+            index.add(7).write(1);
+            index.add(12).write(1);
+            handles.write(table as usize as u32);
+            handles.add(1).write(slab.add(0x400) as usize as u32);
+            table.write(3);
+            for (entry, encoded, expected_status, expected_length) in [
+                (1, 7, 0, 3), (1, 8, 0, 4), (1, 1, 0, 0),
+                (1, 0x7fff_ffff, 0, 0x3fff_ffff),
+                (1, 0, 0xffff_ffce, 0), (1, u32::MAX, 0xffff_ffce, 0),
+                (0, 7, 0, 0), (2, 7, 0xffff_ffce, 0),
+                (u32::MAX, 7, 0xffff_ffce, 0),
+            ] {
+                record.add(10).write(entry);
+                table.add(1).write(encoded);
+                let mut payload = ptr::dangling_mut::<u8>();
+                let mut length = 99;
+                assert_eq!(record_indexed_payload_lookup_at_0xc0(record, &mut payload, &mut length), expected_status);
+                assert_eq!(length, expected_length);
+                assert_eq!(payload, if entry == 1 && expected_status == 0 { slab.add(0x403) } else { ptr::null_mut() });
+            }
+            record.add(10).write(1);
+            table.add(1).write(7);
+            let mut payload = ptr::null_mut();
+            assert_eq!(record_indexed_payload_lookup_at_0xc0(record, &mut payload, ptr::null_mut()), 0);
+            assert_eq!(payload, slab.add(0x403));
+            index.add(4).write(0); // NULL payload output must avoid the blob handle.
+            let mut length = 99;
+            assert_eq!(record_indexed_payload_lookup_at_0xc0(record, ptr::null_mut(), &mut length), 0);
+            assert_eq!(length, 3);
+            assert_eq!(record_indexed_payload_lookup_at_0xc0(record, ptr::null_mut(), ptr::null_mut()), 0);
+            index.add(12).write(0);
+            assert_eq!(record_indexed_payload_lookup_at_0xc0(record, ptr::null_mut(), &mut length), 0xffff_ffce);
+            assert_eq!(length, 0);
+        }
+    }
 
     #[test]
     fn nested_lookup_decodes_lengths_and_balances_counters_on_success_and_failure() {
