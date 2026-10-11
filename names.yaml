@@ -245093,3 +245093,41 @@ functions:
       register frame and three indirect BLX calls through ops rather than
       direct BLs; index guard, selector/forward arguments, owner+0xf50 load
       and all three result paths are retained. No intentional symbol fold.
+
+  - address: 0x0806460c
+    ghidra: FUN_0806460c
+    name: ui_plst_complete_linked_items
+    size: 80
+    sig: "i32 ui_plst_complete_linked_items(u8 *owner)"
+    module: ui/plst_complete_linked_items
+    status: ported
+    renames:
+      param_1/r4: owner
+      "owner+0xf5c": linked_plst_element
+      "element+0x40": collection_header
+      "header+0x2e": item_count
+      FUN_08052728: ui_plst_slot_item_at
+      FUN_08048a0c: plst_task_complete
+    notes: >-
+      Raw ARM verifies an 80-byte extent, not Ghidra's 76: includes the
+      -65536 literal at 0x08064658, with next function beginning at
+      0x0806465c before its push at 0x08064664. Two inbound plain BLs at
+      0x08100d70 and 0x08189dd8, zero predicated BLs; body has two plain
+      BLs and zero predicated BLs. Reload owner+0xf5c each iteration;
+      null link or zero u16 count at element(+0x40)+0x2e returns zero.
+      Fetch selector 1, forward order, index zero. Missing task returns
+      -65536; otherwise complete it, ignore completion status, and repeat.
+      Both callers discard the result. Ghidra's void/two-argument signature
+      is incorrect; r1 is scratch and raw r0 carries the status. Volatile
+      owner loads preserve the repeated stock loads; volatile ops follow
+      the adjacent wrapper and default to the two existing Rust ports.
+      Host tests cover null/empty links, immediate and partial fetch failure,
+      full drain despite completion errors, maximum u16 count and callback
+      link clearing. All 15492 host tests and the ARM release build pass.
+      Isolated executable smoke confirms null-link zero without callbacks;
+      whole-crate non-test host smoke is blocked by four existing missing
+      host functions in prepare_entry_metadata, shared_payload_select_kind
+      and calendar_schedule. match.py with size 80 exits 1: 20 stock versus
+      32 Rust instructions. Larger frame and indirect BLX through ops;
+      count guard, first-item arguments, reload loop and both statuses remain.
+      No intentional symbol fold.
