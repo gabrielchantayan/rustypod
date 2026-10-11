@@ -22,6 +22,7 @@ pub mod cstr_append_bounded;
 pub mod cstr_find_from;
 pub mod cstr_expand_three_tokens;
 pub mod bzero;
+pub mod null_guarded_zero_24;
 pub mod zero_unwritten_suffix;
 pub mod halfword_load;
 pub mod iram_veneers;
