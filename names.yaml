@@ -244816,3 +244816,43 @@ functions:
       branches and three remaining calls after inlining the count helper.
       LLVM changes frame/register allocation and independent sentinel-store
       order. No hardware execution was performed.
+
+  - address: 0x08066328
+    ghidra: FUN_08066328
+    name: seconds_to_calendar
+    size: 156
+    sig: "void seconds_to_calendar(u32 seconds, Calendar *out)"
+    module: time/seconds_to_calendar
+    status: ported
+    vars:
+      param_1/r0: seconds
+      param_2/r1/r4: out
+      local_18: packed_datetime
+      DAT_080663b8: SECONDS_PER_DAY
+      DAT_080663bc: runtime_day_bias_pointer
+      DAT_080663c0: runtime_epoch_day_pointer
+    renames:
+      FUN_08036f14: __rt_udiv
+      FUN_080964cc: unix_seconds_to_datetime
+    notes: >-
+      Raw ARM establishes [0x08066328,0x080663c4): 144 executable bytes
+      and three trailing literals, followed by a real PUSH entry. Independent
+      aligned BL decoding finds two plain inbound sites at 0x080d72a0 and
+      0x080d72d4, two plain outbound sites at 0x08066350 and 0x08066374,
+      and zero predicated BLs in either direction. NULL out skips all reads
+      and calls. Divide unsigned seconds by 86400, add the day bias read at
+      0x083f50a4, subtract the epoch day read at 0x083e2e58, multiply by
+      86400 and restore remainder with wrapping u32 arithmetic. Convert to
+      zero-initialized packed DateTime and widen year, month, day, hour,
+      minute, second to seven halfwords; weekday is widened before adding
+      one. No assumed epoch constants or new callee seams. The existing
+      current_day_range caller now calls this Rust port directly. Host
+      tests cover NULL, second/minute/hour/day boundaries, unsigned maximum,
+      positive/negative/wrapped day biases, output guards and weekday 255
+      becoming 256. Host suite and ARM release build pass. Public-function
+      smoke with mapped runtime globals produces 1970-01-02 01:01:01 with
+      weekday 6. match.py exits 1: original 36 versus Rust 47 instructions;
+      LLVM uses reciprocal multiply instead of ADS division and reorders
+      independent halfword stores. NULL guard, runtime reads, modulo day
+      arithmetic, packed conversion and field expansion are retained.
+      No intentional symbol fold or hardware execution.
