@@ -1021,6 +1021,7 @@ pub mod path_component_query;
 pub mod path_component_query_worker;
 pub mod path_prefix_dispatch;
 pub mod path_object_construct;
+pub mod counted_path_last_component;
 pub mod path_probe;
 pub mod path_stage_budget_set;
 pub mod path_facade_probe_dispatch_counted;

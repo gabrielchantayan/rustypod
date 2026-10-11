@@ -245979,3 +245979,52 @@ functions:
       writer and explicit conditional flush replace the ADS frame and
       BLNE. Rejection, argument shuffle, error tail branch, bit-zero
       flush gate and forced zero success return are preserved.
+
+  - address: 0x0805a9f4
+    ghidra: FUN_0805a9f4
+    name: counted_path_last_component
+    size: 180
+    sig: "int32_t counted_path_last_component(const uint16_t *source, uint16_t *destination)"
+    module: app/counted_path_last_component
+    status: ported
+    vars:
+      param_1/r5: source (leading u16 followed by NUL-terminated UTF-8)
+      param_2/r4: destination (leading UTF-16 unit count)
+      auStack_1c: remaining
+      auStack_24: component
+      auStack_14: extracted
+    renames:
+      FUN_082792cc: path_object_default_construct
+      FUN_0827639c: string_object_assign_cstr
+      FUN_08278f98: destructive final path component extraction (unported boundary)
+      FUN_08279314: path_object_assign_from_string_object
+      thunk_FUN_08277484: string_object_destroy_veneer at 0x082792fc
+      FUN_082a50b0: string_object_c_str
+      FUN_08045f54: cstr_to_counted_u16
+    notes: >-
+      Raw osos.dec establishes [0x0805a9f4,0x0805aaa8), 180 code bytes,
+      ending in a branch to the shared epilogue before the next PUSH.
+      Whole-image aligned A32 BL decoding finds one plain inbound BL at
+      0x081a436c and one BLNE at 0x0805a9e4; body has 12 plain BLs and
+      zero predicated BLs. Constructs two PathObjects even for NULL input,
+      then returns -50 without touching destination for NULL. Otherwise
+      assigns the UTF-8 string at source+2 bytes, extracts its final path
+      component with escaping=0 via the verified unported 0x08278f98
+      boundary, assigns and destroys the extracted temporary, converts to
+      counted UTF-16 and removes a final backslash from the count only.
+      Conversion status is ignored; non-NULL destination is required.
+      Input's leading word is not used as a length. No extra NUL is written.
+      Existing ported constructor, assignment, accessor and destructor
+      functions are reused. Host pointers widen and MaybeUninit models the
+      stack objects. Unused conversion arguments are zero; raw 0x08046c74
+      writes the converted count without reading its initial value.
+      Host tests exercise NULL rejection, ignored input length, delimiter
+      and Unicode boundary models, empty output, and count-only trimming
+      without erasing the removed unit. Host tests do not execute the
+      unported firmware extractor or converter boundary. Exported-wrapper
+      smoke with real NULL-payload release observes -50 and untouched output.
+      Full host suite passes (15537 tests); ARM release build passes.
+      match.py exits 1 with 49 versus 45 instructions: larger LLVM frame,
+      shared cleanup, literal-loaded BLX to 0x08278f98, and explicit zero
+      fourth conversion argument; constructor/copy/destructor sequencing,
+      NULL status and conditional halfword decrement/store are retained.
