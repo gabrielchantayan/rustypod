@@ -175,6 +175,7 @@ pub mod object_packed_field;
 pub mod object_packed_field_ensure_one;
 pub mod object_packed_field_is_not_one;
 pub mod plst_class_check;
+pub mod plst_payload_is_blocked;
 pub mod plst_task_is_active;
 pub mod plst_resource_activate;
 pub mod plst_resource_dispatch_pldm;
