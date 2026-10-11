@@ -2,6 +2,8 @@
 //! HFS B-tree node access).
 /// Validated backing-stream write @ 0x0805b834.
 pub mod validated_file_write;
+/// Validated backing-stream seek @ 0x0805b804.
+pub mod validated_file_seek;
 /// Release an HFS/HFS+ extent record @ 0x0806451c.
 pub mod hfs_extent_record_release;
 /// HFS/HFS+ extent-record logical-block lookup @ 0x080660b8.

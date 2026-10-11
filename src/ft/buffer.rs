@@ -94,7 +94,7 @@ unsafe fn backing_stream_tell() -> BackingStreamTellFn {
 pub type BackingStreamWriteFn =
     unsafe extern "C" fn(io_context: u32, transferred: *mut u32, data: u32) -> i32;
 
-/// ABI of the unported backing-stream seek helper at `0x0805b804`.
+/// ABI of the ported backing-stream seek helper at `0x0805b804`.
 pub type BackingStreamSeekFn = unsafe extern "C" fn(io_context: u32, position: u64) -> i32;
 
 unsafe extern "C" fn firmware_backing_stream_write(
@@ -105,19 +105,12 @@ unsafe extern "C" fn firmware_backing_stream_write(
     crate::validated_file_write::validated_file_write(io_context as *const u32, transferred, data)
 }
 
-#[cfg(target_os = "none")]
 unsafe extern "C" fn firmware_backing_stream_seek(io_context: u32, position: u64) -> i32 {
-    let seek: BackingStreamSeekFn = core::mem::transmute(0x0805b804usize);
-    seek(io_context, position)
+    crate::validated_file_seek::validated_file_seek(io_context as *const u32, position)
 }
 
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn firmware_backing_stream_seek(_io_context: u32, _position: u64) -> i32 {
-    panic!("ft_buffered_stream_flush requires backing seek 0x0805b804")
-}
 
-/// Host-replaceable calls retained as volatile seams. The writer invokes its
-/// Rust port; the unported seek invokes its verified retailOS entry on target.
+/// Host-replaceable calls retained as volatile seams; both invoke Rust ports.
 pub static mut BACKING_STREAM_WRITE: BackingStreamWriteFn = firmware_backing_stream_write;
 pub static mut BACKING_STREAM_SEEK: BackingStreamSeekFn = firmware_backing_stream_seek;
 
