@@ -16,6 +16,44 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0806451c
+    ghidra: FUN_0806451c
+    name: hfs_extent_record_release
+    size: 140
+    sig: "u32 hfs_extent_record_release(u8 *volume, const AllocationExtent *extents, u32 *released_blocks, u8 *terminated)"
+    module: fs/hfs_extent_record_release
+    status: ported
+    vars:
+      param_1/r0: volume
+      param_2/r1: extents
+      param_3/r2: released_blocks
+      param_4/r3: terminated
+      r4: extent_index
+      r5: block_count
+      r8: extent_limit
+    notes: >-
+      Raw A32 extent [0x0806451c,0x080645a8) is 140 bytes; the next real
+      function starts with MOV r0,#5 followed by a tail branch. Whole-image
+      word decoding finds two incoming plain BLs at 0x08048158 and
+      0x0806b6fc, zero incoming predicated BLs, one outgoing plain BL at
+      0x08064580 to 0x08042658, and zero outgoing predicated BLs.
+      Clears both outputs before reading the volume signature at +2.
+      Signature 0x482b selects eight HFS+ extents, all others three.
+      Reads target-width start/count word pairs, stops on zero count with
+      termination one, propagates the first release error, and accumulates
+      only successful counts modulo 2^32. The firmware-owned allocation
+      bitmap range release at 0x08042658 calls 0x08042b4c to clear bitmap
+      bits, then increments volume+0x168 and ORs header flags with 0xff00
+      on success; neither callee has a registry entry or existing Rust seam.
+      Calls its verified raw address without porting that second function.
+      No target behavioral deviations; host release is test-only.
+      Host edge tests cover both limits, every terminator and failure
+      position, full-width errors, wrapping totals and adjacent byte guards.
+      All 15493 host tests pass; ARM release build passes. A standalone
+      executable exercises 13 success/termination scenarios and accounting.
+      match.py shows 39 versus 35 instructions: frame setup and a literal
+      BLX replace the direct BL, with equivalent bounded loop, zero-count
+      termination, error short circuit, and successful-count stores.
   - address: 0x080651d0
     ghidra: FUN_080651d0
     name: sha1_init_legacy
