@@ -10,24 +10,13 @@
 //! with 00:00:00 and 23:59:59, convert back, and cache each result as a
 //! zero-extended 64-bit pair. Publish ready last. Nonzero ready is a no-op.
 //!
-//! No deliberate behavioral deviations. Calendar converters remain direct
-//! firmware seams: 0x08066328 reads runtime epoch globals at 0x083f50a4 and
-//! 0x083e2e58; 0x08048080 reads 0x083f50a4. Their semantics must not be
-//! replaced with a presumed Unix or Macintosh epoch arithmetic shortcut.
+//! No deliberate behavioral deviations. Expansion uses the Rust port, retaining
+//! runtime epoch globals at 0x083f50a4 and 0x083e2e58. The collapse converter
+//! remains a firmware seam at 0x08048080 and reads 0x083f50a4.
 
 use core::mem::MaybeUninit;
+use super::seconds_to_calendar::{Calendar, seconds_to_calendar};
 
-/// Seven halfwords used by the firmware's expanded calendar converters.
-#[repr(C)]
-struct Calendar {
-    year: u16,
-    month: u16,
-    day: u16,
-    hour: u16,
-    minute: u16,
-    second: u16,
-    weekday: u16,
-}
 
 /// Word-pair timestamps deliberately avoid host u64 alignment differences.
 #[repr(C)]
@@ -45,15 +34,6 @@ pub struct CurrentDayRange {
 type ExpandCalendar = unsafe extern "C" fn(u32, *mut Calendar);
 type CollapseCalendar = unsafe extern "C" fn(*const Calendar, *mut u32);
 
-unsafe extern "C" fn expand_calendar(seconds: u32, out: *mut Calendar) {
-    #[cfg(target_os = "none")]
-    {
-        let convert: ExpandCalendar = core::mem::transmute(0x0806_6328usize);
-        convert(seconds, out);
-    }
-    #[cfg(not(target_os = "none"))]
-    { let _ = (seconds, out); panic!("requires firmware calendar converter 0x08066328"); }
-}
 
 unsafe extern "C" fn collapse_calendar(calendar: *const Calendar, out: *mut u32) {
     #[cfg(target_os = "none")]
@@ -103,7 +83,7 @@ unsafe fn initialize(
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn current_day_range_initialize(cache: *mut CurrentDayRange) {
     initialize(cache, super::current_mac_epoch_seconds_raw::current_mac_epoch_seconds_raw,
-        expand_calendar, collapse_calendar);
+        seconds_to_calendar, collapse_calendar);
 }
 
 #[cfg(test)]
