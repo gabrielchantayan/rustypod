@@ -126,6 +126,7 @@ pub mod standard_cipher_table_six;
 pub mod rand_bytes;
 pub mod sha1_digest;
 pub mod sha1_init;
+pub mod sha1_init_compact;
 pub mod sha1_managed_context_create;
 pub mod sha1_update;
 pub mod sha1_update_payload;
