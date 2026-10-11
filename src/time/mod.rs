@@ -16,6 +16,7 @@ pub mod daylight_saving_offset_is_nonzero;
 pub mod refresh_utc_offset_cache;
 pub mod current_day_and_seconds;
 pub mod current_mac_epoch_seconds;
+pub mod current_mac_epoch_seconds_uncorrected;
 pub mod current_mac_epoch_seconds_raw;
 pub mod current_day_range;
 pub mod current_datetime_query;

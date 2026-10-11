@@ -247152,3 +247152,39 @@ functions:
       build pass. match.py reports sixteen instructions in both bodies;
       LLVM changes the frame and register shuffle but preserves both nested
       loads, index adjustment, backend BL, conditional shift/store, and status.
+
+  # --- Current Macintosh-epoch seconds without UTC/DST correction ---
+  - address: 0x08054fbc
+    ghidra: FUN_08054fbc
+    name: current_mac_epoch_seconds_uncorrected
+    size: 8
+    sig: "i32 current_mac_epoch_seconds_uncorrected(void)"
+    module: time/current_mac_epoch_seconds_uncorrected
+    status: ported
+    vars: {}
+    renames:
+      r0: apply_utc_offset (constant 0; incoming r0 ignored)
+      FUN_08051d98: current_mac_epoch_seconds (unported shared tail target)
+      FUN_0808e9e0: current_datetime_to_normalized_record
+      FUN_080aad6c: datetime_to_mac_epoch_seconds
+    notes: >-
+      Raw words e3a00000 eafff374 establish the full 8-byte extent
+      [0x08054fbc,0x08054fc4): mov r0,#0 then b 0x08051d98.
+      The next independent wrapper begins at 0x08054fc4 with mov r0,#1.
+      Whole-image aligned ARM decoding finds two plain inbound BLs at
+      0x08058018 and 0x0806cb10, no predicated BLs; the body contains
+      zero BL instructions and one unconditional tail branch. The shared
+      target obtains a normalized current DateTime, ignores query validity,
+      and converts it to wrapping signed Macintosh-epoch seconds without
+      applying or querying UTC/daylight offsets. Both callees are existing
+      Rust ports; no new firmware seam is introduced. Deliberate deviations:
+      inline the shared target composition and zero stack padding rather
+      than retaining caller-register residue. Regression coverage checks
+      false query status, normalized leap-day output, signed Unix overflow,
+      Macintosh epoch wrapping, and skipped UTC query. Host suite passes
+      15583 tests; ARM release build passes. Standalone smoke using real
+      calendar and timestamp arithmetic returns -1260253697 for
+      2000-02-29 23:59:59 despite false query validity and skips UTC query.
+      match.py reports a structural diff: LLVM emits a 15-instruction frame,
+      stack initialization and two Rust calls instead of the 2-instruction
+      retailOS tail wrapper; this is the intentional composition deviation.
