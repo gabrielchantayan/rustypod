@@ -782,6 +782,36 @@ pub unsafe extern "C" fn string_pool_read_counted(
     status
 }
 
+/// record_string_pool_read_counted_at_0x118_word11 — `FUN_08055718` @ `0x08055718`.
+///
+/// True size: 20 bytes, ending at the next function's push at 0x0805572c.
+/// Raw words e1a02001 e590102c e5900000 e2800f46 ea01a063 select record
+/// word 11 and the owner's pool at +0x118, then tail-branch to 0x080bd8bc.
+/// Whole-image decoding verifies two inbound plain BLs at 0x080462f4 and
+/// 0x082a3e58, zero predicated BLs, zero body BLs, and an inbound conditional
+/// tail branch at 0x080558bc.
+///
+/// Copies at most 510 bytes after the u16 prefix, stores floor(copied_bytes
+/// / 2), and preserves reader status. Deliberate deviation: pass zero for
+/// untouched incoming r3, since the reader clears that initial length before
+/// validation. Target pointer fields stay u32 on hosts; Ghidra incorrectly
+/// expands the tail callee into a four-argument void function.
+///
+/// # Safety
+/// `record` must contain twelve readable aligned target words. Word zero
+/// must address an owner with a valid StringPool at +0x118. `counted` must
+/// have writable space for its u16 prefix and 510 payload bytes.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn record_string_pool_read_counted_at_0x118_word11(
+    record: *const u32,
+    counted: *mut u16,
+) -> i32 {
+    let entry_id = record.add(11).cast::<i32>().read();
+    let owner = record.read() as usize as *mut u8;
+    string_pool_read_counted(owner.add(0x118).cast(), entry_id, counted, 0)
+}
+
 /// record_string_pool_read_counted_at_0x380 — `FUN_080557b0` @ `0x080557b0`.
 ///
 /// True extent: 20 bytes, `0x080557b0..0x080557c4`; the next word is
@@ -1106,6 +1136,45 @@ mod tests {
         fixture.payload = payload;
         fixture.payload_cell = fixture.payload.as_mut_ptr();
         fixture
+    }
+
+    #[test]
+    fn record_counted_reader_word11_preserves_payload_boundaries_and_status() {
+        let slab = crate::testing::try_map_u32_slab(
+            crate::testing::hints::RECORD_STRING_POOL_READ_COUNTED_118_WORD11, 4096,
+        ).expect("target-width owner fixture");
+        unsafe {
+            let mut f = payload_fixture((0..600).map(|i| (i % 251) as u8).collect());
+            let pool = slab.add(0x118).cast::<StringPool>();
+            pool.write(ptr::read(&f.pool));
+            let mut record = [u32::MAX; 12];
+            record[0] = slab as usize as u32;
+            for (id, length, tag, offset, status, copied) in [
+                (1i32, 1, CRTS_TAG, 0, 0, 1usize),
+                (1, 5, CRTS_TAG, 0, 0, 5),
+                (1, 510, CRTS_TAG, 0, 0, 510),
+                (1, 511, CRTS_TAG, 0, 0, 510),
+                (0, 5, CRTS_TAG, 0, 0, 0),
+                (-1, 5, CRTS_TAG, 0, PARAM_ERR, 0),
+                (2, 5, CRTS_TAG, 0, PARAM_ERR, 0),
+                (1, 0, CRTS_TAG, 0, PARAM_ERR, 0),
+                (1, 5, CRTS_TAG, ENTRY_RECLAIMABLE, PARAM_ERR, 0),
+                (1, 5, 0, 0, PARAM_ERR, 0),
+            ] {
+                record[11] = id as u32;
+                f.entries[0].length = length;
+                f.entries[0].blob_offset = offset;
+                (*pool).tag = tag;
+                let mut output = [0xa5a5u16; 257];
+                assert_eq!(record_string_pool_read_counted_at_0x118_word11(
+                    record.as_ptr(), output.as_mut_ptr()), status);
+                assert_eq!(output[0], (copied / 2) as u16);
+                let bytes = std::slice::from_raw_parts(output.as_ptr().add(1).cast::<u8>(), 512);
+                assert_eq!(&bytes[..copied], &f.payload[..copied]);
+                assert!(bytes[copied..].iter().all(|&byte| byte == 0xa5));
+                assert_eq!((*pool).lock_depth, 0);
+            }
+        }
     }
 
     #[test]
