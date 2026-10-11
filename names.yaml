@@ -16,6 +16,32 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0805413c
+    ghidra: thunk_FUN_080865e0
+    name: ui_fixed_index_limit
+    size: 4
+    sig: "uint32_t ui_fixed_index_limit(uint32_t context)"
+    module: ui/fixed_index_limit
+    status: ported
+    vars: {r0: context, return/r0: index_limit}
+    notes: >-
+      Raw word ea00c927 establishes the 4-byte branch veneer extent
+      [0x0805413c,0x08054140); the next function begins with stmdb.
+      Verified target 0x080865e0 has words e3a00017 e12fff1e, returning
+      23 without inspecting the incoming context word. Neither address
+      had a registry entry. Two inbound plain BLs at 0x081722a8 and
+      0x081790f4, zero predicated BLs, zero outbound BLs. Caller
+      0x081790e0 uses the low halfword as an exclusive index limit before
+      dispatching event 0x6063; no narrower subsystem identity asserted.
+      Deliberate deviation: return the constant directly rather than
+      retaining the verified target as a firmware seam. Host tests cover
+      zero, unaligned, firmware, mirror, high-bit and maximal context
+      words; standalone API smoke returns 23 for 0, 3 and ffffffff and
+      confirms 22 is below the limit while 23 is not. Host suite and
+      ARM release build pass. match.py exits 1: the original single B
+      becomes push, frame setup, mov r0,#23 and pop returning through pc.
+      The exported symbol remains a real target; no calls introduced.
+      No device execution.
   - address: 0x08054568
     ghidra: FUN_08054568
     name: query_navigation_mode
