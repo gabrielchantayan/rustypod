@@ -245201,3 +245201,45 @@ functions:
       32 Rust instructions. Larger frame and indirect BLX through ops;
       count guard, first-item arguments, reload loop and both statuses remain.
       No intentional symbol fold.
+
+  - address: 0x08062da4
+    ghidra: FUN_08062da4
+    name: rsa_padding_add_none
+    size: 100
+    sig: "i32 rsa_padding_add_none(u8 *dst, i32 dst_len, const u8 *src, i32 src_len)"
+    module: crypto/rsa_padding_add_none
+    status: ported
+    renames:
+      param_1/r0/r7: dst
+      param_2/r1/r4: dst_len
+      param_3/r2/r6: src
+      param_4/r3/r5: src_len
+      FUN_08049a84: diag_ring_record
+      thunk_EXT_FUN_220002d4: iram_memzero_veneer
+      thunk_EXT_FUN_22000020: __rt_memcpy
+    notes: >-
+      OpenSSL RSA_padding_add_none. Raw A32 verifies the exact 100-byte
+      extent 0x08062da4..0x08062e08, where the next real function begins.
+      Independent full-image decoding finds two inbound plain BL callers,
+      at 0x080c6f74 and 0x080cbb58, and no predicated BL callers.
+      Body has three plain BLs and no predicated BLs. Signed src_len > dst_len
+      records diagnostic (4,0x6f,0x6d,0,0) and returns -1 without buffer
+      accesses. Otherwise clears the wrapping u32 dst_len-src_len prefix,
+      copies src_len bytes at dst+prefix, and returns dst_len. No extra
+      sign, NULL, or overlap validation. Ghidra's fifth caller argument
+      is unused. Raw veneers e51ff004/220002d4 and e51ff004/22000020
+      reach the IRAM mirrors of existing memzero and __rt_memcpy ports.
+      All callees are already ported; no new seam. Deliberate deviations:
+      native host pointers, existing Rust zero veneer and volatile memcpy
+      body pointer instead of the stock memcpy veneer, preventing builtin
+      substitution. Host tests compare all source/destination alignments,
+      lengths 0..64, empty/full inputs, signed rejection boundaries,
+      diagnostic contents, unchanged sources and destination sentinels.
+      All 15499 host tests and ARM release build pass. Executable smoke
+      using a test-configured host rlib confirms right alignment, zero
+      prefix, preserved sentinels and rejection; ordinary host library
+      build remains blocked by four pre-existing missing host functions.
+      match.py exits 1: 25 stock versus 31 Rust instructions, larger frame,
+      reversed equivalent signed compare, two direct BLs and a volatile
+      indirect BLX copy. Error arguments, prefix clearing, right-aligned
+      copy and returned length remain intact. No intentional symbol fold.
