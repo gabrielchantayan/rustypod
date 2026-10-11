@@ -143,6 +143,7 @@ pub mod object_resource_string;
 pub mod object_resource_table_counted_string;
 pub mod object_resource_vector20_counted_string;
 pub mod object_resource_vector24_counted_string;
+pub mod object_resource_vector16_pool850_counted_string;
 pub mod rect;
 pub mod calendar_day_rect;
 pub mod indexed_rect;
