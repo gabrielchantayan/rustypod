@@ -8,22 +8,18 @@
 //! global pointer held at that literal. It scans entries from queue word +1;
 //! for each matching request ID, it optionally requires the entry's context
 //! word (+0x18) to equal `context`, clears both words, and invokes
-//! `FUN_08058c3c` when the entry has a successor.
+//! `move_entry_to_queue_end` when the entry has a successor.
 //!
 //! # Deliberate deviations
 //!
-//! `FUN_08058c3c` is not ported or named in the ledger. The device build calls
-//! its verified retail address directly; host tests install a seam that records
-//! the call. Target-width words are used rather than host pointers because
-//! every observed entry field is four bytes apart.
+//! Target-width words are used rather than host pointers because every
+//! observed entry field is four bytes apart. Tail promotion uses the Rust port.
 
 #[cfg(not(target_os = "none"))]
 use core::ptr;
 
 const REQUEST_QUEUE_GLOBAL: *const *mut u32 = 0x08a0_aa78 as *const *mut u32;
-const RETAIL_MOVE_ENTRY_TO_QUEUE_END: usize = 0x0805_8c3c;
-
-type MoveEntryToQueueEnd = unsafe extern "C" fn(*mut u32, *mut u32);
+use super::move_entry_to_queue_end::move_entry_to_queue_end;
 
 #[cfg(target_os = "none")]
 #[inline(always)]
@@ -40,27 +36,6 @@ unsafe fn request_queue() -> *mut u32 {
     unsafe { ptr::read_volatile(ptr::addr_of!(REQUEST_QUEUE)) }
 }
 
-#[cfg(target_os = "none")]
-#[inline(always)]
-unsafe fn move_entry_to_queue_end(queue: *mut u32, entry: *mut u32) {
-    let move_entry: MoveEntryToQueueEnd = unsafe { core::mem::transmute(RETAIL_MOVE_ENTRY_TO_QUEUE_END) };
-    unsafe { move_entry(queue, entry) }
-}
-
-#[cfg(not(target_os = "none"))]
-static mut MOVE_ENTRY_TO_QUEUE_END: MoveEntryToQueueEnd = missing_move_entry_to_queue_end;
-
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_move_entry_to_queue_end(_queue: *mut u32, _entry: *mut u32) {
-    panic!("request_queue_clear_matching_entries requires FUN_08058c3c @ 0x08058c3c")
-}
-
-#[cfg(not(target_os = "none"))]
-#[inline(always)]
-unsafe fn move_entry_to_queue_end(queue: *mut u32, entry: *mut u32) {
-    let move_entry = unsafe { ptr::read_volatile(ptr::addr_of!(MOVE_ENTRY_TO_QUEUE_END)) };
-    unsafe { move_entry(queue, entry) }
-}
 
 /// Clears the request ID and context of matching queued entries.
 ///
@@ -108,15 +83,6 @@ mod tests {
         try_map_u32_slab(hints::REQUEST_QUEUE_CLEAR_MATCHING_ENTRIES, FIXTURE_LEN).map(|pointer| pointer as usize)
     });
     static LOCK: Mutex<()> = Mutex::new(());
-    static mut MOVED: [u32; 4] = [0; 4];
-    static mut MOVED_LEN: usize = 0;
-
-    unsafe extern "C" fn record_move(_queue: *mut u32, entry: *mut u32) {
-        unsafe {
-            MOVED[MOVED_LEN] = entry as usize as u32;
-            MOVED_LEN += 1;
-        }
-    }
 
     unsafe fn fixture() -> Option<*mut u32> {
         let base = *FIXTURE.as_ref()? as *mut u8;
@@ -128,22 +94,10 @@ mod tests {
         unsafe { base.add(word) }
     }
 
-    unsafe fn install(base: *mut u32) -> (*mut u32, MoveEntryToQueueEnd) {
-        let old_queue = unsafe { REQUEST_QUEUE };
-        let old_move = unsafe { MOVE_ENTRY_TO_QUEUE_END };
-        unsafe {
-            REQUEST_QUEUE = base.add(QUEUE);
-            MOVE_ENTRY_TO_QUEUE_END = record_move;
-            MOVED_LEN = 0;
-        }
-        (old_queue, old_move)
-    }
-
-    unsafe fn restore(old_queue: *mut u32, old_move: MoveEntryToQueueEnd) {
-        unsafe {
-            REQUEST_QUEUE = old_queue;
-            MOVE_ENTRY_TO_QUEUE_END = old_move;
-        }
+    unsafe fn install(base: *mut u32) -> *mut u32 {
+        let old_queue = REQUEST_QUEUE;
+        REQUEST_QUEUE = base.add(QUEUE);
+        old_queue
     }
 
     #[test]
@@ -160,17 +114,25 @@ mod tests {
             base.add(QUEUE + 1).write(first as usize as u32);
             first.write(second as usize as u32);
             second.write(third as usize as u32);
+            base.add(QUEUE + 2).write(third as usize as u32);
+            second.add(1).write(first as usize as u32);
+            third.add(1).write(second as usize as u32);
             first.add(2).write(7); first.add(6).write(1);
             second.add(2).write(7); second.add(6).write(2);
             third.add(2).write(9); third.add(6).write(7);
             let saved = install(base);
             request_queue_clear_matching_entries(7, 0);
-            restore(saved.0, saved.1);
+            REQUEST_QUEUE = saved;
             assert_eq!(first.add(2).read(), 0); assert_eq!(first.add(6).read(), 0);
             assert_eq!(second.add(2).read(), 0); assert_eq!(second.add(6).read(), 0);
             assert_eq!(third.add(2).read(), 9);
-            assert_eq!(MOVED_LEN, 2);
-            assert_eq!(MOVED[0], first as usize as u32); assert_eq!(MOVED[1], second as usize as u32);
+            assert_eq!(base.add(QUEUE + 1).read(), third as usize as u32);
+            assert_eq!(base.add(QUEUE + 2).read(), second as usize as u32);
+            assert_eq!(third.read(), first as usize as u32);
+            assert_eq!(first.add(1).read(), third as usize as u32);
+            assert_eq!(first.read(), second as usize as u32);
+            assert_eq!(second.add(1).read(), first as usize as u32);
+            assert_eq!(second.read(), 0);
         }
     }
 
@@ -186,14 +148,19 @@ mod tests {
             let second = entry(base, SECOND);
             base.add(QUEUE + 1).write(first as usize as u32);
             first.write(second as usize as u32);
+            base.add(QUEUE + 2).write(second as usize as u32);
+            second.add(1).write(first as usize as u32);
             first.add(2).write(7); first.add(6).write(1);
             second.add(2).write(7); second.add(6).write(2);
             let saved = install(base);
             request_queue_clear_matching_entries(7, 2);
-            restore(saved.0, saved.1);
+            REQUEST_QUEUE = saved;
             assert_eq!(first.add(2).read(), 7); assert_eq!(first.add(6).read(), 1);
             assert_eq!(second.add(2).read(), 0); assert_eq!(second.add(6).read(), 0);
-            assert_eq!(MOVED_LEN, 0);
+            assert_eq!(base.add(QUEUE + 1).read(), first as usize as u32);
+            assert_eq!(base.add(QUEUE + 2).read(), second as usize as u32);
+            assert_eq!(first.read(), second as usize as u32);
+            assert_eq!(second.add(1).read(), first as usize as u32);
         }
     }
 }

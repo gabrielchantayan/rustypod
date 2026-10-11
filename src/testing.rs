@@ -1636,6 +1636,7 @@ pub mod hints {
     // raw-u32 queue and entry fixture; mappings never unmap, so no other user
     // may share this hint.
     pub const REQUEST_QUEUE_CLEAR_MATCHING_ENTRIES: usize = 0xed10_0000;
+    pub const MOVE_ENTRY_TO_QUEUE_END: usize = 0xed20_0000;
     // 0xee30_0000: dedicated to util/singly_linked_list_remove's raw-u32
     // head and node fixture; mappings never unmap, so no other user may share
     // this hint.
