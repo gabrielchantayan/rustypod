@@ -246657,3 +246657,36 @@ functions:
       uses a post-decrement byte store; normalization, descending stores,
       unsigned termination and r0 preservation remain intact.
       Reference C: decomp/c/004/08057210_FUN_08057210.c.
+
+  # --- record indexed payload lookup wrapper (app) ---
+  - address: 0x08055a0c
+    ghidra: FUN_08055a0c
+    name: record_indexed_payload_lookup_at_0x220
+    size: 56
+    sig: "u32 record_indexed_payload_lookup_at_0x220(const u32 *record, void **payload_out, u32 *encoded_length_out)"
+    module: app/indexed_payload_lookup
+    status: ported
+    renames:
+      param_1/r0: record
+      param_2/r1: payload_out
+      param_3/r2: encoded_length_out
+      record_word_0: index_base
+      record_word_14: entry
+      FUN_0809e3d0: indexed_payload_lookup
+    notes: >-
+      Raw words establish the true 56-byte extent 0x08055a0c..0x08055a44;
+      the following mov r2,r1 begins a separately entered function.
+      Whole-image aligned A32 BL decoding finds two inbound plain BLs at
+      0x08045a24 and 0x08045a34, zero predicated BLs. The body has one plain
+      BL to the already-ported indexed_payload_lookup at 0x0809e3d0 and
+      zero predicated BLs. Load record word 14 and the base from word 0,
+      add 0x220, perform the lookup, logically halve the optional encoded
+      length even on error, and return backend status unchanged. Ghidra's
+      void return misses the preserved r0 status. Target pointer fields
+      remain u32 on hosts; payload outputs use native pointer width.
+      Real-backend host tests cover odd/even and maximal live lengths,
+      empty and signed-invalid indices, dead entries, invalid tags,
+      inactive indices, output clearing, and NULL optional outputs.
+      match.py reports fourteen instructions in both bodies; LLVM changes
+      the frame and register shuffle but preserves index adjustment,
+      backend call, conditional logical shift/store, and status return.
