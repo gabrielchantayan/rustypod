@@ -16,6 +16,43 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08057e88
+    ghidra: FUN_08057e88
+    name: linked_record_slots_at
+    size: 68
+    sig: "i32 linked_record_slots_at(const u32 *owner, u32 index, u32 **payload_slot, u32 **value_slot)"
+    module: heap/linked_record_slots_at
+    status: ported
+    vars:
+      param_1: owner
+      param_2: index
+      param_3: payload_slot
+      param_4: value_slot
+      puVar1: node
+      iVar2: ordinal
+    notes: >-
+      Raw A32 establishes [0x08057e88,0x08057ecc), 68 bytes; the next
+      independent function starts with PUSH {r4,lr}. Whole-image aligned
+      BL decoding finds two plain inbound calls at 0x081c0104 and
+      0x081c0160, zero predicated inbound calls, and zero outgoing calls.
+      Walk word-0 links from owner word 3 with a wrapping u32 ordinal.
+      A selected node returns addresses of words 5 and 4, stored in that
+      order, and status zero. Exhaustion returns -123 without writing
+      either output. Callers initialize buffer/address slots and release
+      associated objects; the constructor at 0x08058150 builds this
+      chain with a 20-byte node header and variable payload size.
+      No callee seams or deliberate behavioral deviations. Pointer fields
+      stay u32 on hosts; output slots use native pointer width. Host cases
+      cover empty and noncontiguous chains, every valid ordinal, one-past,
+      maximum-u32 indices, writable returned slots, untouched failure
+      outputs including NULL output slots, and aliasing with second-store
+      precedence. Standalone smoke exercises slot writes and exhaustion.
+      Full host gate passes all 15554 tests and the ARM release build
+      passes. match.py exits 1: LLVM emits 21 instructions versus 17,
+      replacing the increasing ordinal with a wrapping countdown,
+      predicated loads with branches, and adding a frame pointer.
+      Null checks, ordered output stores, offsets and statuses are preserved.
+
   - address: 0x08058584
     ghidra: FUN_08058584
     name: initialize_zero_word
