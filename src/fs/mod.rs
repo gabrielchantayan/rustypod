@@ -1,5 +1,7 @@
 //! Filesystem-layer helpers (path handling, FAT-facing utilities,
 //! HFS B-tree node access).
+/// Checked file read with status translation @ 0x0805a6e8.
+pub mod file_read_checked;
 /// File write with optional flush @ 0x0805ae18.
 pub mod file_write;
 /// Data-backed stream context construction @ 0x0805b764.

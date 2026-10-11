@@ -245873,7 +245873,7 @@ functions:
       "[handle + 4]": descriptor
     renames:
       FUN_08087974: stream_handle_validate
-      FUN_0805a6e8: retail read and error-translation wrapper (unported)
+      FUN_0805a6e8: file_read_checked
     notes: >-
       Raw osos.dec establishes [0x0805b7cc,0x0805b804), 56 instruction
       bytes ending with POP to PC; the next real function starts with PUSH.
@@ -245884,19 +245884,19 @@ functions:
       validation failure or backend status unchanged. Validate the mrts tag
       before loading count or descriptor word 1, then pass descriptor,
       destination, requested count, mode 2, and the original count pointer
-      to 0x0805a6e8. No canonical entry exists for that wrapper. Its raw
+      to file_read_checked at 0x0805a6e8. The wrapper's raw
       words verify the five-argument ABI, rejection of descriptor -1 or
       destination zero, mode-bit-2 selection of the already ported
       retail_file_read_mode_2 at 0x08277c74 (otherwise retail_file_read at
       0x082784b8), and nonzero error tail translation at 0x0809da3c.
-      Deliberate deviation: reuse the Rust validator and keep that entire
-      unported backend as a volatile host-replaceable retail seam; no second
-      function is ported. Host tests cover null/foreign single-word handles
+      Deliberate deviation: reuse the Rust validator and checked-read port;
+      the obsolete volatile backend seam is removed. Host tests inject a
+      finite stream and cover null/foreign single-word handles
       without count access, empty input, zero/exact/short/maximal requests,
       and backend errors preserving count. Standalone executable smoke
       observes invalid=-50, short_read=-39, transferred=3 and checks the
       five backend arguments. Host suite and ARM release build pass.
-      match.py reports 22 Rust instructions versus 14 original: frame
+      Historical pre-cutover match.py reported 22 versus 14 instructions: frame
       setup and indirect volatile BLX replace the fixed backend BL; the
       validation gate, word loads, mode 2, stack argument and status return
       remain structurally equivalent.
@@ -246028,3 +246028,35 @@ functions:
       shared cleanup, literal-loaded BLX to 0x08278f98, and explicit zero
       fourth conversion argument; constructor/copy/destructor sequencing,
       NULL status and conditional halfword decrement/store are retained.
+
+  - address: 0x0805a6e8
+    ghidra: FUN_0805a6e8
+    name: file_read_checked
+    size: 76
+    sig: "i32 file_read_checked(u32 descriptor, u32 destination, u32 requested, u32 flags, u32 *transferred)"
+    module: fs/file_read_checked
+    status: ported
+    vars:
+      param_1/r0: descriptor
+      param_2/r1/ip: destination
+      param_3/r2: requested
+      param_4/r3: flags
+      param_5/stack: transferred
+    renames:
+      FUN_082784b8: retail_file_read
+      FUN_08277c74: retail_file_read_mode_2
+      FUN_0809da3c: map_status_code (raw semantics inlined)
+    notes: >-
+      Raw A32 establishes [0x0805a6e8,0x0805a734), 76 bytes; the next
+      function is MVN r0,#3 / BX lr. Two plain outbound BLs at 0x0805a718
+      and 0x0805a720, no predicated BLs; BNE at 0x0805a72c tail-calls
+      the status mapper. Whole-image decode finds two plain inbound BLs
+      at 0x0805b7fc and 0x080a7550, no predicated inbound BLs. Reject
+      descriptor -1 or destination zero with -50, otherwise read even
+      zero counts, selecting mode 2 only for flags bit 1. Preserve partial
+      progress and translate 2/5/7/13/14 to -35/-39/-43/-48/-37. Reuse both
+      canonical read ports; inline the raw mapper because its existing
+      Rust port is off by one for 2, 5, 7 and 14. Migrate validated_file_read
+      and remove its obsolete seam. Host suite and ARM release build pass.
+      Exported-path finite-stream smoke verifies both modes, short-read
+      errors, preserved buffer tail, zero length and invalid arguments.
