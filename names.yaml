@@ -43076,6 +43076,35 @@ functions:
       PLST_TASK_COMPLETE_OPS seam with retail-address defaults. No callee
       identity beyond the observed role is claimed.
 
+  - address: 0x08048e9c
+    ghidra: FUN_08048e9c
+    name: paired_buffer_release
+    size: 28
+    sig: "void paired_buffer_release(u32 *buffer)"
+    module: heap/paired_buffer_create
+    status: ported
+    renames:
+      param_1/r0: buffer
+      r1: buffer
+      DAT_08048eb4: paired_pool_state
+      "0x089cb194": paired_buffer_owner_slot
+      FUN_08048eb8: release_element_resource
+    notes: >-
+      Raw words establish 24 instruction bytes at 0x08048e9c..0x08048eb4
+      plus the 0x089cb190 literal at 0x08048eb4; the next real function
+      starts at 0x08048eb8, making the true extent 28 bytes. Full-image
+      aligned A32 decoding finds one inbound plain bl at 0x0806cd74 and
+      one predicated blne at 0x0806ce2c, with no outbound BLs. NULL returns
+      before any owner read. Otherwise r1 receives buffer, r0 receives
+      the owner word at 0x089cb194, and bne tail-dispatches to the existing
+      release_element_resource port. Ghidra incorrectly incorporates that
+      separate function and its downstream callees into this wrapper.
+      Rust reuses the paired-buffer constructor's host owner-slot seam;
+      its direct release call replaces the retail tail branch.
+      ARM match confirms the NULL gate, owner load, and direct tail branch;
+      LLVM adds a frame-pointer prologue/epilogue and addresses the owner
+      slot directly instead of using pool-base plus four.
+
   - address: 0x08048eb8
     ghidra: FUN_08048eb8
     name: release_element_resource

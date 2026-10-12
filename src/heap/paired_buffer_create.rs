@@ -50,6 +50,37 @@ pub unsafe extern "C" fn paired_buffer_create() -> *mut u32 {
     buffer
 }
 
+/// Return a paired buffer to its shared FixA owner.
+///
+/// RetailOS `FUN_08048e9c` @ `0x08048e9c`: true extent 28 bytes to
+/// `0x08048eb8`, including 24 instruction bytes and a 4-byte owner-base
+/// literal. Full-image A32 decoding finds one inbound plain BL at
+/// `0x0806cd74`, one BLNE at `0x0806ce2c`, and no outbound BLs.
+/// NULL returns without reading the owner slot; otherwise load the owner
+/// at `0x089cb194` and tail-dispatch to `release_element_resource`.
+/// Deviations: call the existing Rust release port; host builds reuse
+/// the constructor's owner-slot seam rather than a fixed address.
+///
+/// ARM codegen retains the NULL gate and direct tail branch, but adds a
+/// frame-pointer prologue/epilogue and loads `0x089cb194` directly instead
+/// of loading the pool base then adding four.
+///
+/// # Safety
+///
+/// Externally serialize the shared pool. Non-NULL buffers require a readable
+/// owner slot and valid target-layout objects for `release_element_resource`.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn paired_buffer_release(buffer: *mut u32) {
+    if buffer.is_null() { return; }
+    #[cfg(target_os = "none")]
+    let slot = 0x089c_b194 as *const u32;
+    #[cfg(not(target_os = "none"))]
+    let slot = unsafe { ptr::read_volatile(ptr::addr_of!(PAIRED_BUFFER_OWNER_SLOT)) };
+    let owner = unsafe { ptr::read_volatile(slot) } as usize as *mut super::fixa::FixaOwner;
+    unsafe { super::fixa_resource::release_element_resource(owner, buffer) };
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -73,6 +104,56 @@ mod tests {
             WORD_RECORD_TABLE = self.1;
             FIXED_POOL_OPS = self.2;
         } }
+    }
+
+    #[test]
+    fn release_null_invalid_owner_and_inclusive_pool_endpoints() {
+        let _pool = match crate::testing::UI_POOL_ENTRY_CREATE_TEST_LOCK.lock() {
+            Ok(guard) => guard,
+            Err(error) => panic!("shared pool lock poisoned: {error}"),
+        };
+        let base = try_map_u32_slab(hints::PAIRED_BUFFER_RELEASE, 0x400)
+            .expect("low-address paired-buffer release fixture");
+        unsafe {
+            struct RestoreSlot(*mut u32);
+            impl Drop for RestoreSlot {
+                fn drop(&mut self) { unsafe { PAIRED_BUFFER_OWNER_SLOT = self.0; } }
+            }
+            let _restore = RestoreSlot(PAIRED_BUFFER_OWNER_SLOT);
+            PAIRED_BUFFER_OWNER_SLOT = ptr::null_mut();
+            paired_buffer_release(ptr::null_mut());
+            base.write_bytes(0, 0x400);
+            let slot = base.cast::<u32>();
+            let owner = base.add(0x40).cast::<u32>();
+            let range = base.add(0x80).cast::<u32>();
+            let first = base.add(0x100).cast::<u32>();
+            let last = base.add(0x10c).cast::<u32>();
+            PAIRED_BUFFER_OWNER_SLOT = slot;
+            first.write(0xdead_beef);
+            paired_buffer_release(first);
+            assert_eq!(first.read(), 0xdead_beef, "NULL owner rejects resource");
+            slot.write(owner as usize as u32);
+            owner.add(3).write(range as usize as u32);
+            range.add(3).write(2);
+            range.add(5).write(first as usize as u32);
+            range.add(6).write(last as usize as u32);
+            paired_buffer_release(first);
+            assert_eq!(first.read(), 0xdead_beef, "invalid owner rejects resource");
+            assert_eq!(range.add(4).read(), 0);
+            owner.write(0x4669_7841);
+            last.add(1).write(0x1234_5678);
+            paired_buffer_release(last.add(1));
+            assert_eq!(last.add(1).read(), 0x1234_5678);
+            assert_eq!(range.add(4).read(), 0);
+            paired_buffer_release(first);
+            assert_eq!(first.read(), 0);
+            assert_eq!(range.add(7).read(), first as usize as u32);
+            paired_buffer_release(last);
+            assert_eq!(last.read(), first as usize as u32);
+            assert_eq!(range.add(7).read(), last as usize as u32);
+            assert_eq!(range.add(4).read(), 2, "sole full range remains reusable");
+            assert_eq!(owner.add(3).read(), range as usize as u32);
+        }
     }
 
     #[test]
