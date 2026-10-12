@@ -243,6 +243,76 @@ pub unsafe extern "C" fn word_buffer_reset_optional_singleton(
     1
 }
 
+/// Unported limb multiply worker at 0x082ba944; returns the final carry.
+pub type WordBufferMultiplyWords = unsafe extern "C" fn(*mut u32, *const u32, i32, u32) -> u32;
+
+#[cfg(target_os = "none")]
+unsafe extern "C" fn stock_multiply_words(dst: *mut u32, src: *const u32, len: i32, factor: u32) -> u32 {
+    let worker: WordBufferMultiplyWords = unsafe { core::mem::transmute(0x082b_a944usize) };
+    unsafe { worker(dst, src, len, factor) }
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_multiply_words(_dst: *mut u32, _src: *const u32, _len: i32, _factor: u32) -> u32 {
+    panic!("word_buffer_multiply_word requires limb multiply worker 0x082ba944")
+}
+
+#[cfg(target_os = "none")]
+pub static mut WORD_BUFFER_MULTIPLY_WORDS: WordBufferMultiplyWords = stock_multiply_words;
+#[cfg(not(target_os = "none"))]
+pub static mut WORD_BUFFER_MULTIPLY_WORDS: WordBufferMultiplyWords = missing_multiply_words;
+
+/// Multiply a marked little-endian limb buffer by a single word.
+///
+/// Original: FUN_08040350 at load address 0x08040350, 140 bytes,
+/// [0x08040350, 0x080403dc). Verified two incoming plain BLs, zero
+/// predicated BLs; three outgoing plain BLs, zero predicated BLs.
+/// Empty input is unchanged. Zero factor resets a nonempty buffer and
+/// ignores reset failure. Otherwise multiply in place, then reserve and
+/// append a nonzero carry. Failed reserve returns zero but retains the
+/// already-multiplied limbs and old length; sign/marker is unchanged.
+///
+/// Deliberate deviation: the unported multiply worker uses a volatile
+/// stock-address dispatch slot, replaceable by a host arithmetic model.
+/// Reset/reserve reuse existing ports. Signed wrapping length/capacity
+/// comparison follows the raw ARM, including noncanonical header values.
+///
+/// # Safety
+/// `buffer` must hold four writable target words; data must address aligned
+/// writable limbs covering length/capacity and satisfy reserve ownership.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn word_buffer_multiply_word(buffer: *mut MarkedWordBuffer, factor: u32) -> u32 {
+    let len = unsafe { core::ptr::addr_of!((*buffer).len).read_volatile() };
+    if len == 0 {
+        return 1;
+    }
+    if factor == 0 {
+        unsafe { word_buffer_reset_optional_singleton(buffer, 0) };
+        return 1;
+    }
+    let data = unsafe { core::ptr::addr_of!((*buffer).data).read_volatile() as usize as *mut u32 };
+    let multiply = unsafe { core::ptr::addr_of!(WORD_BUFFER_MULTIPLY_WORDS).read_volatile() };
+    let carry = unsafe { multiply(data, data, len as i32, factor) };
+    if carry != 0 {
+        let len = unsafe { core::ptr::addr_of!((*buffer).len).read_volatile() };
+        let capacity = unsafe { core::ptr::addr_of!((*buffer).capacity).read_volatile() };
+        let requested = len.wrapping_add(1);
+        if (requested as i32) > (capacity as i32)
+            && unsafe { word_buffer_reserve(buffer.cast::<WordBuffer>(), requested) }.is_null()
+        {
+            return 0;
+        }
+        unsafe {
+            let len = core::ptr::addr_of!((*buffer).len).read_volatile();
+            core::ptr::addr_of_mut!((*buffer).len).write_volatile(len.wrapping_add(1));
+            let data = core::ptr::addr_of!((*buffer).data).read_volatile() as usize as *mut u32;
+            data.wrapping_offset(len as i32 as isize).write_volatile(carry);
+        }
+    }
+    1
+}
+
 /// word_buffer_set_bit — original: `FUN_080407a0` @ 0x080407a0.
 /// True extent: 140 bytes, 0x080407a0..0x0804082c. Two unconditional
 /// incoming BL sites, zero predicated BL sites; one outgoing BL to
@@ -487,6 +557,72 @@ mod tests {
             TRACED_FREE_HOOKS = old_free;
         }
         drop(guard);
+    }
+
+    unsafe extern "C" fn multiply_model(dst: *mut u32, src: *const u32, len: i32, factor: u32) -> u32 {
+        let mut carry = 0u64;
+        for index in 0..len.max(0) as usize {
+            let product = unsafe { src.add(index).read() } as u64 * factor as u64 + carry;
+            unsafe { dst.add(index).write(product as u32) };
+            carry = product >> 32;
+        }
+        carry as u32
+    }
+
+    #[test]
+    fn multiply_word_handles_zero_carry_and_nonatomic_growth_failure() {
+        let (guard, old_grow, old_free) = install();
+        let words = try_map_u32_slab(hints::WORD_BUFFER_MULTIPLY_WORD, 0x100)
+            .expect("multiply-word target-width fixture").cast::<u32>();
+        unsafe {
+            let old_multiply = WORD_BUFFER_MULTIPLY_WORDS;
+            WORD_BUFFER_MULTIPLY_WORDS = multiply_model;
+            let mut buffer = MarkedWordBuffer { data: 0, len: 0, capacity: 0, marker: 7 };
+            assert_eq!(word_buffer_multiply_word(&mut buffer, 0), 1);
+            assert_eq!((buffer.len, buffer.marker), (0, 7));
+            // Reset failure is deliberately ignored by the caller.
+            buffer.len = 1;
+            assert_eq!(word_buffer_multiply_word(&mut buffer, 0), 1);
+            assert_eq!((buffer.len, buffer.marker), (1, 7));
+            buffer.data = words as usize as u32;
+            buffer.capacity = 8;
+            for factor in [1, 2, 0xffff, 0x10000, u32::MAX] {
+                let original = 0x1234_5678_ffff_ffffu64;
+                words.write(original as u32);
+                words.add(1).write((original >> 32) as u32);
+                words.add(2).write(0xdead_beef);
+                words.add(3).write(0xcafe_babe);
+                buffer.len = 2;
+                let expected = original as u128 * factor as u128;
+                assert_eq!(word_buffer_multiply_word(&mut buffer, factor), 1);
+                assert_eq!(words.read(), expected as u32);
+                assert_eq!(words.add(1).read(), (expected >> 32) as u32);
+                let carry = (expected >> 64) as u32;
+                assert_eq!(buffer.len, if carry == 0 { 2 } else { 3 });
+                assert_eq!(words.add(2).read(), if carry == 0 { 0xdead_beef } else { carry });
+                assert_eq!(words.add(3).read(), 0xcafe_babe);
+                assert_eq!(buffer.marker, 7);
+            }
+            words.write(u32::MAX);
+            buffer.len = 1;
+            buffer.capacity = 1;
+            assert_eq!(word_buffer_multiply_word(&mut buffer, 2), 0);
+            assert_eq!(words.read(), 0xffff_fffe);
+            assert_eq!((buffer.len, buffer.capacity, buffer.marker), (1, 1, 7));
+            // Existing grow model returns prepared copied storage.
+            words.write(u32::MAX);
+            let grown = words.add(8);
+            grown.write(0xffff_fffe);
+            GROW_RESULT = grown;
+            assert_eq!(word_buffer_multiply_word(&mut buffer, 2), 1);
+            assert_eq!(buffer.data, grown as usize as u32);
+            assert_eq!((grown.read(), grown.add(1).read()), (0xffff_fffe, 1));
+            assert_eq!((buffer.len, buffer.capacity, buffer.marker), (2, 2, 7));
+            assert_eq!(word_buffer_multiply_word(&mut buffer, 0), 1);
+            assert_eq!((buffer.len, buffer.marker, grown.read()), (0, 0, 0));
+            WORD_BUFFER_MULTIPLY_WORDS = old_multiply;
+            restore(guard, old_grow, old_free);
+        }
     }
 
     #[test]

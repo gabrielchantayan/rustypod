@@ -41,6 +41,7 @@ extern crate std;
 pub mod hints {
     pub const WORD_BUFFER_SET_BIT: usize = 0x721c_0000;
     pub const WORD_BUFFER_SET_BIT_GROW: usize = 0x721d_0000;
+    pub const WORD_BUFFER_MULTIPLY_WORD: usize = 0x721e_0000;
     pub const VDBE_CLEAR_OBJECT: usize = 0x720b_0000;
     pub const EMBEDDED_LIST_STORAGE_DESTROY: usize = 0x720a_0000;
     pub const CLEAR_TAGGED_LIST: usize = 0x7208_0000;
