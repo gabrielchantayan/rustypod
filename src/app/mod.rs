@@ -1,5 +1,7 @@
 //! retailOS application/UI framework glue — the global application
 //! context and the small helpers its view classes lean on.
+pub mod descriptor_apply_counted_string;
+pub use descriptor_apply_counted_string::descriptor_apply_counted_string;
 pub mod descriptor_lookup_attach;
 pub use descriptor_lookup_attach::lookup_and_attach_descriptor;
 pub mod ipod_control_prepare;
