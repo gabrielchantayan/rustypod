@@ -251294,3 +251294,26 @@ functions:
       cleanup, diagnostic constants, target offsets and success-only context
       store; LLVM uses explicit branches instead of predicated success
       stores, a larger frame, and the documented zero-fill BLX.
+
+  - address: 0x0803d670
+    ghidra: FUN_0803d670
+    name: bio_next
+    size: 16
+    sig: "BIO *bio_next(const BIO *bio)"
+    module: crypto/bio_next
+    status: ported
+    renames:
+      param_1/r0: bio
+      uVar1/r0: next_bio
+    notes: >-
+      Raw words e3500000, 15900024, 03a00000, e12fff1e establish the
+      exact 0x0803d670..0x0803d680 extent; BIO_printf starts at the next
+      push prologue. Two inbound plain BLs at 0x0805fcb8 and 0x08060738,
+      zero predicated BLs, no outbound calls or inbound plain branches.
+      Both callers advance digest BIO searches. Returns null for null input,
+      otherwise the next_bio pointer word at +0x24 without following it.
+      Reuses the existing target-width Bio layout; no seams or deliberate
+      semantic deviations. Host tests cover null input, null successor,
+      inaccessible successor values, high pointer bits and adjacent fields.
+      match.py confirms the same conditional load and null result; LLVM
+      adds a frame-pointer push/mov/pop in place of the original bx lr.
