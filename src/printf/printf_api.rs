@@ -417,6 +417,29 @@ mod tests {
     }
 
     #[test]
+    fn bio_new_file_ignores_inputs_and_diagnostic_success_or_failure() {
+        let _guard = engine_lock();
+        unsafe extern "C" fn diagnostic_failure(
+            _fmt: *const u8, _putc: PutcFn, _ctx: *mut c_void, _ap: VaList,
+        ) -> i32 {
+            -1
+        }
+        unsafe {
+            for engine in [echo_engine as PrintfEngineFn, diagnostic_failure] {
+                with_engine(engine, || {
+                    for (filename, mode) in [
+                        (core::ptr::null(), core::ptr::null()),
+                        (b"missing.pem\0".as_ptr(), b"r\0".as_ptr()),
+                        (1usize as *const u8, usize::MAX as *const u8),
+                    ] {
+                        assert!(crate::crypto::bio_new_file::bio_new_file(filename, mode).is_null());
+                    }
+                });
+            }
+        }
+    }
+
+    #[test]
     fn message_buffer_fixed_capacity_boundaries_and_error() {
         let _engine = engine_lock();
         let mut buffer = [0xa5; 8];
