@@ -19,7 +19,7 @@ use crate::cxx::magic_tagged_object_retain::magic_tagged_object_retain;
 use crate::cxx::magic_tagged_object_release::magic_tagged_object_release;
 
 #[cfg(target_os = "none")]
-unsafe fn leaf_tag_mask(tag: u32) -> u64 {
+pub(crate) unsafe fn leaf_tag_mask(tag: u32) -> u64 {
     let mapper: unsafe extern "C" fn(u32) -> u64 = unsafe { core::mem::transmute(0x08057958usize) };
     unsafe { mapper(tag) }
 }
@@ -27,7 +27,7 @@ unsafe fn leaf_tag_mask(tag: u32) -> u64 {
 // Reference for the still-stock mapper: its branch table and r0/r1 return
 // paths were decoded from osos.dec, not inferred from tag names.
 #[cfg(not(target_os = "none"))]
-fn leaf_tag_mask(tag: u32) -> u64 {
+pub(crate) fn leaf_tag_mask(tag: u32) -> u64 {
     match tag {
         1 => 0x100000,
         2..=13 => 1u64 << (tag - 2),
