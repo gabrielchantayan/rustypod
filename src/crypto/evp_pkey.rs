@@ -117,6 +117,83 @@ pub struct EvpPkey {
     pub attributes: *mut u8,
 }
 
+/// OpenSSL `EVP_PKEY_size` — `FUN_0804af10` at load address **0x0804af10**.
+///
+/// True extent: 32 bytes, 0x0804af10..0x0804af30 (the next entry is
+/// `EVP_PKEY_type`). Whole-image ARM word decoding verifies two inbound
+/// plain BL sites (0x0805fcd0, 0x08060154), zero predicated BL sites, and
+/// no outbound BL: the type-6 path tail-branches to `RSA_size` @ 0x08063040.
+/// NULL and every other type, including the unnormalized RSA2 tag 19,
+/// return zero without reading the payload. Type 6 returns the RSA modulus
+/// byte length. No new seam; the already-ported `rsa_size` is called directly.
+/// Deliberate deviation: repr(C) pointer fields widen on host while retaining
+/// the original +0x0c payload offset on ARM, as for the destructor.
+///
+/// # Safety
+///
+/// A non-NULL `key` must point to a live `EvpPkey`. For type 6 its payload
+/// must be a valid target-layout RSA object accepted by `rsa_size`.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn evp_pkey_size(key: *const EvpPkey) -> i32 {
+    if key.is_null() || unsafe { (*key).pkey_type } != 6 {
+        return 0;
+    }
+    unsafe { super::bn_num_bytes::rsa_size((*key).pkey.cast()) }
+}
+
+#[cfg(test)]
+mod size_tests {
+    use super::{evp_pkey_size, EvpPkey};
+    use crate::crypto::bn_num_bits::{BigNum, BnNumBitsWordFn, BN_NUM_BITS_WORD, BN_NUM_BITS_WORD_TEST_LOCK};
+    use crate::crypto::bn_num_bits_word::bn_num_bits_word;
+    use crate::testing::{hints, try_map_u32_slab};
+    use core::ptr;
+
+    struct RestoreWorker(BnNumBitsWordFn);
+    impl Drop for RestoreWorker {
+        fn drop(&mut self) {
+            unsafe { ptr::addr_of_mut!(BN_NUM_BITS_WORD).write(self.0) };
+        }
+    }
+
+    #[test]
+    fn null_unsupported_types_and_rsa_modulus_boundaries() {
+        assert_eq!(unsafe { evp_pkey_size(ptr::null()) }, 0);
+        let mut key = EvpPkey {
+            pkey_type: 0, save_type: 6, references: 1,
+            pkey: ptr::null_mut(), save_parameters: 1, attributes: ptr::null_mut(),
+        };
+        for tag in [0, 19, 28, 116, -1, i32::MAX] {
+            key.pkey_type = tag;
+            assert_eq!(unsafe { evp_pkey_size(&key) }, 0);
+        }
+
+        let Some(slab) = try_map_u32_slab(hints::EVP_PKEY_SIZE, 0x1000) else { return };
+        let _lock = BN_NUM_BITS_WORD_TEST_LOCK.lock();
+        let _restore = RestoreWorker(unsafe { ptr::read_volatile(ptr::addr_of!(BN_NUM_BITS_WORD)) });
+        unsafe { ptr::addr_of_mut!(BN_NUM_BITS_WORD).write(bn_num_bits_word) };
+        let rsa = slab.cast::<u32>();
+        let modulus = unsafe { slab.add(0x40).cast::<BigNum>() };
+        unsafe { rsa.add(4).write(modulus as usize as u32) };
+        key.pkey_type = 6;
+        key.pkey = rsa.cast();
+        for (limbs, expected) in [
+            (&[][..], 0), (&[1][..], 1), (&[0x80][..], 1),
+            (&[0x100][..], 2), (&[u32::MAX][..], 4),
+            (&[0, 0x80][..], 5), (&[0, 0x100][..], 6),
+        ] {
+            unsafe {
+                modulus.write(BigNum {
+                    d: if limbs.is_empty() { ptr::null() } else { limbs.as_ptr() },
+                    top: limbs.len() as i32, dmax: limbs.len() as i32, neg: 1, flags: 0,
+                });
+            }
+            assert_eq!(unsafe { evp_pkey_size(&key) }, expected);
+        }
+    }
+}
+
 
 /// Indirect dispatch for this destructor's unported `EVP_PKEY_free_it`
 /// callee. On target the slot defaults to the stock body called in place;
