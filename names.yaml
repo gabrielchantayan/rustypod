@@ -16,6 +16,30 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0804aeb4
+    ghidra: FUN_0804aeb4
+    name: evp_pkey_new
+    size: 92
+    sig: "EvpPkey *EVP_PKEY_new(void)"
+    module: crypto/evp_pkey
+    status: ported
+    renames:
+      puVar1/r0: pkey
+      FUN_08043c18: traced_alloc
+      FUN_08049a84: diag_ring_record
+    notes: >-
+      Raw osos.dec establishes the 92-byte extent 0x0804aeb4..0x0804af10,
+      ending at the next real entry EVP_PKEY_size. It has exactly two outbound
+      plain BL calls and zero predicated BL calls: traced_alloc(24, 0, 0) and
+      diag_ring_record(ERR_LIB_EVP=6, EVP_F_EVP_PKEY_NEW=106,
+      ERR_R_MALLOC_FAILURE=65, 0, 0). On success it writes the 0.9.6-era
+      EVP_PKEY wrapper fields in retail order: type 0, references 1, pkey NULL,
+      save_parameters 1, attributes NULL; save_type remains untouched. The
+      repr(C) Rust wrapper keeps these offsets on ARM while host pointer fields
+      widen. Host tests cover full successful initialization and the diagnostic
+      allocation-failure path. ARM match.py reviewed LLVM's equivalent
+      allocation, NULL gate, error call and ordered stores.
+
   - address: 0x0804af10
     ghidra: FUN_0804af10
     name: evp_pkey_size
