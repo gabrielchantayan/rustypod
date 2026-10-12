@@ -16,6 +16,31 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08052328
+    ghidra: FUN_08052328
+    name: ft_service_metadata_byte_at_b4c
+    size: 12
+    sig: "uint32_t ft_service_metadata_byte_at_b4c(const uint8_t *service_context)"
+    module: ft/service/metadata
+    status: ported
+    renames:
+      param_1/r0: service_context
+      intermediate/r0: metadata
+      return/r0: metadata_byte
+    notes: >-
+      Raw words e5900f00 e5d00b4c e12fff1e establish the true extent
+      [0x08052328,0x08052334); next function tail-branches to 0x080b4444.
+      Whole-image aligned A32 decoding finds two plain inbound BLs at
+      0x08172f38 and 0x08172f4c, zero predicated inbound BLs, and zero
+      outgoing BLs. Follow the aligned pointer at context+0xf00 and
+      zero-extend metadata byte +0xb4c. FUN_08172c6c compares/caches it
+      at caller+0x57; higher-level meaning remains unknown. Reuse the
+      registered metadata module without new callee seams or NULL/bounds
+      checks. Native host pointers preserve the offset; ARM pointers remain
+      four bytes. Tests cover all 256 unsigned byte values, live pointer
+      replacement and unchanged neighboring bytes. Host suite and ARM
+      release build pass; actual-source smoke returns 254. match.py exit 1
+      preserves both loads and offsets; LLVM adds frame setup/teardown.
   - address: 0x08052560
     ghidra: FUN_08052560
     name: image_library_entry_at
