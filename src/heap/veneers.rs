@@ -1230,6 +1230,24 @@ pub unsafe extern "C" fn cxx_allocator_deallocate(
     cxx_array_dealloc(ptr, count, 0);
 }
 
+/// operator_delete_status — original: `FUN_080491c8` @ 0x080491c8
+/// (20 bytes; 2 unconditional incoming `bl` calls, no predicated calls).
+///
+/// Passes the pointer unchanged to [`operator_delete_forwarder`] (one
+/// unconditional outgoing BL), then returns zero regardless of the pointer.
+/// NULL is accepted by the existing tag-2 delete path. The next real function
+/// starts at 0x080491dc. No deliberate behavioral deviations; Rust chooses
+/// the register holding the zero result rather than preserving it in r4.
+///
+/// # Safety
+/// A non-NULL pointer must be a live allocation accepted by operator_delete.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn operator_delete_status(ptr: *mut u8) -> u32 {
+    operator_delete_forwarder(ptr);
+    0
+}
+
 /// operator_delete_forwarder — original: `FUN_08049398` @ 0x08049398
 /// (4 bytes; 8 unconditional `bl` call sites, no predicated forms).
 ///
@@ -1802,6 +1820,25 @@ pub(crate) mod tests {
             assert_eq!(CREATE_CALLS, 1);
             assert_eq!(LAST_FREE_PTR, BLOCK_A as *mut u8);
             assert_eq!(LAST_FREE_TAG, 2);
+        }
+    }
+
+    #[test]
+    fn operator_delete_status_returns_success_for_null_and_live_allocation() {
+        let _lock = mock_heap();
+        unsafe {
+            assert_eq!(operator_delete_status(core::ptr::null_mut()), 0);
+            assert_eq!(FREE_CALLS, 0, "NULL must not initialize or free a heap block");
+            assert_eq!(CREATE_CALLS, 0);
+
+            let ptr = operator_new(24);
+            assert_eq!(operator_delete_status(ptr), 0);
+            assert_eq!(FREE_CALLS, 1, "success must follow releasing the allocation");
+            assert_eq!(LAST_FREE_PTR, ptr);
+            assert_eq!(LAST_FREE_TAG, 2);
+
+            assert_eq!(operator_delete_status(core::ptr::null_mut()), 0);
+            assert_eq!(FREE_CALLS, 1, "NULL on an initialized heap remains a no-op");
         }
     }
 

@@ -42885,6 +42885,35 @@ functions:
       early return, and tail branch; Rust adds an ABI frame, so it is 6
       instructions rather than the original 3.
 
+  - address: 0x080491c8
+    ghidra: FUN_080491c8
+    name: operator_delete_status
+    size: 20
+    sig: "u32 operator_delete_status(void *ptr)"
+    module: heap/veneers
+    status: ported
+    renames:
+      param_1/r0: ptr
+      r4: success_status
+      FUN_08049398: operator_delete_forwarder
+    notes: >-
+      Raw words e92d4010 e3a04000 eb000070 e1a00004 e8bd8010 establish
+      the complete 20-byte body before the distinct function at 0x080491dc.
+      Passes r0 unchanged to the already ported operator_delete_forwarder,
+      then returns zero. The callee is the raw branch veneer to tag-2
+      operator_delete, not Ghidra's expanded heap implementation.
+      Independent whole-image ARM decoding finds two plain BL callers
+      (0x081620d0 and 0x081c0170), no predicated BL callers, and one plain
+      outgoing BL at 0x080491d0. Ghidra's apparent caller FUN_081bfa14 is
+      not supported by the raw BL scan. NULL is a successful no-op; a live
+      allocation is deleted with tag 2 before returning success.
+      No behavioral deviations; register allocation is left to LLVM.
+      Host coverage checks zero status for NULL before and after heap
+      initialization and for an allocated pointer. ARM match.py shows
+      five instructions in both bodies: an ABI frame, one BL relocation
+      to operator_delete_forwarder, zero result, and return. LLVM uses fp
+      rather than saving zero in r4.
+
   - address: 0x08049398
     ghidra: FUN_08049398
     name: operator_delete_forwarder
