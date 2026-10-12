@@ -16,6 +16,39 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080437e8
+    ghidra: FUN_080437e8
+    name: record_interface_initialize
+    size: 64
+    sig: "void record_interface_initialize(u32 *record, u32 value)"
+    module: runtime/record_interface_initialize
+    status: ported
+    vars:
+      param_1: record
+      param_2: value
+      piVar1: interface_cache
+      iVar2: interface_descriptor
+    renames:
+      DAT_08043824: record_interface_cache
+      FUN_0805db2c: record_interface_descriptor_get
+    notes: >-
+      Raw A32 extent [0x080437e8,0x08043828) is 64 bytes: 60 bytes
+      of code and the cache literal 0x08a0f6c4 at 0x08043824. Next
+      real entry starts with PUSH at 0x08043828. Whole-image word
+      decoding finds two incoming plain BLs at 0x0804373c and
+      0x080437c8, zero predicated incoming BLs. Body has one plain
+      BL to 0x0805db2c, zero predicated BLs, and BLX r1 at 0x08043818.
+      Getter words E59F0000 E12FFF1E return literal 0x08a0fb44;
+      no existing names entry for the getter was found. Lazily publish
+      its descriptor in the cache, reload cache, call descriptor +8
+      with record, then overwrite record +8 with saved value. No locks
+      or NULL guards added. Descriptor callback identity is not inferred
+      from pre-initialization data. Host descriptor/cache pointers are
+      native-width; record remains u32 words. Tests cover publication,
+      reuse, override, callback writes, zero/full-width final values,
+      and adjacent-word preservation. Public API smoke produced
+      [3,42,4294967295]. ARM match preserves branches, reload, slot +8,
+      callback and final store; LLVM uses BLX for the stock getter.
   - address: 0x08043b28
     ghidra: FUN_08043b28
     name: crypto_lock_needs_acquire
