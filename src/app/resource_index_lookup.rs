@@ -191,6 +191,43 @@ pub unsafe extern "C" fn resource_index_lookup(
     lookup_indirect_key(index, key_lo, key_hi)
 }
 
+/// Resource entry value — original `FUN_08051394` @ `0x08051394`.
+///
+/// True extent: `[0x08051394, 0x080513bc)`, 40 bytes; the next function
+/// starts with `cmp r0,#0`. Whole-image raw A32 decoding verifies two
+/// plain inbound BLs (0x080ca428, 0x080d1c10), no predicated inbound BLs,
+/// and one plain outbound BL to resource_index_lookup, no predicated BLs.
+/// Load context's index at target +0xf9c, return zero if absent, otherwise
+/// resolve entry and return the record's +0x0c word or zero on a miss.
+/// Ghidra omits entry: the raw body preserves incoming r1 for the lookup.
+///
+/// Deliberate deviations: reuse the existing Rust lookup, with no new seam.
+/// The existing repr(C) context widens its pointer on hosts; ARM keeps
+/// the firmware offsets. No target behavioral deviations.
+///
+/// # Safety
+/// `context` must be readable through its resource_index field. When that
+/// index is nonnull, `entry` and index must satisfy resource_index_lookup's
+/// contract, and a returned record must be readable through its value.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.resource_entry_value")]
+pub unsafe extern "C" fn resource_entry_value(
+    context: *const super::resource_reference_value::ResourceReferenceContext,
+    entry: *mut ResourceIndexEntry,
+) -> u32 {
+    let index = core::ptr::addr_of!((*context).resource_index).read();
+    if index.is_null() {
+        return 0;
+    }
+    let record = resource_index_lookup(index, entry);
+    if record.is_null() {
+        0
+    } else {
+        core::ptr::addr_of!((*record).value).read()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -382,6 +419,47 @@ mod tests {
         assert!(record.is_null());
         unsafe {
             assert_eq!(DIRECT_CALL.map(|call| call.1), Some(7));
+        }
+    }
+
+    #[test]
+    fn entry_value_absent_index_does_not_touch_entry() {
+        let context = unsafe { core::mem::zeroed() };
+        assert_eq!(unsafe { resource_entry_value(&context, 1usize as *mut ResourceIndexEntry) }, 0);
+    }
+
+    #[test]
+    fn entry_value_rejected_entry_and_search_miss_return_zero() {
+        let mut bench = bench();
+        let mut index: ResourceIndex = unsafe { core::mem::zeroed() };
+        let mut context: super::super::resource_reference_value::ResourceReferenceContext =
+            unsafe { core::mem::zeroed() };
+        context.resource_index = &mut index;
+        assert_eq!(unsafe { resource_entry_value(&context, core::ptr::null_mut()) }, 0);
+        bench.entry.owner_element = bench.tdat.as_ptr().cast();
+        bench.entry.direct_key = 7;
+        assert_eq!(unsafe { resource_entry_value(&context, &mut bench.entry) }, 0);
+    }
+
+    #[test]
+    fn entry_value_reads_record_word_for_both_key_paths() {
+        let mut bench = bench();
+        let mut index: ResourceIndex = unsafe { core::mem::zeroed() };
+        let mut context: super::super::resource_reference_value::ResourceReferenceContext =
+            unsafe { core::mem::zeroed() };
+        context.resource_index = &mut index;
+        bench.entry.owner_element = bench.tdat.as_ptr().cast();
+        let mut record: ResourceIndexRecord = unsafe { core::mem::zeroed() };
+        unsafe {
+            DIRECT_RECORD = &mut record;
+            INDIRECT_RECORD = &mut record;
+        }
+        for key in [0, 7] {
+            bench.entry.direct_key = key;
+            for value in [0, 1, 0x8000_0000, 0xffff_ffff, 0x1234_5678] {
+                record.value = value;
+                assert_eq!(unsafe { resource_entry_value(&context, &mut bench.entry) }, value);
+            }
         }
     }
 }

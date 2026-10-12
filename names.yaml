@@ -248938,3 +248938,40 @@ functions:
       frame instructions before the tail branch. The archive relocation
       is R_ARM_JUMP24 board_version, preserving the original dispatch;
       match.py displays the unresolved branch as a self-reference.
+
+  - address: 0x08051394
+    ghidra: FUN_08051394
+    name: resource_entry_value
+    size: 40
+    sig: "uint32_t resource_entry_value(const ResourceReferenceContext *context, ResourceIndexEntry *entry)"
+    module: app/resource_index_lookup
+    status: ported
+    renames:
+      param_1/r0: context
+      r1: entry
+      "context+0xf9c": resource_index
+      "record+0x0c": value
+      FUN_080506bc: resource_index_lookup
+    notes: >-
+      Raw A32 words establish [0x08051394,0x080513bc), 40 bytes, with
+      the next independent function opening with cmp r0,#0. Whole-image
+      aligned immediate BL decoding finds two plain inbound calls at
+      0x080ca428 and 0x080d1c10, zero predicated inbound calls, one plain
+      outbound call at 0x080513a4 to 0x080506bc, and zero predicated
+      outbound calls. Ghidra omits the second argument: r1 is untouched
+      before the lookup, and both callers supply their entry in r1.
+      Load context's resource index at +0xf9c, return zero if absent,
+      otherwise call the existing ported resource_index_lookup and return
+      its record's +0x0c value, or zero for a missing record. No new seam
+      or target semantic deviations. Existing repr(C) context fields
+      widen pointers on hosts while preserving ARM offsets. Tests cover
+      absent index without entry access, rejected entry, failed search,
+      both key paths, zero values and high-bit/full-width values.
+      Host suite passed 15666 tests; ARM release build succeeded.
+      Standalone host smoke exercised absent-index and rejected-entry
+      paths through the actual Rust bodies; host library required cfg(test)
+      because unrelated host non-test symbols are missing. No device run.
+      match.py exited 1 with a reviewed structural diff: 10 stock versus
+      11 Rust instructions. LLVM adds frame setup and uses r4 for the
+      zero result; +0xf9c load, null checks, one lookup BL and conditional
+      +0x0c load remain. R_ARM_CALL at +0x18 resolves to resource_index_lookup.
