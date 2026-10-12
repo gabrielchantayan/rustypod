@@ -248317,3 +248317,41 @@ functions:
       1: six original versus thirteen Rust instructions; LLVM adds frame
       setup and explicit zero return while retaining both selector tail
       branches and the container gate. No device execution.
+
+  - address: 0x08052b04
+    ghidra: FUN_08052b04
+    name: ui_backend_plst_item_counted_string
+    size: 148
+    sig: "i32 ui_backend_plst_item_counted_string(const u8 *object, i32 index, u16 *counted)"
+    module: ui/plst_counted_string
+    status: ported
+    renames:
+      param_1/r0: object
+      param_2/r1/r6: index
+      param_3/r2/r7: counted
+      r4: backend
+      r5: linked_plst
+      FUN_08051dc4: object_backend_for_kind
+      FUN_0805c220: tdat_element_addref_counters
+      FUN_08052728: ui_plst_slot_item_at
+      tail_080bd8bc: string_pool_read_counted
+    notes: >-
+      Raw A32 establishes [0x08052b04,0x08052b98), 148 bytes including
+      the -65536 literal at 0x08052b94. Next real function begins with push.
+      Three plain outbound BLs, no predicated BLs; conditional BNE tail
+      to 0x080bd8bc. Two plain inbound BLs at 0x081158a8 and 0x0813d694,
+      no predicated inbound BLs. Ghidra's 144-byte extent and absorbed
+      string_pool_read call are incorrect. Clear count before backend
+      resolution and signed range validation against linked plst +0xf58;
+      acquire tdat +0xf60 counters before selector-1 non-reversed lookup.
+      Missing item returns -65536. Read record +0x28 string ID through
+      tdat +0xc0 pool, preserving status and counted UTF-16 output.
+      NULL output remains invalid: stock writes before checking it.
+      Reuse canonical Rust callees; zero dead incoming reader length.
+      Host edge tests and full suite pass (15636 tests); standalone actual
+      source smoke verifies invalid-index count clearing and payload guard.
+      ARM build-std release succeeds. match.py exits 1: 36 original versus
+      39 Rust instructions (tool uses Ghidra's code-only 144-byte extent).
+      LLVM retains three calls and the reader tail branch, uses explicit
+      branches instead of predicated loads, and materializes -65536 without
+      a literal. No device execution.

@@ -14,6 +14,127 @@ use super::plst_class_check::ui_element_is_plst_class;
 use super::plst_linked_item_count::ui_plst_linked_item_count;
 use super::plst_slot_item::ui_plst_slot_item_at;
 
+/// ui_backend_plst_item_counted_string — retailOS `FUN_08052b04` @
+/// `0x08052b04`; 148 bytes including the -65536 literal at 0x08052b94,
+/// ending at the next real function's push at 0x08052b98.
+/// Raw ARM verifies three plain outbound BLs, zero predicated BLs, and a
+/// conditional tail branch to string_pool_read_counted at 0x080bd8bc.
+/// Two inbound plain BLs at 0x081158a8 and 0x0813d694; none predicated.
+///
+/// Clear the output count, resolve the object backend, and range-check the
+/// signed index against backend +0xf58's linked plst header count. Acquire
+/// backend +0xf60's tdat counters before fetching selector 1's item. Missing
+/// items return -65536; otherwise read record +0x28's string ID from the
+/// tdat pool at +0xc0, preserving reader status and its counted UTF-16 output.
+///
+/// Deliberate deviations: use existing Rust callees and pass zero for the
+/// tail reader's dead incoming r3 (the reader always clears byte length).
+/// NULL output is outside the safety contract: stock stores through it
+/// before its ineffective NULL check. Target pointer fields remain u32.
+///
+/// # Safety
+/// `counted` must hold a writable count plus 255 UTF-16 units. `object`
+/// must resolve to a readable backend through +0xf60. A non-NULL plst link
+/// requires its header at +0x40. Valid indices require complete plst slot,
+/// item/record links, and a tdat object valid for counter acquisition and
+/// its inline StringPool.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn ui_backend_plst_item_counted_string(
+    object: *const u8, index: i32, counted: *mut u16,
+) -> i32 {
+    counted.write(0);
+    let backend = super::object_state::object_backend_for_kind(object);
+    let element = backend.add(0xf58).cast::<u32>().read() as usize as *mut u8;
+    let count = if element.is_null() {
+        0
+    } else {
+        let header = element.add(0x40).cast::<u32>().read() as usize as *const u8;
+        header.add(0x2e).cast::<u16>().read() as u32
+    };
+    if index < 0 || index as u32 >= count {
+        return PARAM_ERR;
+    }
+    let tdat = backend.add(0xf60).cast::<u32>().read() as usize as *mut u8;
+    super::tdat_counter_addrefs::tdat_element_addref_counters(tdat);
+    let item = ui_plst_slot_item_at(element, 1, 0, index as u32) as usize as *const u8;
+    if item.is_null() {
+        return -65536;
+    }
+    let record = item.add(0x20).cast::<u32>().read() as usize as *const u8;
+    let entry_id = record.add(0x28).cast::<i32>().read();
+    let tdat = backend.add(0xf60).cast::<u32>().read() as usize as *mut u8;
+    string_pool_read_counted(tdat.add(0xc0).cast::<StringPool>(), entry_id, counted, 0)
+}
+
+#[cfg(test)]
+mod backend_item_tests {
+    use super::*;
+    use crate::testing::{hints, try_map_u32_slab, note_missing_u32_fixture};
+    use crate::util::string_pool::PoolEntry;
+
+    #[test]
+    fn clears_invalid_indices_acquires_before_missing_item_and_reads_counted_data() {
+        unsafe {
+            let Some(backend) = try_map_u32_slab(hints::BACKEND_PLST_ITEM_COUNTED_STRING, 0x6000) else {
+                assert!(note_missing_u32_fixture("ui/backend_plst_item_counted_string"));
+                return;
+            };
+            ptr::write_bytes(backend, 0, 0x6000);
+            backend.write(1);
+            let mut output = [0xa55au16; 257];
+            for index in [-1, 0, i32::MAX] {
+                output[0] = 0xa55a;
+                assert_eq!(ui_backend_plst_item_counted_string(backend, index, output.as_mut_ptr()), -50);
+                assert_eq!(output[0], 0);
+                assert_eq!(output[1], 0xa55a);
+            }
+            let element = backend.add(0x1000);
+            let header = backend.add(0x2000);
+            let slot = backend.add(0x3000);
+            let item = backend.add(0x4000);
+            let record = backend.add(0x4100);
+            let tdat = backend.add(0x5000);
+            backend.add(0xf58).cast::<u32>().write(element as usize as u32);
+            backend.add(0xf60).cast::<u32>().write(tdat as usize as u32);
+            element.add(4).cast::<u32>().write(0x706c7374);
+            element.add(0x40).cast::<u32>().write(header as usize as u32);
+            header.add(0x2e).cast::<u16>().write(2);
+            element.add(0x3b0).cast::<u32>().write(slot as usize as u32);
+            slot.add(0x14).cast::<u32>().write(item as usize as u32);
+            item.add(0x20).cast::<u32>().write(record as usize as u32);
+            record.add(0x28).cast::<i32>().write(1);
+            tdat.add(4).cast::<u32>().write(0x74646174);
+            let pool = tdat.add(0xc0).cast::<StringPool>();
+            pool.write(core::mem::MaybeUninit::zeroed().assume_init());
+            (*pool).tag = 0x73747263;
+            tdat.add(0xf0).cast::<u32>().write(7);
+            assert_eq!(ui_backend_plst_item_counted_string(backend, 2, output.as_mut_ptr()), -50);
+            assert_eq!(tdat.add(0xf0).cast::<u32>().read(), 7);
+            assert_eq!(ui_backend_plst_item_counted_string(backend, 0, output.as_mut_ptr()), -65536);
+            assert_eq!(tdat.add(0xf0).cast::<u32>().read(), 8);
+            assert_eq!(output[0], 0);
+            assert_eq!(output[1], 0xa55a);
+            (*pool).entry_count = 1;
+            let mut entry = PoolEntry { blob_offset: 0, length: 5 };
+            let mut entries = &mut entry as *mut PoolEntry;
+            let mut bytes = [0x41u8, 0, 0x42, 0, 0x7f];
+            let mut payload = bytes.as_mut_ptr();
+            (*pool).entries = &mut entries;
+            (*pool).payload = &mut payload;
+            assert_eq!(ui_backend_plst_item_counted_string(backend, 1, output.as_mut_ptr()), 0);
+            assert_eq!(&output[..4], &[2, 0x41, 0x42, 0xa57f]);
+            assert_eq!(output[256], 0xa55a);
+            record.add(0x28).cast::<i32>().write(2);
+            assert_eq!(ui_backend_plst_item_counted_string(backend, 1, output.as_mut_ptr()), -50);
+            assert_eq!(output[0], 0);
+            record.add(0x28).cast::<i32>().write(0);
+            assert_eq!(ui_backend_plst_item_counted_string(backend, 1, output.as_mut_ptr()), 0);
+            assert_eq!(output[0], 0);
+        }
+    }
+}
+
 /// ui_plst_linked_item_counted_string — retailOS `FUN_08053170` @
 /// `0x08053170`; 120 bytes through the error literal at `0x080531e4`,
 /// followed by the next real function's push at `0x080531e8`.
