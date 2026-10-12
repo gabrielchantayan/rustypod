@@ -251513,3 +251513,40 @@ functions:
       a tail B for attachment, preserving the null branch and argument
       moves. Objdump relocation R_ARM_JUMP24 at Rust +0x3c confirms the
       tail branch targets attach_matching_descriptor, not itself.
+  - address: 0x0803bea0
+    ghidra: FUN_0803bea0
+    name: descriptor_apply_counted_string
+    size: 104
+    sig: "int descriptor_apply_counted_string(u32 *context, const u8 *key, const u16 *counted, u32 value)"
+    module: app/descriptor_apply_counted_string
+    status: ported
+    renames:
+      param_1/r0/r5: context
+      param_2/r1: key
+      param_3/r2/r7: counted
+      param_4/r3/r6: value
+      iVar1/r4: link
+      context_plus_0xf50: descriptor_owner
+      link_plus_0x20: descriptor
+      descriptor_plus_0x5c: value
+    notes: >-
+      Raw words establish [0x0803bea0,0x0803bf08), 104 bytes without
+      literals, ending before the next independent PUSH. Whole-image aligned
+      BL decoding finds two plain inbound calls at 0x081a3d5c and 0x081a4414,
+      no predicated inbound calls; three plain outbound calls at 0x0803becc,
+      0x0803bed8, and 0x0803bef4, no predicated outbound calls.
+      Reject NULL key or NULL owner at context+0xf50 with -50. Call existing
+      lookup_and_attach_descriptor with NULL context and option zero, then
+      ensure_object_packed_field_is_one using the outer context as selector,
+      ignoring its result. The ensure call precedes the NULL-link check and
+      dereferences its object: failed lookup is not a safely returning path.
+      Write value to descriptor+0x5c, call plst_apply_counted_string, return
+      zero for zero status and -20 otherwise. All three callees reuse ports;
+      no new retail seams or extra guards. Host edge tests exercise rejection,
+      status collapse, neighbouring-word preservation, selector masking and
+      packed-field transitions. Standalone actual-source exported rejection
+      smoke passed. Host suite passed 15795 tests; ARM release build passed.
+      match.py exits 1: LLVM emits 30 instructions versus 26, retaining
+      early rejection, all three calls, the post-ensure NULL check, the
+      +0x20 load/+0x5c write and zero/nonzero status collapse. Differences
+      are register allocation, frame pointer and conditional return layout.
