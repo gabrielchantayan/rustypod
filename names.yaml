@@ -250145,3 +250145,31 @@ functions:
       structural diff: 19 stock versus 28 Rust instructions; equivalent
       error/termination gate, relocated inline-release BL, extra frame
       setup, and a literal-address overflow tail BX instead of a BL.
+
+  - address: 0x08047cc8
+    ghidra: thunk_FUN_08057958
+    name: leaf_tag_mask_veneer
+    size: 4
+    sig: "u64 leaf_tag_mask_veneer(u32 tag)"
+    module: app/leaf_tag_mask_veneer
+    status: ported
+    vars:
+      param_1: tag
+    notes: >-
+      Raw word ea003f22 is an unconditional tail B to the verified
+      leaf_tag_mask target 0x08057958. Next real entry 0x08047ccc
+      establishes the four-byte extent. Whole-image aligned A32
+      BL-immediate decoding finds two inbound plain BLs at 0x080df40c
+      and 0x080e5b58, zero predicated inbound BLs, and zero outgoing
+      BLs. Both callers consume the r0/r1 mask. Pass the tag unchanged
+      through the existing stock-call seam in opaque_collection_mask;
+      the canonical mapper remains unported, with its existing
+      raw-verified host backend. No new callee identity or mapping.
+      Host tests cover sparse tags, low/high mask words, dispatch bounds,
+      and unsigned extremes. Full x86_64 host suite and ARM build-std
+      release pass. Actual-source host consumer smoke unions tags
+      2, 24, 69 and UINT32_MAX into 0x0080000100000001.
+      match.py exits 1: original direct B becomes an LLVM frame
+      push/mov, literal load, frame pop and tail BX through 0x08057958,
+      followed by the literal word. The veneer retains its own symbol;
+      no intentional fold. No target behavioral deviations.
