@@ -46749,6 +46749,33 @@ functions:
       more specific upstream representation, so the operation-based name
       is intentional. All adds wrap modulo 2^32.
 
+  - address: 0x08044a9c
+    ghidra: FUN_08044a9c
+    name: ft_validate_combined_size
+    size: 108
+    sig: "i32 ft_validate_combined_size(const u8 *const *context_slot, const u8 *record, const u8 *payload, u32 additional_size)"
+    module: ft/size_validation
+    vars: {param_1: context_slot, param_2: record, param_3: payload, param_4: additional_size, iVar4: context, uVar2: combined}
+    status: ported
+    notes: >-
+      Raw ARM establishes 104 instruction bytes plus the 0x302 literal at
+      0x08044b04; next real function begins at 0x08044b08 (108-byte extent).
+      One outgoing plain BL to existing ft_round_add_clear_bit16 at
+      0x08044200, zero predicated BLs; two incoming plain BLs at 0x0804114c
+      and 0x08041b04. Null slot returns -50, null context returns 0x302
+      before checking record/payload, and either remaining null returns -50.
+      Context flag bit 1 at +0x30 selects record's byte plus 1 or unsigned
+      halfword plus 2 at +0x1c; clears bit 16, rounds/adds with the existing
+      helper, and returns 0x23 if the unsigned result exceeds context's
+      halfword at +0x1c divided by two, otherwise zero. Payload is never
+      dereferenced. Native pointer slots permit host tests without changing
+      target ABI; opaque records retain fixed aligned target byte offsets.
+      No upstream API identity is assumed and no arithmetic deviations made.
+      ARM match review: LLVM inlines the arithmetic helper and narrows the
+      flags read to a byte; unsigned comparison and bit-clearing arithmetic
+      are preserved. Host tests cover null precedence, both widths, capacity
+      boundaries, wrapping additions, and non-interference.
+
   - address: 0x080489fc
     ghidra: FUN_080489fc
     name: plst_task_delete

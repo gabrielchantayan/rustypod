@@ -71,6 +71,7 @@ pub mod stream_read_capped;
 pub mod stream_skip;
 pub mod system;
 pub mod selection;
+pub mod size_validation;
 pub mod sfnt;
 pub mod post_names;
 pub mod sbit_decoder;
