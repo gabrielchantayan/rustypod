@@ -55370,8 +55370,9 @@ functions:
       string to the firmware logger (0x0802f654 with the context word
       0x08b1c9dc from the literal @ 0x0804d1a4), then terminates the
       record via 0x08050f80. Busiest FreeType routine in the image:
-      359 bl + 7 b call sites, binary-scanned. Neither logger routine
-      is ported, so the port reproduces the CONTRACT - it tail-calls an
+      359 bl + 7 b call sites, binary-scanned. The formatter remains
+      unported; the record finalizer is a ported empty leaf. The port
+      reproduces the CONTRACT - it tail-calls an
       installable FtTraceSink (ft_set_trace_sink, an ADDITION) and
       discards the message when none is installed, which is what retail
       hardware observes anyway. Second deviation - the port takes the
@@ -249000,3 +249001,34 @@ functions:
       11 Rust instructions. LLVM adds frame setup and uses r4 for the
       zero result; +0xf9c load, null checks, one lookup BL and conditional
       +0x0c load remain. R_ARM_CALL at +0x18 resolves to resource_index_lookup.
+
+  - address: 0x08050f80
+    ghidra: FUN_08050f80
+    name: retail_log_record_finish
+    size: 4
+    sig: "u8 *retail_log_record_finish(u8 *context)"
+    module: ft/trace
+    status: ported
+    vars: {r0: context}
+    notes: >-
+      Raw word e12fff1e is bx lr; true extent is [0x08050f80,0x08050f84),
+      followed by an independent push prologue. Whole-image aligned A32
+      BL decoding verifies two unconditional inbound calls at 0x0804d198
+      and 0x0804e16c, zero predicated inbound calls, and zero outbound
+      calls. No aligned firmware word references this address as data.
+      Callers reload logger contexts 0x08b1c9dc and 0x08b1e9dc after
+      formatting, then ignore the return. This is an empty logger record
+      finalizer, not a destructor, veneer, flush operation, or dispatch.
+      Ghidra lists additional callers not present in the raw BL scan;
+      raw bytes establish the actual BL callers and extent. Return the context
+      explicitly to preserve untouched r0 despite Ghidra's void signature.
+      Host suite and ARM release build passed. Standalone host smoke
+      preserved pointer bits and record storage. LLVM folds the exported
+      alias into context_scope_drop; objdump's symbol table confirms the
+      alias in .text.context_scope_drop, size 12. match.py cannot find the
+      alias label; matching the shared body shows push {fp,lr}, mov fp,sp,
+      pop {fp,pc} versus stock bx lr, preserving r0 with frame overhead.
+      This fold is intentional; no artificial work is added to prevent it.
+      Native host pointers widen; no target behavioral deviations. Exported
+      with inline(never); host tests cover null, unaligned, high-bit and
+      all-one pointer bits plus unchanged record storage.
