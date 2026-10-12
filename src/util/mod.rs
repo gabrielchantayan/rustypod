@@ -570,3 +570,4 @@ pub mod masked_djb2_hash;
 pub mod payload_counter_decrement;
 pub mod payload_counter_increment;
 pub mod initialize_zero_word;
+pub mod object_counter_adjust_touch;
