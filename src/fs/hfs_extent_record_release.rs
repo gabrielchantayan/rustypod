@@ -6,9 +6,8 @@
 //! Clear both outputs, then release up to eight extents for signature 0x482b
 //! at volume+2, otherwise three. Stop at a zero length and mark termination;
 //! propagate the first error without counting its extent. Successful lengths
-//! accumulate modulo 2^32. The verified 0x08042658 bitmap-range release remains
-//! firmware-owned (it also updates volume+0x168 and the volume flags).
-//! No target behavior deviations; host builds install a test-only release seam.
+//! accumulate modulo 2^32. Allocation-range release uses the Rust wrapper.
+//! No target behavior deviations; host builds substitute firmware bitmap clear.
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -17,19 +16,7 @@ pub struct AllocationExtent {
     pub block_count: u32,
 }
 
-#[inline(always)]
-unsafe fn release_range(volume: *mut u8, start: u32, count: u32) -> u32 {
-    #[cfg(target_os = "none")]
-    {
-        let release: unsafe extern "C" fn(*mut u8, u32, u32) -> u32 =
-            core::mem::transmute(0x0804_2658usize);
-        release(volume, start, count)
-    }
-    #[cfg(all(not(target_os = "none"), test))]
-    { tests::release_range(volume, start, count) }
-    #[cfg(all(not(target_os = "none"), not(test)))]
-    { let _ = (volume, start, count); panic!("requires firmware allocation-range release") }
-}
+use super::hfs_allocation_range_release::hfs_allocation_range_release;
 
 /// Release a target-width extent record, returning the firmware status.
 ///
@@ -57,7 +44,7 @@ pub unsafe extern "C" fn hfs_extent_record_release(
             return 0;
         }
         let start = core::ptr::addr_of!((*extent).start_block).read();
-        let status = release_range(volume, start, count);
+        let status = hfs_allocation_range_release(volume, start, count);
         if status != 0 { return status; }
         released_blocks.write(released_blocks.read().wrapping_add(count));
     }
@@ -83,17 +70,15 @@ mod tests {
 
     pub(super) fn configure_failure(index: usize, status: u32) {
         STATE.with(|state| *state.borrow_mut() = (Vec::new(), index, status));
+        super::super::hfs_allocation_range_release::set_test_clear(release_range);
     }
 
-    pub unsafe fn release_range(volume: *mut u8, start: u32, count: u32) -> u32 {
+    pub unsafe fn release_range(_volume: *mut u8, start: u32, count: u32) -> u32 {
         STATE.with(|state| {
             let mut state = state.borrow_mut();
             let index = state.0.len();
             state.0.push((start, count));
             if index == state.1 { return state.2; }
-            // Model the real callee's successful free-block accounting.
-            let free = volume.add(0x168).cast::<u32>();
-            free.write(free.read().wrapping_add(count));
             0
         })
     }
@@ -117,6 +102,7 @@ mod tests {
                     if stop < limit && !error { extents[stop].block_count = 0; }
                     STATE.with(|state| *state.borrow_mut() = (Vec::new(),
                         if error { stop } else { usize::MAX }, 0x8000_001f));
+                    super::super::hfs_allocation_range_release::set_test_clear(release_range);
                     let mut total = 0xa5a5_a5a5;
                     let mut marker = [0x55, 0x66, 0x77];
                     let result = unsafe { hfs_extent_record_release(volume_ptr,
