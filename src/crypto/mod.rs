@@ -113,6 +113,7 @@ pub mod digest_init;
 pub mod hmac_digest_20;
 pub mod hmac_finalize;
 pub mod digest_update_u32;
+pub mod digest_verify_and_release;
 pub mod evp_digest_init_ex;
 pub mod evp_digest;
 pub mod evp_digest_final_ex;

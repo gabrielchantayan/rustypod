@@ -68318,6 +68318,48 @@ functions:
       existing identified thunk at 0x081bb29c. No guessed controller
       identity, partial Rust body, zeroing fallback, or new callee
       seam is introduced.
+  - address: 0x0803c1cc
+    ghidra: FUN_0803c1cc
+    name: digest_verify_and_release
+    size: 152
+    sig: "int32_t digest_verify_and_release(void *context, const uint8_t *expected, uint32_t len)"
+    module: crypto/digest_verify_and_release
+    status: ported
+    args:
+      r0: context
+      r1: expected
+      r2: len
+    locals:
+      r8: inverse_scale_a
+      r5: inverse_scale_b
+      r7: encoded_length
+      r11: return_state
+    notes: >-
+      Raw extent [0x0803c1cc,0x0803c264) contains 136 instruction bytes
+      and 16 literal bytes, ending before the next PUSH. One outbound
+      plain BL at 0x0803c238 to 0x08392dbc, zero predicated outbound BLs.
+      Whole-image ARM word decoding finds one inbound BL at 0x08097d34
+      and one inbound BLNE at 0x08097d98. Ghidra's size excludes the pool
+      and its fourth argument is not read by either wrapper or worker.
+      Initial state 0x2d133efe installs the arguments; base 0x2d133efd
+      invokes the worker; base+2 returns. Constants 0xaf777bff and
+      0x0c7883ff are inverse modulo 2^32, so length and signed result
+      pass through exactly. Rust removes this opaque state machine and
+      wrapping multiplications, retaining a volatile fixed-address seam
+      to the unported three-argument worker. No canonical names.yaml
+      entry exists for that callee. Its raw code checks non-null pointers
+      and length 20, compares a finalized 20-byte digest, overwrites the
+      0x5c-byte context with 0x42 and releases it. Host contract-model
+      tests cover invalid and overflowing lengths, null arguments,
+      matching and endpoint-mismatching digests, context consumption and
+      exact signed status boundaries; they do not port the worker.
+      A standalone host smoke matched 100,000 pseudorandom length/status
+      pairs against the raw-literal state machine (effective length,
+      status and call count). Host cargo tests and the release ARM build
+      passed. match.py reports the intentional reduction from 34 original
+      instructions to seven Rust instructions, using a tail dispatch
+      through the worker seam instead of the original BL. No device run.
+
   - address: 0x0803c264
     ghidra: FUN_0803c264
     name: default_playback_node_start
