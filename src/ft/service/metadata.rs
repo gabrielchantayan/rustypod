@@ -40,6 +40,57 @@ pub const METADATA_SIGNED_BYTE_B43_OFFSET: usize = 0xb43;
 /// Byte offset of this unsigned word in the metadata block.
 pub const METADATA_WORD_AF8_OFFSET: usize = 0xaf8;
 
+/// ft_service_metadata_byte_at_b4c — original: `FUN_08052328` @
+/// `0x08052328` (12 bytes; two plain inbound BLs at 0x08172f38 and
+/// 0x08172f4c, zero predicated inbound BLs, zero outgoing BLs).
+///
+/// Raw words `e5900f00 e5d00b4c e12fff1e` establish the true extent
+/// [0x08052328, 0x08052334); the next function tail-branches to 0x080b4444.
+/// Follow the aligned pointer at service_context+0xf00 and zero-extend
+/// metadata byte +0xb4c. The caller compares/caches it at caller+0x57;
+/// its higher-level meaning is unrecovered.
+/// Deliberate deviations: native-width host pointers, four-byte ARM pointers;
+/// no additional NULL or bounds checks.
+///
+/// # Safety
+/// `service_context` must contain an aligned readable metadata pointer at
+/// +0xf00, whose pointee is readable through +0xb4c.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn ft_service_metadata_byte_at_b4c(
+    service_context: *const u8,
+) -> u32 {
+    let metadata = (service_context.add(SERVICE_CONTEXT_METADATA_OFFSET) as *const *const u8).read();
+    metadata.add(0xb4c).read() as u32
+}
+
+#[cfg(test)]
+mod byte_b4c_tests {
+    use super::*;
+
+    #[test]
+    fn unsigned_byte_values_and_live_pointer_replacement() {
+        let mut owner = [0usize; 0xf00 / core::mem::size_of::<usize>() + 1];
+        let mut metadata = [0xa5u8; 0xb4d];
+        let mut replacement = [0x5au8; 0xb4d];
+        let context = owner.as_mut_ptr().cast::<u8>();
+        unsafe {
+            context.add(0xf00).cast::<*const u8>().write(metadata.as_ptr());
+            for value in 0..=255u8 {
+                metadata[0xb4c] = value;
+                assert_eq!(ft_service_metadata_byte_at_b4c(context), value as u32);
+            }
+            replacement[0xb4c] = 0x80;
+            context.add(0xf00).cast::<*const u8>().write(replacement.as_ptr());
+            assert_eq!(ft_service_metadata_byte_at_b4c(context), 128);
+            context.add(0xf00).cast::<*const u8>().write(metadata.as_ptr());
+            assert_eq!(ft_service_metadata_byte_at_b4c(context), 255);
+        }
+        assert!(metadata[..0xb4c].iter().all(|byte| *byte == 0xa5));
+        assert!(replacement[..0xb4c].iter().all(|byte| *byte == 0x5a));
+    }
+}
+
 /// ft_service_metadata_action — original: `FUN_08054de0` @ `0x08054de0`.
 ///
 /// True size 40 bytes, [0x08054de0, 0x08054e08), ending at the independent
