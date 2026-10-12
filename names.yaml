@@ -16,6 +16,27 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08051e0c
+    ghidra: FUN_08051e0c
+    name: current_calendar_unix_seconds
+    size: 36
+    sig: "i32 current_calendar_unix_seconds(void)"
+    module: time/current_datetime
+    status: ported
+    vars: {uStack_10: datetime, iVar1: current_status, return/r0: unix_seconds}
+    renames:
+      FUN_0808e9e0: current_datetime_to_normalized_record
+      FUN_08093c38: datetime_to_unix_seconds
+    notes: >-
+      Raw words prove the 36-byte extent ends at the independent constant
+      getter at 0x08051e30. Two unconditional outgoing BLs, no predicated
+      BLs; two plain incoming BLs at 0x08236684 and 0x082366c0. Queries the
+      normalized current calendar and converts it to a Unix timestamp on
+      nonzero status, returning zero otherwise. Ghidra's void signature
+      loses the live r0 return passed directly to the next call at 0x08236688.
+      Omit dead incoming arguments and the timestamp converter's dead r1=1;
+      initialize ignored padding and retain the status branch via volatile
+      read. Reuse both existing ports without adding a seam.
   - address: 0x08051e30
     ghidra: FUN_08051e30
     name: settings_scale_midpoint

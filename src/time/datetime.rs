@@ -258,14 +258,14 @@ pub unsafe extern "C" fn datetime_to_unix_seconds(dt: *mut DateTime) -> i32 {
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     extern crate std;
     use super::*;
     use core::ptr;
     use std::sync::Mutex;
 
     /// Serializes tests that replace the shared floor pointer.
-    static FLOOR_LOCK: Mutex<()> = Mutex::new(());
+    pub(in crate::time) static FLOOR_LOCK: Mutex<()> = Mutex::new(());
 
     /// The floor the host tests stand in for the unreadable record @
     /// 0x083e2e3e. Its value is a test fixture only — the port never
