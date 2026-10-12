@@ -16,6 +16,31 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08053228
+    ghidra: FUN_08053228
+    name: owner_pair_vector_word_at
+    size: 68
+    sig: "i32 owner_pair_vector_word_at(const PairVectorOwner *owner, i32 index, u32 *output)"
+    module: app/owner_pair_vector_word_at
+    status: ported
+    vars: {param_1: owner, param_2: index, param_3: output, uVar1: record_count}
+    notes: >-
+      Raw A32 words establish extent [0x08053228,0x0805326c), ending
+      before the next independent push prologue. Two incoming plain BLs
+      at 0x08066954 and 0x0813bd84, zero predicated incoming BLs; one
+      outgoing plain BL at 0x08053248 to vector_size_elem8 at 0x083d7664,
+      zero predicated outgoing BLs. Reuse the existing verified Rust callee.
+      Reject null output and negative index before touching owner; compare
+      index unsigned against the arithmetic-shift size of the vector at
+      +0xee0, then copy only the first word of its eight-byte record.
+      Success returns zero; rejection returns -50 without writing output.
+      Callers cache the word at +0xe2c or return it with zero on failure;
+      finer record identity remains unknown. Native-width repr(C) bounds
+      on hosts preserve target +0xee0/+0xee4 fields on ARM. Tests cover
+      early rejection, empty/partial bounds, stride, high-bit values, zero,
+      unsigned reversed bounds and output aliasing. Host suite: 15632 pass;
+      ARM release build passes. match.py exits 1: 17 versus 20 instructions,
+      same +0xee0 access, BL, unsigned bound check, lsl #3 load and store.
   - address: 0x08053820
     ghidra: FUN_08053820
     name: controller_context_value
