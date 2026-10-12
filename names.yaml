@@ -250914,3 +250914,43 @@ functions:
       updates. Aligned loads, unsigned comparisons, wrapping recurrence,
       and r0 return remain intact. The exported symbol is present; no
       intentional fold or device execution.
+
+  - address: 0x080407a0
+    ghidra: FUN_080407a0
+    name: word_buffer_set_bit
+    size: 140
+    sig: "u32 word_buffer_set_bit(WordBuffer *buffer, i32 bit_index)"
+    module: heap/word_buffer
+    status: ported
+    renames:
+      param_1/r4: buffer
+      param_2/r1: bit_index
+      iVar1/r5: word_index
+      iVar4/r6: required
+      piVar2/r0: reserved_buffer
+      iVar3/r0: len
+      r7: bit_remainder
+    notes: >-
+      Raw ARM extent is 0x080407a0..0x0804082c, ending immediately
+      before the next real prologue. Full aligned raw-word BL decode finds
+      two unconditional incoming calls at 0x0803dff4 and 0x0803e108,
+      zero predicated incoming calls, and one unconditional outgoing BL
+      at 0x080407e4 to ported word_buffer_reserve 0x082b8174.
+      Signed division by 32 truncates toward zero. Compare length and
+      capacity as signed words, reserve word_index+1 if required, return
+      zero on failure, zero newly exposed words, publish length, and OR
+      one shifted by the signed remainder into the selected word.
+      ARM register LSL uses the low eight shift bits; negative remainders
+      produce a zero mask rather than a Rust masked shift. Negative exact
+      multiples still address preceding words. No deliberate deviations;
+      reuse the existing target-word header and reserve port, including
+      its existing unported allocation helper dependency.
+      Host tests cover word boundaries, gap initialization, idempotence,
+      negative remainders and offsets, allocation failure atomicity and
+      successful growth. Host suite and ARM release build pass.
+      Public API smoke sets bit 95, retaining the old word and guard,
+      clearing the gap, and publishing length 3. match.py exits 1:
+      35 original instructions versus 41 Rust instructions. LLVM adds a
+      frame pointer and explicit failure branch, retains signed division,
+      reserve call, zeroing loop and OR store, and suppresses the OR for
+      negative remainders. The exported symbol is present; no fold.
