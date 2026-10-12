@@ -106,6 +106,40 @@ fn abs_and_sign(x: i32) -> (u32, i32) {
     ((x ^ sign).wrapping_sub(sign) as u32, sign)
 }
 
+/// ft_sqrt_fixed (FreeType `FT_SqrtFixed`) — original: `FUN_0804ed54`
+/// @ 0x0804ed54 (72 bytes, next function @ 0x0804ed9c).
+///
+/// Two incoming plain BL sites (@ 0x080e2428 and 0x080e2450), zero
+/// predicated BL sites; no outgoing BLs, verified from raw ARM words.
+/// Returns zero for nonpositive signed 16.16 inputs. Otherwise extracts
+/// 24 root bits with restoring square root: consume the input's 16 bit
+/// pairs, then eight zero pairs for the fractional result. The result is
+/// floor(sqrt(value * 65536)), also in 16.16 format.
+///
+/// No behavioral deviations. Rust locals replace registers and the saved
+/// return address; all arithmetic fits u32, including the remainder.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub extern "C" fn ft_sqrt_fixed(value: i32) -> i32 {
+    if value <= 0 {
+        return 0;
+    }
+    let mut input = value as u32;
+    let mut remainder = 0u32;
+    let mut root = 0u32;
+    for _ in 0..24 {
+        remainder = (remainder << 2) | (input >> 30);
+        root <<= 1;
+        let trial = (root << 1) + 1;
+        if remainder >= trial {
+            remainder -= trial;
+            root += 1;
+        }
+        input <<= 2;
+    }
+    root as i32
+}
+
 /// ft_mulfix (FreeType `FT_MulFix`) — original: `FUN_0804d2cc`
 /// @ 0x0804d2cc (124 bytes).
 ///
@@ -383,6 +417,55 @@ pub unsafe extern "C" fn ft_matrix_invert(matrix: *mut FtMatrix) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Independent oracle: binary-search the integer root of the scaled
+    // radicand, rather than repeating the firmware's digit recurrence.
+    fn sqrt_fixed_ref(value: i32) -> i32 {
+        if value <= 0 {
+            return 0;
+        }
+        let radicand = (value as u64) << 16;
+        let (mut low, mut high) = (0u64, 1u64 << 24);
+        while low + 1 < high {
+            let mid = (low + high) >> 1;
+            if mid * mid <= radicand {
+                low = mid;
+            } else {
+                high = mid;
+            }
+        }
+        low as i32
+    }
+
+    #[test]
+    fn sqrt_fixed_signed_and_fractional_boundaries() {
+        for value in [i32::MIN, -65536, -1, 0] {
+            assert_eq!(ft_sqrt_fixed(value), 0);
+        }
+        assert_eq!(ft_sqrt_fixed(1), 256);
+        assert_eq!(ft_sqrt_fixed(0x4000), 0x8000);
+        assert_eq!(ft_sqrt_fixed(0x10000), 0x10000);
+        assert_eq!(ft_sqrt_fixed(0x40000), 0x20000);
+        for value in [2, 3, 0xffff, 0x10001, i32::MAX - 1, i32::MAX] {
+            assert_eq!(ft_sqrt_fixed(value), sqrt_fixed_ref(value));
+        }
+    }
+
+    #[test]
+    fn sqrt_fixed_square_transitions_and_full_range() {
+        for integer_root in 1..=181i32 {
+            let square = integer_root * integer_root * 65536;
+            for value in [square - 1, square, square + 1] {
+                assert_eq!(ft_sqrt_fixed(value), sqrt_fixed_ref(value));
+            }
+        }
+        let mut state = 0x45a9_31b7u32;
+        for _ in 0..10000 {
+            state = state.wrapping_mul(1664525).wrapping_add(1013904223);
+            let value = state as i32;
+            assert_eq!(ft_sqrt_fixed(value), sqrt_fixed_ref(value));
+        }
+    }
 
     /// Reference `FT_Add64`: exact 64-bit wrapping addition of the two
     /// {lo,hi} pairs.
