@@ -16,6 +16,35 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08052f24
+    ghidra: FUN_08052f24
+    name: object_resource_plst_counted_string
+    size: 80
+    sig: "i32 object_resource_plst_counted_string(const u8 *object, i32 index, u16 *counted)"
+    module: ui/object_resource_plst_counted_string
+    status: ported
+    renames:
+      param_1/r0: object
+      param_2/r1/r3: index
+      param_3/r2: counted
+      backend+0xf64: resource_table
+      backend+0xf68: resource_count
+      FUN_08051dc4: object_backend_for_kind
+      FUN_080544dc: plst_element_read_counted_string
+    notes: >-
+      Raw ARM proves the 80-byte extent ending at the next push at
+      0x08052f74. Two outbound plain BLs at 0x08052f34 and 0x08052f68,
+      zero predicated BLs. Full-image aligned decoding finds two inbound
+      plain BLs at 0x081156b0 and 0x08172504, zero predicated callers.
+      Clears output before kind-resolving the backend; rejects negative
+      index or index >= backend+0xf68 with -50. Selects a target-width
+      pointer from the +0xf64 resource table and calls the existing PLST
+      reader, then returns zero even for empty/foreign elements. NULL
+      output is invalid despite the later stock check. No observable
+      deviations for valid inputs. Host coverage includes self/proxy,
+      signed bounds, zero count, first/last entries, NULL/foreign elements,
+      and counted UTF-16 containing an embedded NUL.
+
   - address: 0x08053114
     ghidra: FUN_08053114
     name: ui_plst_linked_item_music_path
