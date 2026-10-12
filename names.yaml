@@ -16,6 +16,39 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08053114
+    ghidra: FUN_08053114
+    name: ui_plst_linked_item_music_path
+    size: 92
+    sig: "i32 ui_plst_linked_item_music_path(const u8 *owner, u32 index, u16 *output)"
+    module: ui/plst_music_path
+    status: ported
+    renames:
+      param_1/r0: owner
+      param_2/r1: index
+      param_3/r2/r4: output
+      iVar1: item
+    notes: >-
+      Raw A32 proves [0x08053114,0x08053170), 88 instruction bytes plus
+      the -65536 literal at 0x0805316c. Next real function starts with
+      push at 0x08053170. Two plain body BLs (0x08053134, 0x08053160),
+      zero predicated; two inbound plain BLs (0x081a31a8, 0x081a4c8c),
+      zero predicated, independently decoded image-wide. Reject NULL
+      output with -50 before reading owner. Fetch selector 1, reverse 0
+      from *(owner+0xf50) using ported ui_plst_slot_item_at. Missing item
+      returns -65536. Follow target-u32 item+0x20 to record and require
+      byte record+0x16 == 1, otherwise return -43. Errors preserve output.
+      Call ported music_path_resolve on record+0xc0, discard its status,
+      return zero. Explicit zero reserved/seed words replace unspecified
+      post-lookup caller-saved registers; the volume matcher writes its
+      digit before successful consumption. Tests cover NULL precedence,
+      absent item, unsigned boundaries, non-1 kinds, actual prefixed-path
+      construction, empty path, and unchanged tails. Full host tests and
+      ARM release build pass; temporary direct API smoke returned -50
+      without accessing NULL owner. match.py reviewed: 27 Rust versus
+      22 stock instructions, preserving two calls, offsets, three error
+      exits, and forced-zero success. LLVM adds a frame prologue and
+      materializes -65536 instead of loading the literal.
   - address: 0x08053170
     ghidra: FUN_08053170
     name: ui_plst_linked_item_counted_string

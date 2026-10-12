@@ -40,6 +40,7 @@ extern crate std;
 /// overlap.
 pub mod hints {
     pub const PLST_LINKED_ITEM_COUNTED_STRING: usize = 0x71f9_0000;
+    pub const PLST_LINKED_ITEM_MUSIC_PATH: usize = 0x71f8_0000;
     pub const LINKED_ITEM_INDEX_FIND: usize = 0x60ab_8000;
     pub const LINKED_RECORD_SLOTS_AT: usize = 0x71ff_0000;
     pub const PLST_ENABLE_TDAT: usize = 0x71fa_0000;
