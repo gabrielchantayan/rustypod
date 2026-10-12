@@ -16,6 +16,39 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0804be3c
+    ghidra: FUN_0804be3c
+    name: retail_runtime_initialize_once
+    size: 48
+    sig: "u32 retail_runtime_initialize_once(void)"
+    module: util/retail_runtime_initialize_once
+    status: ported
+    renames:
+      pcVar1/r4: initialized_flag
+      r5: success
+    notes: >-
+      Raw A32 words establish 44 instruction bytes through POP PC at
+      0x0804be64 plus the flag-address literal at 0x0804be68. The next
+      real function begins with CMP r0,#0 at 0x0804be6c, so the true
+      extent is 48 bytes rather than Ghidra's 44. Independent whole-image
+      branch decoding finds two inbound plain BLs at 0x08061c60 and
+      0x080725c4, zero predicated inbound BLs, and one outbound plain BL
+      at 0x0804be54 to 0x082dc2a8, with no predicated outbound BLs.
+      When byte 0x089cfcb8 is zero, call the stock no-argument routine
+      at 0x082dc2a8 and only then write one; all nonzero byte values
+      skip initialization unchanged. Always return zero. Neither the
+      assigned function nor its callee had a canonical names.yaml entry;
+      the callee's subsystem identity remains unknown, so the port calls
+      its verified address without inventing a semantic callee identity.
+      Host deviation: native flag storage and an explicitly installed
+      callback replace fixed firmware addresses. No synchronization or
+      pre-call publication is added. Host edge tests cover all nonzero
+      guards, neighboring bytes, publication order, and repeated calls.
+      The full host test gate, ARM release build, and exported-entry
+      cold/warm smoke pass. match.py shows the same byte guard, conditional
+      call, post-call byte store, and zero return; LLVM uses an absolute
+      BLX through the verified callee literal rather than a relative BL,
+      adds a frame pointer, and duplicates the return path.
   - address: 0x0804cac8
     ghidra: FUN_0804cac8
     name: ft_list_finalize
