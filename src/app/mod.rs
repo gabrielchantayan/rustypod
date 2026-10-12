@@ -1,5 +1,6 @@
 //! retailOS application/UI framework glue — the global application
 //! context and the small helpers its view classes lean on.
+pub mod media_player_selected_payload_index;
 pub mod settings_scale_midpoint;
 pub mod controller_context_value;
 pub mod scoped_context_contains_playlist;
