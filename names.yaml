@@ -37185,6 +37185,32 @@ functions:
       tail-branching.
 
 
+  # --- node rectangle getter ---
+  - address: 0x080513d0
+    ghidra: FUN_080513d0
+    name: ui_node_bounds_copy
+    size: 48
+    sig: "i32 ui_node_bounds_copy(const u8 *node, u8 *output)"
+    module: ui/node_bounds_copy
+    status: ported
+    vars: {param_1/r0/r1: node, param_2/r1/r0: output}
+    renames: {thunk_EXT_FUN_22000020: __rt_memcpy}
+    notes: >-
+      Raw ARM words establish [0x080513d0,0x08051400), 48 instruction
+      bytes without literals; next entry begins with cmp r0, #0. Whole-image
+      word decoding finds two incoming plain BLs at 0x080fe18c and
+      0x081142ac, no incoming predicated BLs. The body has zero plain BLs
+      and one BLNE at 0x080513f4 to 0x08037db0. Veneer words
+      e51ff004/22000020 identify the osos IRAM mirror of ported __rt_memcpy
+      at 0x08000020. Null node returns -192 without touching output;
+      otherwise optionally copy eight bytes from node +0x10 and return zero.
+      Both callers interpret four signed 16-bit rectangle coordinates.
+      Deviations: volatile Rust copy-function pointer retains a real call
+      and prevents builtin substitution; ignore its changed return pointer.
+      Host tests cover both null paths, all 16 source/output alignment pairs,
+      signed-coordinate extremes, source preservation and output sentinels.
+      Direct executable smoke passed. ARM match: 22 versus 12 instructions;
+      LLVM uses explicit branches, a stack-loaded BLX and a frame pointer.
   # --- matchable entry index word getter ---
   - address: 0x08051400
     ghidra: FUN_08051400
