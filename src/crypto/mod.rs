@@ -99,6 +99,7 @@ pub mod bn_sub_word;
 pub mod bn_lshift1;
 pub mod bn_mod_mul_montgomery;
 pub mod bn_mod_mul;
+pub mod bn_blinding_convert;
 pub mod bn_ucmp;
 pub mod bn_cmp_words;
 pub mod cipher_name;

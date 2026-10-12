@@ -16,6 +16,30 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0803db58
+    ghidra: FUN_0803db58
+    name: bn_blinding_convert
+    size: 80
+    sig: "int bn_blinding_convert(BigNum *value, const TwoBufferOwner *owner, TaggedWordBufferPool *ctx)"
+    module: crypto/bn_blinding_convert
+    status: ported
+    renames:
+      param_1/r0: value
+      param_2/r1: owner
+      param_3/r2: ctx
+      iVar2/r2: first_factor
+      in_r12: second_factor
+      FUN_0803ff80: bn_mod_mul
+      FUN_08049a84: diag_ring_record
+    notes: >-
+      Raw extent 0x0803db58..0x0803dba8 is 80 bytes, ending at the
+      independent two_buffer_owner_release prologue. Two plain outbound BL
+      (0x0803db88, 0x0803dba0), no predicated BL. Two plain inbound BL
+      (0x080cb9a4, 0x080cbd04), no predicated callers. RSA callers blind
+      before private exponentiation. Require both factors; absent factors
+      record (3,100,107,0,0) and return zero. Otherwise multiply value in
+      place by first modulo trailing[0], without advancing factors. Reuses
+      existing ports; match.py confirms factor gates, diagnostic and multiply.
   - address: 0x0803dbd8
     ghidra: FUN_0803dbd8
     name: bn_blinding_invert
