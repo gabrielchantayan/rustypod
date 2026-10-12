@@ -16,6 +16,40 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08044900
+    ghidra: FUN_08044900
+    name: refcounted_buffer_owner_release
+    size: 28
+    sig: "void refcounted_buffer_owner_release(u32 *owner)"
+    module: heap/refcounted_buffer_owner_release
+    status: ported
+    vars:
+      param_1/r0: owner
+      r1: remaining_reference_count
+    renames:
+      FUN_080aa408: refcounted_buffer_owner_destroy
+    notes: >-
+      Raw words establish [0x08044900,0x0804491c), seven ARM instructions
+      ending in BX LR before the next independent field-query entry.
+      Whole-image aligned B/BL decoding finds one plain BL at 0x08095ef4,
+      one BLNE at 0x080da950, and no inbound B. Body has zero plain or
+      predicated BLs and one BEQ tail branch to 0x080aa408. Ghidra folds
+      that destructor and its heap-free chain into this wrapper incorrectly.
+      NULL returns; otherwise decrement the count at +4 modulo 2^32,
+      store before destruction, and invoke the existing ported destructor
+      only at zero. Initial zero wraps without destruction. Reuses the
+      existing Rust callee without a new seam. Deliberate deviation:
+      Rust does not guarantee a conditional tail branch. Host tests cover
+      NULL, underflow, high counts, unchanged surrounding words, repeated
+      release, and final tag-4 owner destruction.
+      Standalone actual-source release/destructor smoke passed NULL,
+      2-to-1-to-0 final destruction, and zero-to-UINT_MAX underflow,
+      with empty child fields and allocator interception.
+      Host suite passed 15748 tests; ARM release build passed. match.py
+      exited 1 with a reviewed structural diff: seven stock versus eleven
+      Rust instructions. LLVM adds a frame-pointer prologue/epilogue and
+      branches to a tail-call epilogue at zero; NULL guard, +4 load,
+      wrapping decrement, store, and conditional destruction are preserved.
   - address: 0x08044c78
     ghidra: FUN_08044c78
     name: vdbe_clear_object
