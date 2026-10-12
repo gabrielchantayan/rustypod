@@ -16,6 +16,39 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08040538
+    ghidra: FUN_08040538
+    name: bn_pseudo_rand_range
+    size: 16
+    sig: "int bn_pseudo_rand_range(BigNum *result, const BigNum *range)"
+    module: crypto/bn_pseudo_rand_range
+    status: ported
+    vars:
+      param_1: result
+      param_2: range
+    renames:
+      FUN_08082354: bn_random_range_worker
+    notes: >-
+      Raw words e1a02001 e1a01000 e3a00001 ea010782 establish the
+      16-byte extent ending at the independent PUSH entry 0x08040548.
+      Binary-wide A32 decoding finds two inbound plain BLs at 0x080622a4
+      and 0x0808b324, zero predicated BLs, and no outgoing BLs.
+      Move range/result to r2/r1, select pseudo-random mode 1, and
+      tail-branch to 0x08082354, preserving its integer return.
+      Neither address has a prior canonical names entry. Raw worker
+      disassembly verifies positive-range validation, range-one zero,
+      bit tests, mode-dependent random generation, comparisons,
+      two-subtraction optimization, and rejection sampling. Ghidra
+      incorrectly inlines this worker into the wrapper decompilation.
+      Deviation: existing volatile dispatch-slot convention retains
+      the unported stock worker at its verified address. Deterministic
+      host-source tests cover rejection, unit range, word boundaries,
+      invalid ranges, and failure preservation, not RNG quality or
+      device execution. Host suite and ARM release build pass. Public
+      API smoke returns 4 below range 13. match.py exits 1: four stock
+      instructions versus ten Rust lines including a relocation word.
+      Argument moves and mode survive; LLVM adds frame setup and slot
+      loads, then BX replaces the direct tail branch. No allocation.
   - address: 0x08040b30
     ghidra: FUN_08040b30
     name: bn_sub_word
