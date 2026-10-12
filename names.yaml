@@ -16,6 +16,44 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08048080
+    ghidra: FUN_08048080
+    name: calendar_to_seconds
+    size: 184
+    sig: "void calendar_to_seconds(const Calendar *calendar, u32 *out)"
+    module: time/calendar_to_seconds
+    status: ported
+    vars:
+      param_1/r0: calendar
+      param_2/r4: out
+      local_18: date
+      DAT_08048130: runtime_day_bias_pointer
+      DAT_08048134: seconds_per_day
+    renames:
+      FUN_0807ea68: datetime_day_number
+    notes: >-
+      Raw extent [0x08048080,0x08048138) is 184 bytes: 176 executable
+      bytes and eight literal bytes, ending at the next PUSH. Whole-image
+      aligned A32 decoding finds two plain inbound BLs at 0x080d72bc and
+      0x080d72f4, one plain outgoing BL at 0x080480e8 to 0x0807ea68,
+      and no predicated BLs. Narrow expanded calendar fields to packed
+      bytes except the retained year halfword; weekday is minus one
+      modulo 256. Use the existing datetime_day_number port, subtract
+      the runtime day bias at 0x083f50a4, multiply by 86400 and add
+      hour*3600 + minute*60 + second modulo 2^32. Either NULL argument
+      is a no-op. Preserve both output stores and allow input/output
+      overlap; no new callee seam or deliberate behavioral deviation.
+      Host suite passed 15723 tests including NULL guards, independent
+      epoch/leap-century anchors, byte narrowing, modular bias arithmetic,
+      input preservation, output guards and overlap. Standalone public-entry
+      smoke with a mapped runtime bias returned 86398 for 1970-01-01
+      23:59:58 and 4294967294 after increasing the bias by one day.
+      ARM release build passed. match.py printed the expected structural
+      diff (exit 1): 44 original instructions versus 48 Rust instructions,
+      retaining both NULL guards, packed scratch record, one BL, runtime
+      bias load, day multiplication and both output stores. LLVM narrows
+      halfword loads to byte loads for truncated fields and uses SMLABB
+      for hour accumulation; these preserve behavior for ordinary RAM.
   - address: 0x08048804
     ghidra: FUN_08048804
     name: clear_tagged_target
