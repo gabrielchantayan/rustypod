@@ -251065,3 +251065,48 @@ functions:
       including a relocation word. LLVM adds frame setup and dispatch-slot
       loads and replaces BL with BLX; mode, argument order, stack bottom,
       and unchanged return survive. No allocation added.
+
+  - address: 0x08040350
+    ghidra: FUN_08040350
+    name: word_buffer_multiply_word
+    size: 140
+    sig: "u32 word_buffer_multiply_word(MarkedWordBuffer *buffer, u32 factor)"
+    module: heap/word_buffer
+    status: ported
+    vars:
+      param_1/r0: buffer
+      param_2/r1: factor
+      iVar1/r5: carry
+    renames:
+      FUN_0804082c: word_buffer_reset_optional_singleton
+      FUN_082b8174: word_buffer_reserve
+      FUN_082ba944: limb_multiply_words_worker
+    notes: >-
+      Raw extent [0x08040350,0x080403dc) is 140 bytes; next entry has
+      independent push {r3,lr}. Binary-wide aligned ARM BL decoding finds
+      two incoming plain BLs at 0x0803e8cc and 0x0803fe40, zero predicated
+      callers. Three outgoing plain BLs reach reset at 0x08040374,
+      multiply at 0x08040388, and reserve at 0x080403b4; none predicated.
+      Decimal parsing multiplies by its radix; the other caller scales
+      a bignum during modular arithmetic. Empty input remains unchanged.
+      Zero factor resets nonempty input and ignores reset failure.
+      Nonzero factor multiplies little-endian limbs in place, appending
+      nonzero carry after signed wrapping length/capacity comparison.
+      Reserve failure returns zero with already-multiplied limbs retained;
+      marker stays unchanged except on successful zero reset.
+      No previous assigned-address or multiply-worker registry entry exists.
+      Worker raw words split factor and limbs into 16-bit halves, accumulate
+      cross-products and carry, store low words, and return high carry.
+      Deliberate deviation: unported 0x082ba944 uses a volatile stock-address
+      slot with a host arithmetic model; existing reset/reserve ports reused.
+      Host edge tests cover empty input, ignored reset failure, factor one,
+      halfword boundaries, maximum factor, carry append, guard preservation,
+      nonatomic reserve failure, successful growth, and zero reset.
+      Host suite passes 15770 tests; ARM release build passes. Standalone
+      actual-module public API smoke yields 0x00000001fffffffe from
+      0xffffffff times two, length two and marker one. This exercises host
+      behavior with a modeled worker, not device execution. match.py exits
+      1 with a structural diff: 35 stock instructions versus 45 Rust lines.
+      LLVM adds frame setup and dispatch-slot loads, replacing multiply BL
+      with BLX; empty/zero paths, signed comparison, reserve failure, length
+      publication before carry store, and return behavior remain intact.
