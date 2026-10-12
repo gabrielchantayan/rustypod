@@ -3364,6 +3364,42 @@ functions:
       restored first, cleared second and intact neighbors. ARM release build
       passes. match.py shows the same two stores, with LLVM frame setup and
       pop return instead of bx lr (five instructions versus three).
+  - address: 0x080444d4
+    ghidra: FUN_080444d4
+    name: item_refresh_string_flag
+    size: 84
+    sig: "void item_refresh_string_flag(CountedStringItem *item)"
+    module: ui/item_refresh_string_flag
+    status: ported
+    renames:
+      param_1/r0/r4: item
+      item+0x0: owner
+      item+0x28: string_id
+      item+0x15: string_flag_byte
+      local_c: payload
+      local_10: byte_length
+      FUN_080d6e50: indexed_payload_lookup_mode_one
+      FUN_08059c68: counted_wstr_validate
+    notes: >-
+      Raw aligned A32 establishes [0x080444d4,0x08044528), 84 bytes,
+      no literals; the next function starts with push {r2-r8,lr}.
+      Whole-image immediate decoding finds two incoming plain BLs at
+      0x08067c90 and 0x08095c7c, zero predicated incoming BLs, two
+      outgoing plain BLs and zero predicated outgoing BLs. Look up the
+      string id in owner+0xc0, ignore status, halve the encoded byte
+      length, validate with flags 0x1d, and replace only bit 3 at +0x15.
+      Validator bit 2 forces rejection even for empty or invalid lookups;
+      preserve both real calls rather than reducing to a constant clear.
+      Ghidra's extra arguments are scratch output storage, not inputs.
+      Deviations: initialized scratch outputs and native host pointer width
+      through repr(C); reuse both existing Rust callees without new seams.
+      Host tests cover all flag bytes, empty and invalid lookups, signed
+      id boundaries, and neighboring state preservation. Serial host suite
+      passes 15749 tests; default parallel suite segfaulted. ARM release
+      build passes. Standalone real-source smoke confirms ff to f7 and
+      intact neighboring state on lookup failure. match.py reports 23
+      versus 21 instructions: LLVM frame setup and scratch initialization;
+      relocations verify both callees, logical halving and +0x15 access.
   - address: 0x08067c70
     ghidra: FUN_08067c70
     name: item_store_counted_string
@@ -3378,7 +3414,7 @@ functions:
       item+0x0: owner
       item+0x28: string_id
       FUN_080be81c: string_pool_store_counted
-      FUN_080444d4: retail item string-flag refresh (unported seam)
+      FUN_080444d4: item_refresh_string_flag
     notes: >-
       Raw A32 establishes [0x08067c70,0x08067c9c), 44 bytes, no literals;
       the next function starts with strb r1,[r0,#0xe3c]. Whole-image decoding
@@ -3390,14 +3426,14 @@ functions:
       with argument 0x1d through 0x08059c68, and replaces flag bit 3 at +0x15.
       Ghidra's extra refresh arguments are incoming scratch registers used
       only as stack output storage, not meaningful inputs. Reuse the ported
-      string_pool_store_counted; retain the refresh retail address through a
-      volatile seam. repr(C) widens the owner pointer on hosts only.
+      string_pool_store_counted and item_refresh_string_flag directly.
+      repr(C) widens the owner pointer on hosts only.
       Host tests cover replacement and NULL clearing across success and error
       statuses with post-store refresh and return preservation. ARM machine-code
       smoke confirms +0xc0/+0x28 argument formation, store-before-refresh order,
-      and status preservation for 0, -50, INT_MIN and INT_MAX. match.py reports
-      15 versus 11 instructions: frame-pointer setup and the volatile indirect
-      refresh call/literal replace the direct BL; the core sequence is retained.
+      and status preservation for 0, -50, INT_MIN and INT_MAX. The refresh
+      seam has now been removed in favor of the direct Rust port; host tests
+      exercise the real refresh after replacement and clearing.
   - address: 0x08067cac
     ghidra: FUN_08067cac
     name: rtc_context_set_configuration_b88
