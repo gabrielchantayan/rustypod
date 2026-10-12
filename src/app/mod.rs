@@ -1,5 +1,6 @@
 //! retailOS application/UI framework glue — the global application
 //! context and the small helpers its view classes lean on.
+pub mod ipod_control_prepare;
 pub mod leaf_tag_mask_veneer;
 pub mod media_player_selected_payload_index;
 pub mod settings_scale_midpoint;

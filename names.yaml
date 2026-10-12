@@ -16,6 +16,42 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08047454
+    ghidra: FUN_08047454
+    name: ipod_control_prepare
+    size: 296
+    sig: "u32 ipod_control_prepare(void)"
+    module: app/ipod_control_prepare
+    status: ported
+    vars:
+      r4: root_status_or_zero
+      r5: firsttime_request
+      auStack_70: transition_addon
+      auStack_1c: marker_path
+      local_14: temporary_string
+    renames:
+      FUN_0809b678: path_component_query
+      FUN_08090bc0: path_facade_slot_80_from_cstr
+      FUN_0827735c: string_owner_embedded_init
+      FUN_0827929c: path_object_construct_from_string_object
+      FUN_08275d74: string_object_release_payload
+      FUN_08278e8c: silver_controller_transition_addon_construct (resident)
+      FUN_08278f60: silver_controller_transition_addon_destroy (resident)
+      thunk_FUN_08277484: string_object_destroy_veneer at 0x082792fc
+      DAT_0804753c: firsttime_request at 0x089cb190
+      DAT_08047578: STRING_OBJECT_VTABLE at 0x089a6044
+    notes: >-
+      Raw ARM establishes [0x08047454,0x0804757c): 216 code bytes and
+      80 string/literal bytes, followed by a new push at 0x0804757c.
+      Whole-image aligned BL decoding finds two incoming plain BLs at
+      0x080588e0 and 0x0806e4c8, zero predicated incoming calls, and nine
+      outgoing plain BLs plus BLEQ at 0x080474bc. Root query statuses
+      0 and 13 invoke facade slot 0x80 with (root,1,0). A nonzero request
+      byte queries the iTunes subdirectory but deliberately applies the
+      conditional operation to the root again, constructs the firsttime
+      marker with (addon,path,0,0,0x400,1,0), clears the request before
+      destruction, and returns zero regardless of directory statuses.
+      Resident addon calls avoid existing Rust inert helper defaults.
   - address: 0x08047bfc
     ghidra: FUN_08047bfc
     name: tdat_element_create
