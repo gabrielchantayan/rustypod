@@ -1,5 +1,7 @@
 //! retailOS UI / graphics layer — the geometry primitives the drawing
 //! and view code is built on.
+pub mod plst_dispatch_matching_item;
+pub use plst_dispatch_matching_item::*;
 pub mod embedded_list_storage_destroy;
 pub mod tdat_destroy;
 pub mod tdat_element_create;
