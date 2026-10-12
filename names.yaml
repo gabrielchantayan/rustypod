@@ -54769,6 +54769,30 @@ functions:
       heads respectively. Host pointer fields are wider than ARM target
       fields, so repr(C) preserves field order while tests validate links.
   # --- FreeType 2 ftcalc fixed-point kernels ---
+  - address: 0x0804ed54
+    ghidra: FUN_0804ed54
+    name: ft_sqrt_fixed
+    size: 72
+    sig: "i32 ft_sqrt_fixed(i32 value)"
+    module: ft/calc
+    status: ported
+    vars: {param_1: value, uVar3: remainder, iVar1: root, iVar5: rounds}
+    notes: >-
+      FreeType FT_SqrtFixed: signed 16.16 square root, zero for value <= 0,
+      otherwise floor(sqrt(value * 65536)). Raw bytes verify the complete
+      72-byte extent through the return at 0x0804ed98, before the real
+      ft_stream_close boundary at 0x0804ed9c. Restoring recurrence runs
+      24 rounds, consuming 16 input bit pairs followed by eight zero pairs.
+      Two incoming plain BL words at 0x080e2428 and 0x080e2450, zero
+      predicated BL callers, zero outgoing BLs. Ghidra's apparent caller
+      at 0x0807a7b0 is an incorrectly recovered cross-function flow, not
+      an additional raw BL. No behavioral deviations or callee seams.
+      Host tests cover signed bounds, fractional inputs, square transitions,
+      and randomized words against an independent binary-search oracle.
+      ARM match review confirms the signed early exit and 24-round loop;
+      LLVM compares remainder > root*4 instead of remainder >= root*4+1
+      and uses conditional add of the complemented trial for subtraction.
+
   - address: 0x0804d2cc
     ghidra: FUN_0804d2cc
     name: ft_mulfix
