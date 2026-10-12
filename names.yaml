@@ -251317,3 +251317,34 @@ functions:
       inaccessible successor values, high pointer bits and adjacent fields.
       match.py confirms the same conditional load and null result; LLVM
       adds a frame-pointer push/mov/pop in place of the original bx lr.
+
+  - address: 0x0803d5c0
+    ghidra: FUN_0803d5c0
+    name: bio_new_file
+    size: 48
+    sig: "Bio *bio_new_file(const char *filename, const char *mode)"
+    module: crypto/bio_new_file
+    status: ported
+    renames:
+      param_1/r0: filename
+      param_2/r1: mode
+      FUN_0802f694: printf
+      s_BIO_new_file___stub_called_0803d5d4: diagnostic
+    notes: >-
+      Raw extent 0x0803d5c0..0x0803d5f0 is 48 bytes: 20 instruction
+      bytes plus 28 inline string bytes, ending at an independent PUSH.
+      Two incoming plain BL sites at 0x08043760 and 0x080eee10, zero
+      predicated BL. One outgoing plain BL at 0x0803d5c8 to the registered
+      printf at 0x0802f694, zero predicated BL. Prints BIO_new_file() stub
+      called followed by newline, then returns NULL without reading filename
+      or mode or opening a file. Reuses Rust printf with an empty explicit
+      va_list because the diagnostic contains no conversions; inherits its
+      documented stub engine and discarded semihosting output. Tests cover
+      NULL, ordinary and invalid input pointers and both successful and
+      failed diagnostic results; every case returns NULL.
+      All 15784 host tests pass; ARM release build passes. match.py exits
+      1 with five original instructions versus fifteen Rust lines including
+      literals: LLVM inlines printf and dispatches PRINTF_ENGINE via BLX,
+      retaining stdout, diagnostic and unconditional zero return. No filename
+      or mode loads occur. Isolated actual-source smoke prints the diagnostic
+      and returns NULL for invalid pointers with a failing printf boundary.
