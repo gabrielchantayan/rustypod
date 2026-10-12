@@ -806,6 +806,7 @@ pub mod framework_root_message_post;
 pub mod framework_root_post_message_kind;
 pub mod framework_root;
 pub mod image_library_first_entry;
+pub mod image_library_first_container;
 pub mod image_library_entry_at;
 pub mod liti_class_check;
 pub mod liti_field_class_check;
