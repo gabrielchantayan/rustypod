@@ -1266,7 +1266,7 @@ pub unsafe extern "C" fn version_info_to_cxx_string(string: *mut *mut u8) {
 }
 
 /// Host-swappable entry point for the board-version query
-/// `FUN_080e624c` @ 0x080e624c (44 bytes, unported; [`board_version_halves`]
+/// `FUN_080e624c` @ 0x080e624c (48 occupied bytes, ported); [`board_version_halves`]
 /// reaches it through the 4-byte branch veneer `thunk_FUN_080e624c` @
 /// 0x080515e4 — binary-verified word 0xea025318, a bare
 /// `b 0x080e624c`): answers the lazily cached system-info word at
@@ -1279,9 +1279,8 @@ pub unsafe extern "C" fn version_info_to_cxx_string(string: *mut *mut u8) {
 /// drives [`cg_timer_wait`](crate::codegen::timer_wait)'s channel
 /// pick (HIGH halfword 0x10 with LOW halfword >= 6 selects timer
 /// channel 3 — see its names.yaml ledger entry, which names this
-/// callee board_version). The target build transmutes the fixed
-/// firmware address directly; host tests swap this writable cell to
-/// install recording mocks.
+/// callee board_version). The target calls the Rust board-version veneer;
+/// host tests swap this writable cell to install recording mocks.
 #[cfg(not(target_os = "none"))]
 pub static mut BOARD_VERSION: usize = 0x080e_624c;
 
@@ -1292,8 +1291,7 @@ type BoardVersionFn = unsafe extern "C" fn() -> u32;
 #[cfg(target_os = "none")]
 #[inline(always)]
 unsafe fn board_version() -> u32 {
-    let query: BoardVersionFn = core::mem::transmute(0x080e_624cusize);
-    query()
+    crate::sysinfo::board_version_veneer()
 }
 
 #[cfg(not(target_os = "none"))]
@@ -1320,8 +1318,8 @@ unsafe fn board_version() -> u32 {
 /// r1,[r4,#0x0]; strh r0,[r5,#0x0]; ldmia sp!,{r4,r5,r6,pc}` (Ghidra:
 /// `uVar1 = thunk_FUN_080e624c(); *param_2 = (short)(uVar1 >> 0x10);
 /// *param_3 = (short)uVar1`): query the board-version word
-/// (`FUN_080e624c` @ 0x080e624c, unported, behind the
-/// [`BOARD_VERSION`] seam), store the HIGH halfword into `*high` and
+/// (the Rust [`crate::sysinfo::board_version_veneer`] on target, and
+/// [`BOARD_VERSION`] seam on host), store the HIGH halfword into `*high` and
 /// the LOW halfword into `*low`. The first argument is never read —
 /// the original never touches r0; every sibling in the diagnostics
 /// run takes exactly the arguments it uses, so an unused leading
@@ -1329,11 +1327,8 @@ unsafe fn board_version() -> u32 {
 /// recovered).
 ///
 /// Deviations:
-/// - The query callee is unported firmware behind a host-swappable
-///   usize seam (this module's FIXED16_RECIPROCAL pattern): the
-///   target build transmutes the fixed firmware address 0x080e624c
-///   (the veneer @ 0x080515e4 is folded away — it is a bare `b`),
-///   host tests install recording mocks.
+/// - The target query calls the Rust veneer and cached getter ports.
+///   Host tests retain the recording query seam for splitter behavior.
 /// - The pushed r6 is never used (the `stmdb sp!,{r4,r5,r6,lr}` /
 ///   `ldmia sp!,{r4,r5,r6,pc}` pair spills and restores it
 ///   gratuitously — an ADS frame artifact); the port keeps no frame.
