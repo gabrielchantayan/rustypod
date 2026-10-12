@@ -16,6 +16,30 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080515e8
+    ghidra: FUN_080515e8
+    name: ft_service_metadata_byte_at_b58
+    size: 12
+    sig: "uint32_t ft_service_metadata_byte_at_b58(const uint8_t *service_context)"
+    module: ft/service/metadata
+    status: ported
+    renames:
+      param_1/r0: service_context
+      intermediate/r0: metadata
+      return/r0: metadata_byte
+    notes: >-
+      Raw words e5900f00 e5d00b58 e12fff1e establish the true extent
+      [0x080515e8,0x080515f4); the next function reads byte +0xb78.
+      Whole-image aligned A32 decoding finds two plain inbound BLs at
+      0x08172d90 and 0x08172da4, zero predicated inbound BLs, and zero
+      outgoing BLs of either kind. Follow the aligned pointer at context
+      +0xf00 and zero-extend byte +0xb58. FUN_08172c6c compares/caches
+      it at caller+0x38 and notifies virtually on change; higher-level
+      meaning remains unknown. Native-width host pointers, four-byte ARM
+      pointers; no new seams or NULL/bounds checks. Host tests cover all
+      256 byte values, pointer replacement and absence of writes. Host
+      suite and ARM release build pass; standalone smoke returns 0,128,255.
+      match.py exits 1: identical two loads plus LLVM frame setup/teardown.
   - address: 0x08051b50
     ghidra: FUN_08051b50
     name: ft_service_metadata_halfword_at_b18
