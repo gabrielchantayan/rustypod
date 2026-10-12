@@ -16,6 +16,45 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0805269c
+    ghidra: FUN_0805269c
+    name: ui_tdat_sorted_plst_at
+    size: 140
+    sig: "u32 ui_tdat_sorted_plst_at(u8 *element, u32 index, u32 mode)"
+    module: ui/tdat_sorted_plst_at
+    status: ported
+    vars:
+      param_1/r0/r4: element
+      param_2/r1/r5: index
+      param_3/r2: mode
+      element_plus_0x30: plst_count
+      element_plus_0x910: mode_zero_cache
+      element_plus_0x914: mode_nonzero_cache
+      iVar1: counted_array
+    renames:
+      FUN_0806aa3c: ui_element_is_tdat_class
+      FUN_080ce5a8: ui_tdat_sorted_plst_array_create
+    notes: >-
+      Raw extent [0x0805269c,0x08052728) is 140 bytes; next word is
+      push {r0-r6,lr}. Whole-image aligned ARM-word decoding finds two
+      inbound plain BLs at 0x08068ab4 and 0x080ca7c4, zero predicated.
+      Three outbound plain BLs: class predicate at 0x080526a8 and stock
+      array builder at 0x080526e0/0x08052704; zero predicated.
+      Rejects NULL/non-tdat and unsigned index >= element+0x30 count.
+      Zero mode selects cache +0x910; all nonzero modes select +0x914.
+      Creates a missing array with normalized mode 0/1, stores even NULL,
+      then returns target word array[index+1], or zero on failure.
+      Deliberate deviations: existing Rust class predicate, merged cache
+      branches, explicit stock-builder dispatch seam. Builder identity
+      reuses the identified 0x080ce5a8 entry; its unresolved comparator
+      is neither guessed nor implemented. Host tests exercise invalid
+      class/NULL, zero count, unsigned boundaries, independent caches,
+      failure then retry, nonzero-mode normalization, and ignored header.
+      Host suite: 15641 passed; ARM release build passed. Executable host
+      smoke: first=0x22220000, alternate=0x11110001, boundary=0.
+      match.py exit 1: 35 original versus 36 Rust instructions; frame
+      setup, merged cache selection, indirect builder BLX, unchanged
+      unsigned bounds check and count-header skip. No device run claimed.
   - address: 0x08052f24
     ghidra: FUN_08052f24
     name: object_resource_plst_counted_string

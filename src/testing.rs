@@ -39,6 +39,7 @@ extern crate std;
 /// six files. Each region is at most 0x0100_0000 wide, so neighbours cannot
 /// overlap.
 pub mod hints {
+    pub const TDAT_SORTED_PLST_AT: usize = 0x7202_0000;
     pub const TDAT_NODE_AT: usize = 0x7201_0000;
     pub const BACKEND_PLST_ITEM_COUNTED_STRING: usize = 0x71f7_0000;
     pub const PLST_LINKED_ITEM_COUNTED_STRING: usize = 0x71f9_0000;
