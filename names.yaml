@@ -46290,6 +46290,33 @@ functions:
       more specific upstream representation, so the operation-based name
       is intentional. All adds wrap modulo 2^32.
 
+  - address: 0x080489fc
+    ghidra: FUN_080489fc
+    name: plst_task_delete
+    size: 16
+    sig: "u32 plst_task_delete(u8 *task)"
+    module: ui/plst_task_message
+    vars:
+      param_1/r0: task
+      DAT_08048a08: PLST_DELETE_MESSAGE (0x706c6465)
+    renames:
+      FUN_0804424c: plst_task_message
+    status: ported
+    notes: >-
+      Raw words e59f1004 e3a02000 eaffee10 load message 0x706c6465
+      (plde), clear the arguments pointer, and tail-branch to the already
+      ported plst_task_message at 0x0804424c. True extent is 16 bytes,
+      0x080489fc..0x08048a0c, including the four-byte literal at
+      0x08048a08; the next independent push-prologue is at 0x08048a0c.
+      Full-image ARM decoding finds one plain inbound BL at 0x0812cc30
+      and one predicated BLNE at 0x080b3ec8. No outbound BLs, plain or
+      predicated. Callers use this on cleanup paths. Ghidra incorrectly
+      folds the helper into this wrapper and invents extra arguments.
+      Rust preserves the helper return and NULL arguments with no
+      deliberate algorithm deviations.
+      ARM match.py confirms the literal load, zero arguments, and tail
+      branch; LLVM adds and restores a frame pointer before the branch.
+
   - address: 0x0804424c
     ghidra: FUN_0804424c
     name: plst_task_message

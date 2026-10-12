@@ -75,6 +75,26 @@ pub unsafe extern "C" fn plst_task_message(
     (message_dispatch())(element, TDAT_TASK_MESSAGE, record.as_mut_ptr().cast())
 }
 
+/// plst_task_delete — original: `FUN_080489fc` @ `0x080489fc` (16 bytes).
+///
+/// Three ARM instructions load the `plde` message literal (0x706c6465),
+/// clear r2, and tail-branch to `plst_task_message` at 0x0804424c.
+/// The true extent is 0x080489fc..0x08048a0c: 12 code bytes and the
+/// literal at 0x08048a08, followed by an independent push-prologue.
+/// Raw full-image BL decoding finds one plain inbound BL at 0x0812cc30
+/// and one BLNE at 0x080b3ec8; no outbound plain or predicated BLs.
+/// Returns the helper's status, including -50 for rejected tasks.
+/// Deliberate deviations: none; Rust calls the existing helper directly.
+///
+/// # Safety
+///
+/// `task` has the same validity requirements as [`plst_task_message`].
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn plst_task_delete(task: *mut u8) -> u32 {
+    plst_task_message(task, 0x706c_6465, ptr::null_mut())
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -118,6 +138,19 @@ mod tests {
         DispatchGuard(previous)
     }
 
+
+    #[test]
+    fn delete_rejects_null_wrong_class_and_unready_tasks() {
+        // Exercise the real helper without changing its shared dispatch seam.
+        let mut wrong = [0u32; 2];
+        wrong[1] = OTHER_CLASS_TAG;
+        let mut unready = [0u32; 0x194 / 4];
+        unready[1] = PLST_CLASS_TAG;
+        unready[3] = u32::MAX; // Must not dereference an element when unready.
+        assert_eq!(unsafe { plst_task_delete(ptr::null_mut()) }, DISPATCH_REJECTED);
+        assert_eq!(unsafe { plst_task_delete(wrong.as_mut_ptr().cast()) }, DISPATCH_REJECTED);
+        assert_eq!(unsafe { plst_task_delete(unready.as_mut_ptr().cast()) }, DISPATCH_REJECTED);
+    }
     #[test]
     fn rejects_null_wrong_class_and_unready_tasks_without_dispatch() {
         let _lock = DISPATCH_LOCK.lock().unwrap_or_else(|error| error.into_inner());
