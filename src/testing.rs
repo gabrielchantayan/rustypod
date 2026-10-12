@@ -39,6 +39,7 @@ extern crate std;
 /// six files. Each region is at most 0x0100_0000 wide, so neighbours cannot
 /// overlap.
 pub mod hints {
+    pub const TDAT_DESTROY: usize = 0x7207_0000;
     pub const EVP_PKEY_SIZE: usize = 0x7206_0000;
     pub const CONTEXT_FIRST_FLAGGED_TDAT: usize = 0x7205_0000;
     pub const OBJECT_COMMIT_MARK_MODIFIED: usize = 0x7204_0000;

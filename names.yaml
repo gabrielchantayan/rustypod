@@ -16,6 +16,43 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08049468
+    ghidra: FUN_08049468
+    name: tdat_element_destroy
+    size: 280
+    sig: "void tdat_element_destroy(u8 *element)"
+    module: ui/tdat_destroy
+    status: ported
+    vars:
+      param_1/r0/r4: element
+      r5: owner
+      r6: saved_identity
+      r7: owner_tagged_list
+      FUN_080491dc: destroy_plst
+      FUN_080488d4: clear_tagged_list
+      FUN_08048804: clear_handler
+      FUN_080da928: release_resources
+    notes: >-
+      Raw extent 0x08049468..0x08049580: 256 instruction bytes followed by
+      six literal words at 0x08049568..0x0804957c. Ghidra's 68-byte size
+      truncates the body; independently called 0x08049580 starts cmp r0,#0,
+      bne free_tag4, bx lr. Raw ARM BL scan finds two plain inbound calls
+      (0x08047ca0, 0x08068f14), zero predicated; body has 16 plain BL and
+      zero predicated BL. Rejects NULL/foreign classes. Saves owner +8 and
+      identity +0x18, sets +0x21 bit 1, sends 0x7464616f/0x74646164,
+      notifies owner+0xbac with 0x61707274, removes from owner+0xb98,
+      destroys first plst repeatedly, sends 0x7464636c, disables flag bit 2,
+      clears embedded lists and resources, zeroes 0x948 bytes, frees tag 4,
+      then notifies saved owner with 0x61707254 and saved identity.
+      Deviations: four unported cleanups use TDAT_DESTROY_OPS; existing
+      tagged-list notification seam is reused; ported callees are direct.
+      Host tests cover rejection, child removal, callback mutations of saved
+      fields, ordering, zero-before-free and write boundary. Isolated executable
+      smoke exercises the actual entry and Rust dependencies with cleanup/free
+      boundaries installed; normal host non-test crate has unrelated missing
+      functions. ARM build and 15704 host tests pass. match.py structural diff
+      reviewed with --size 280: frame/seam BLX overhead and LLVM merging the
+      two side-effect-free first-plst reads; teardown sequence is preserved.
   - address: 0x08049f88
     ghidra: FUN_08049f88
     name: evp_cipher_update
