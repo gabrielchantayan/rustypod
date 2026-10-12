@@ -16,6 +16,42 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08052560
+    ghidra: FUN_08052560
+    name: image_library_entry_at
+    size: 88
+    sig: "u32 image_library_entry_at(const u8 *database, u32 index)"
+    module: app/image_library_entry_at
+    status: ported
+    vars:
+      param_1/r0/r2: database
+      param_2/r1/r3: index
+      database_plus_0x14: entry_count
+      database_plus_0x18: first_entry
+      iVar1: entry
+    renames:
+      FUN_08057c2c: image_library_is_liti_class
+      FUN_08052274: image_library_first_entry
+      FUN_08053b7c: liti_entry_next
+    notes: >-
+      Raw extent [0x08052560,0x080525b8) is 88 bytes; next independent
+      function starts with mov r2,r0. Whole-image aligned A32 decoding
+      finds two inbound plain BLs at 0x08066730 and 0x0813e644, zero
+      predicated. Three outbound plain BLs at 0x0805256c, 0x08052594,
+      and 0x080525a8; zero predicated. Rejects NULL/non-liti databases
+      and unsigned index >= count at +0x14. Starts at +0x18 and follows
+      class-checked successor words until index reaches zero or the chain
+      terminates. Index zero does not validate the returned entry.
+      Deliberate deviation: uses all three existing canonical Rust ports
+      instead of stock calls; target fields remain aligned u32 words.
+      Host tests cover null/wrong class, zero count, unsigned boundaries,
+      multi-step traversal, truncated chains, and rejected entry classes.
+      Standalone smoke exercises the resource-slot caller with real lookup.
+      Host suite and ARM release build pass. match.py reports 27 Rust
+      instructions versus 22 stock; LLVM uses saved registers/frame pointer
+      and a rotated loop, preserving class/count gates and traversal.
+      R_ARM_CALL relocations verify the three canonical callee symbols.
+
   - address: 0x0805269c
     ghidra: FUN_0805269c
     name: ui_tdat_sorted_plst_at
@@ -137309,7 +137345,7 @@ functions:
       param_2/r1: source
       param_3/r2: index
       source_plus_0x40: indexed_provider
-      FUN_08052560: indexed_provider_lookup
+      FUN_08052560: image_library_entry_at
       thunk_EXT_FUN_22000188: iram_memcpy_veneer
     notes: >-
       Raw ARM confirms the supplied 64-byte extent exactly:
@@ -137320,9 +137356,9 @@ functions:
       five-byte output {entry pointer, tag} to NULL/zero, loads source+0x40,
       calls 0x08052560 with that opaque provider and the unsigned index, then
       copies the returned pointer plus a zero tag through the already ported
-      0x08037df8 IRAM memcpy veneer. The provider and entry types remain
-      unrecovered, so the Rust port keeps them opaque and uses one
-      target-address/host-swappable provider-lookup seam. Host pointer width
+      0x08037df8 IRAM memcpy veneer. The provider is a liti ImageLibrary
+      database; Rust now calls canonical image_library_entry_at directly.
+      Entry pointers remain opaque. Host pointer width
       makes the test-only tag follow a native pointer instead of target +4;
       target repr(C) layout is exactly five bytes. Decoding every ARM
       B/BL-immediate in osos.dec finds exactly six direct callers, all
@@ -183101,19 +183137,19 @@ functions:
       param_3/r2/r1: item_index
       "controller+0xf7c": resource_handle_table
       "controller+0xf8c": selected_item_table
-      FUN_08052560: resource_handle_select_item
+      FUN_08052560: image_library_entry_at
     notes: >-
       Raw osos.dec gives the exact 44-byte executable extent
       0x08066710..0x0806673b; 0x0806673c begins the next function. A32
       decoding finds one outbound plain BL at 0x08066730 to retail
-      resource_handle_select_item @ 0x08052560 and no outbound predicated BL
+      image_library_entry_at @ 0x08052560 and no outbound predicated BL
       instructions. Whole-image decoding finds three inbound plain BL calls at
       0x08058820, 0x0806870c, and 0x08068fa4, with no predicated forms. It
       rejects slot indices above three, leaves a null-handle result word
       untouched, otherwise selects item_index from the slot's handle and stores
-      it in the matching result slot. ARM builds call the unresolved retail
-      selector directly; host tests use a typed seam, covering slot three,
-      null handles, and out-of-range indices.
+      it in the matching result slot. Both builds now call canonical Rust
+      image_library_entry_at. Host tests cover null handles and out-of-range
+      slots; standalone smoke exercises slot three with real list traversal.
   # --- big-endian bit-cell table update ---
   - address: 0x0806436c
     ghidra: FUN_0806436c
@@ -215123,19 +215159,19 @@ functions:
       param_3/r2/r1: item_index
       "controller+0xf7c": resource_handle_table
       "controller+0xf8c": selected_item_table
-      FUN_08052560: resource_handle_select_item
+      FUN_08052560: image_library_entry_at
     notes: >-
       Raw osos.dec gives the exact 44-byte executable extent
       0x08066710..0x0806673b; 0x0806673c begins the next function. A32
       decoding finds one outbound plain BL at 0x08066730 to retail
-      resource_handle_select_item @ 0x08052560 and no outbound predicated BL
+      image_library_entry_at @ 0x08052560 and no outbound predicated BL
       instructions. Whole-image decoding finds three inbound plain BL calls at
       0x08058820, 0x0806870c, and 0x08068fa4, with no predicated forms. It
       rejects slot indices above three, leaves a null-handle result word
       untouched, otherwise selects item_index from the slot's handle and stores
-      it in the matching result slot. ARM builds call the unresolved retail
-      selector directly; host tests use a typed seam, covering slot three,
-      null handles, and out-of-range indices.
+      it in the matching result slot. Both builds now call canonical Rust
+      image_library_entry_at. Host tests cover null handles and out-of-range
+      slots; standalone smoke exercises slot three with real list traversal.
   # --- big-endian bit-cell table update ---
   - address: 0x0806436c
     ghidra: FUN_0806436c
