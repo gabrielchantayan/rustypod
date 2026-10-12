@@ -16,6 +16,30 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0804aeac
+    ghidra: FUN_0804aeac
+    name: evp_pkey_missing_parameters
+    size: 8
+    sig: "int evp_pkey_missing_parameters(const EvpPkey *key)"
+    module: crypto/evp_pkey
+    status: ported
+    renames:
+      param_1/r0: key
+    notes: >-
+      Raw osos.dec words e3a00000 and e12fff1e decode to MOV r0,#0;
+      BX lr. The true extent is 0x0804aeac..0x0804aeb4, ending at
+      EVP_PKEY_new. Whole-image A32 decoding finds two inbound plain BL
+      sites (0x08070c7c and 0x08070cc0), zero predicated BL sites, and
+      no outbound BL. Caller 0x08070c68 tests for missing parameters
+      before searching certificate keys, copying parameters via 0x0804add8,
+      and releasing keys via EVP_PKEY_free. This is the retail build's
+      constant-zero EVP_PKEY_missing_parameters predicate, not a two-key
+      comparison. The key is never read; NULL, unsupported types and even
+      unreadable pointer values return zero. No new seam or behavioral
+      deviation. Host edge tests pass. ARM match.py confirms MOV r0,#0
+      with LLVM's frame-pointer push/pop replacing BX lr; the exported
+      symbol remains a real callable target.
+
   - address: 0x0804aeb4
     ghidra: FUN_0804aeb4
     name: evp_pkey_new

@@ -5,7 +5,7 @@
 //!
 //! Port: `evp_pkey_free` — `FUN_0804ae6c` @ 0x0804ae6c (64 bytes,
 //! 0x0804ae6c..0x0804aeab; the next separately linked function, the
-//! 8-byte `mov r0, #0; bx lr` `EVP_PKEY_cmp_parameters`-style stub, sits
+//! 8-byte `mov r0, #0; bx lr` `EVP_PKEY_missing_parameters` stub, sits
 //! at 0x0804aeac, so Ghidra's 64-byte extent is exactly right). **15
 //! call sites**, binary-verified by decoding every ARM B/BL word in
 //! osos.dec: 12 unconditional `bl`, 2 `bleq` (0x080e8424, 0x080f4f68)
@@ -147,6 +147,43 @@ pub unsafe extern "C" fn evp_pkey_new() -> *mut EvpPkey {
     core::ptr::addr_of_mut!((*pkey).attributes).write_volatile(core::ptr::null_mut());
     core::ptr::addr_of_mut!((*pkey).save_parameters).write_volatile(1);
     pkey
+}
+
+/// OpenSSL `EVP_PKEY_missing_parameters` — `FUN_0804aeac` @ **0x0804aeac**.
+///
+/// True size: 8 bytes, ending at `EVP_PKEY_new` @ 0x0804aeb4.
+/// Raw words are `e3a00000` (mov r0, #0), `e12fff1e` (bx lr).
+/// Whole-image A32 decoding verifies two inbound plain BL sites
+/// (0x08070c7c, 0x08070cc0), zero predicated BL sites, and no outbound BL.
+/// The caller @ 0x08070c68 checks for missing parameters before searching
+/// certificate keys and copying parameters through 0x0804add8.
+/// This retail build always reports no missing parameters, without reading
+/// the key or its payload. No deliberate behavioral deviations or new seams.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub extern "C" fn evp_pkey_missing_parameters(_key: *const EvpPkey) -> i32 {
+    0
+}
+
+#[cfg(test)]
+mod missing_parameters_tests {
+    use super::{evp_pkey_missing_parameters, EvpPkey};
+    use core::ptr;
+
+    #[test]
+    fn missing_parameters_never_inspects_the_key() {
+        assert_eq!(evp_pkey_missing_parameters(ptr::null()), 0);
+        // An unreadable, unaligned address must also be ignored.
+        assert_eq!(evp_pkey_missing_parameters(1usize as *const EvpPkey), 0);
+        let mut key = EvpPkey {
+            pkey_type: 0, save_type: 0, references: 0,
+            pkey: ptr::null_mut(), save_parameters: 0, attributes: ptr::null_mut(),
+        };
+        for tag in [0, 6, 19, 28, 116, -1, i32::MAX] {
+            key.pkey_type = tag;
+            assert_eq!(evp_pkey_missing_parameters(&key), 0);
+        }
+    }
 }
 
 
