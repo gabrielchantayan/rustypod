@@ -251711,3 +251711,41 @@ functions:
       retains both writes, 80-byte batching, signed length reload and return
       gates, using BLX through the verified address literal instead of BL,
       different registers, a frame pointer and equivalent ASCII predicates.
+
+  - address: 0x0803a25c
+    ghidra: FUN_0803a25c
+    name: asn1_string_compare
+    size: 60
+    sig: "i32 asn1_string_compare(const ASN1_STRING *left, const ASN1_STRING *right)"
+    module: crypto/asn1_string_compare
+    status: ported
+    vars:
+      param_1/r4: left
+      param_2/r5: right
+      r2: length
+      iVar1/r0: difference
+    renames:
+      FUN_08030f64: memcmp
+    notes: >-
+      OpenSSL ASN1_STRING_cmp. Raw ARM words establish the 60-byte extent
+      0x0803a25c-0x0803a294; the next real prologue is at 0x0803a298.
+      Two plain inbound BLs at 0x08065bc4 and 0x08070d90, no predicated
+      inbound BLs; branch wrappers also enter at 0x08039f70 and 0x0803a23c.
+      One plain internal BL at 0x0803a280 to the already ported memcmp
+      at 0x08030f64, no predicated internal BLs. Ghidra omits memcmp's
+      length argument: r2 still holds the left record's first word.
+      Returns wrapping u32 length subtraction as i32 when lengths differ,
+      otherwise compares exactly that length of bytes, then returns wrapping
+      type subtraction only if the bytes match. Embedded NULs are ordinary
+      bytes; zero length permits NULL data. Reuses OwnedBuffer's repr(C)
+      prefix: length at +0, source as ASN.1 type at +4, data at +8.
+      No behavioral deviations or new callee seams. Host edge tests cover
+      wrapping length/type subtraction, zero-length NULL data, byte/type
+      precedence, embedded NULs and exclusion of bytes past the length.
+      Actual-source standalone smoke returned byte=254, type=-8, length=-1.
+      Full x86_64 host suite and ARM build-std release build passed.
+      match.py exits 1 with 15 original versus 16 Rust instructions:
+      LLVM adds a frame pointer and changes load/register order while
+      retaining the length early return, memcmp call with length in r2,
+      and conditional type subtraction. Object relocation R_ARM_CALL
+      at +0x28 verifies memcmp despite match.py's unresolved BL display.
