@@ -3647,6 +3647,8 @@ pub mod hints {
     pub const RESOURCE_SLOT_VALUE: usize = 0x53f0_0000;
     // Dedicated controller context value fixture; mapping never unmapped.
     pub const CONTROLLER_CONTEXT_VALUE: usize = 0x53f1_0000;
+    // Dedicated controller context word-index fixture; mapping never unmapped.
+    pub const CONTROLLER_CONTEXT_WORD_INDEX: usize = 0x53f2_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span

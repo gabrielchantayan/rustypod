@@ -248710,3 +248710,44 @@ functions:
       versus 39 Rust instructions; LLVM inlines construction, removes the
       trivial destructor, and retains both virtual calls, vtable reload,
       branch polarity, and indexed lookup. No device execution.
+
+  - address: 0x08051bf4
+    ghidra: FUN_08051bf4
+    name: controller_context_word_index
+    size: 40
+    sig: "uint32_t controller_context_word_index(const uint32_t *controller)"
+    module: app/controller_context_word_index
+    status: ported
+    renames:
+      param_1/r0: controller
+      param_2: unused register, not an argument
+      param_3: unused register, not an argument
+      param_4/r3: saved stack word, not an argument
+      local_8: index
+      iVar1: lookup_status
+      FUN_080c6294: retail_word_index
+    notes: >-
+      Raw A32 words establish [0x08051bf4,0x08051c1c), 40 bytes,
+      ending with e8bd9000 before the next function's e92d4010.
+      Whole-image aligned BL decoding finds two plain inbound calls at
+      0x08172fa8 and 0x08172fbc, zero predicated inbound calls.
+      One outgoing plain BL at 0x08051c08 to existing retail_word_index,
+      zero predicated outgoing calls. Load the four-byte context pointer
+      at controller+0xf00 and zero-extend its aligned halfword at +0xb64.
+      Return the first matching retail table index on success, otherwise
+      zero. The notification caller compares and caches the result at
+      +0x30. Table identity is not inferred. Ghidra's extra arguments
+      arise from saved r3 stack storage; the lookup always overwrites it.
+      No target semantic deviations, no new callee seam. Host tests use
+      the existing lookup algorithm with injected table storage and retain
+      target-width stored pointers. Edge coverage includes high halfword
+      exclusion, unsigned 0x8000/0xffff, index 22, duplicates, misses,
+      context replacement, and untouched controller/context storage.
+      Host suite passed 15653 tests; ARM release build succeeded.
+      Standalone exported-path smoke mapped the actual table address and
+      returned 22, duplicate-first index 3, and zero on a miss.
+      match.py exit 1 reviewed: 10 stock versus 17 Rust instructions.
+      LLVM adds frame setup and output initialization, computes +0xb64
+      with a register offset, and retains halfword load, one lookup BL,
+      status comparison, and zero-on-error selection. R_ARM_CALL at
+      symbol offset 0x28 resolves to retail_word_index. No device execution.
