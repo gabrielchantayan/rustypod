@@ -154,3 +154,4 @@ pub mod encoded_buffer_allocate;
 pub mod conf_section_find;
 
 pub mod store_entry_find;
+pub mod asn1_string_print;

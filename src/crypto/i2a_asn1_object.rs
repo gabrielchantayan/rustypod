@@ -70,7 +70,7 @@ unsafe fn obj_obj2txt(output: *mut u8, capacity: i32, object: *const Asn1Object)
 }
 
 #[inline(always)]
-unsafe fn bio_write(bio: *mut Bio, data: *const u8, len: i32) -> i32 {
+pub(crate) unsafe fn bio_write(bio: *mut Bio, data: *const u8, len: i32) -> i32 {
     #[cfg(target_os = "none")]
     {
         let write: BioWriteFn = unsafe { core::mem::transmute(BIO_WRITE_ADDRESS) };
@@ -100,11 +100,11 @@ pub unsafe extern "C" fn i2a_asn1_object(bio: *mut Bio, object: *const Asn1Objec
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use parking_lot::Mutex;
 
-    static SEAM_LOCK: Mutex<()> = Mutex::new(());
+    pub(crate) static SEAM_LOCK: Mutex<()> = Mutex::new(());
     static mut RENDER_RESULT: i32 = 0;
     static mut WRITTEN: [u8; 80] = [0; 80];
     static mut WRITTEN_LEN: i32 = 0;
