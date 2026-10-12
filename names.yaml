@@ -16,6 +16,33 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0804ebac
+    ghidra: FUN_0804ebac
+    name: ft_select_size
+    size: 84
+    sig: "i32 ft_select_size(FtFace *face, i32 strike_index)"
+    module: ft/select_size
+    status: ported
+    vars:
+      param_1/r0: face
+      param_2/r1: strike_index
+      r2: driver_select_size
+    notes: >-
+      FreeType FT_Select_Size. Raw osos.dec words establish the complete
+      84-byte body at 0x0804ebac..0x0804ec00, followed by the distinct
+      FT_Set_Char_Size prologue. Independent ARM BL-immediate decoding
+      finds two plain incoming calls at 0x0804ea2c and 0x0808f368, zero
+      predicated incoming calls, one plain outgoing call at 0x0804ebf4
+      to the existing ft_select_metrics port (0x0804eafc), and zero
+      predicated outgoing calls. Null faces or faces without fixed sizes
+      return 0x23; negative indices and indices >= signed num_fixed_sizes
+      return 6. Driver class select_size at +0x5c receives face->size and
+      the index via conditional tail BX; absent callbacks select metrics
+      and return zero. Tests cover invalid handles, signed bounds, driver
+      error propagation and active-size changes, and bitmap fallback.
+      match.py reports 26 Rust versus 21 retail instructions: LLVM uses
+      explicit validation branches and delays its frame until fallback,
+      while preserving offsets, signed bounds, and callback tail BX.
   - address: 0x0804ec00
     ghidra: FUN_0804ec00
     name: ft_set_char_size
