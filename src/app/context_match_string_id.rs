@@ -65,7 +65,7 @@ pub unsafe extern "C" fn context_match_string_id(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::root_media_query_is_zero::{ROOT_MEDIA_QUERY, TEST_LOCK};
+    use crate::app::singletons::{MEDIA_PLAYER_INSTANCE, SINGLETON_LOCK};
 
     static mut MEDIA_RESULT: u32 = 0;
     static mut ITEM_RESULT: u32 = 0;
@@ -73,7 +73,7 @@ mod tests {
     static mut EXPECTED_OBJECT: *mut u8 = core::ptr::null_mut();
     static mut ROOT: [u32; 13] = [0; 13];
     unsafe fn root() -> *mut u8 { core::ptr::addr_of_mut!(ROOT).cast() }
-    unsafe extern "C" fn media_query(_: u32) -> u32 {
+    unsafe extern "C" fn media_query(_: *mut u8) -> u32 {
         MEDIA_RESULT
     }
     unsafe extern "C" fn item_query(object: *mut u8, index: u32) -> u32 {
@@ -85,11 +85,13 @@ mod tests {
 
     #[test]
     fn exact_match_and_short_circuit_boundaries() {
-        let _guard = TEST_LOCK.lock();
+        let _guard = SINGLETON_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         unsafe {
-            let saved = (CONTEXT_MATCH_ROOT, ROOT_MEDIA_QUERY, CONTEXT_MATCH_ITEM_QUERY);
+            let saved = (CONTEXT_MATCH_ROOT, MEDIA_PLAYER_INSTANCE, CONTEXT_MATCH_ITEM_QUERY);
+            let vtable = [media_query as unsafe extern "C" fn(*mut u8) -> u32; 102];
+            let mut player = vtable.as_ptr();
+            MEDIA_PLAYER_INSTANCE = core::ptr::addr_of_mut!(player).cast();
             CONTEXT_MATCH_ROOT = root;
-            ROOT_MEDIA_QUERY = media_query;
             CONTEXT_MATCH_ITEM_QUERY = item_query;
             MEDIA_RESULT = 0;
             ITEM_CALLS = 0;
@@ -111,7 +113,7 @@ mod tests {
                     assert_eq!(ITEM_CALLS, 1);
                 }
             }
-            (CONTEXT_MATCH_ROOT, ROOT_MEDIA_QUERY, CONTEXT_MATCH_ITEM_QUERY) = saved;
+            (CONTEXT_MATCH_ROOT, MEDIA_PLAYER_INSTANCE, CONTEXT_MATCH_ITEM_QUERY) = saved;
         }
     }
 }

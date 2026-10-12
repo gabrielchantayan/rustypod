@@ -65,6 +65,7 @@ pub use associated_object_replace::*;
 pub mod playback_position_uncached_get;
 pub mod context_media_query_slot_194;
 pub mod root_media_query_is_zero;
+pub mod media_player_query_code;
 pub mod media_player_refresh_cached_values;
 pub mod media_player_refresh_collection_cache;
 pub mod default_indexed_item_owner_bit_3;

@@ -16,6 +16,36 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08051c1c
+    ghidra: FUN_08051c1c
+    name: media_player_query_code
+    size: 68
+    sig: "u32 media_player_query_code(void)"
+    module: app/media_player_query_code
+    status: ported
+    renames:
+      piVar1/r4: player
+      iVar2: query_result
+      uVar3: query_code
+      FUN_0817ceb4: media_player_get
+    notes: >-
+      Raw A32 extent [0x08051c1c,0x08051c60), ending in e8bd8010
+      before the next real PUSH e92d4030. Whole-image word decoding finds
+      two incoming plain BLs at 0x081115fc and 0x08114670, zero predicated
+      callers. Body has one plain BL to media_player_get, zero predicated
+      BLs, and two register BLX instructions. Incoming r0 is ignored.
+      Return 1 for nonzero virtual slot 100 (+0x190); otherwise reload the
+      object's vtable and return 2 for nonzero slot 101 (+0x194), else 0.
+      No inferred playback semantics. Hosts widen vtable entries while
+      retaining indices. Reuses the existing singleton's cache and constructor
+      limitations; not independently hook-ready. Root caller now calls this
+      port instead of the retail-address seam. Host tests cover high-bit and
+      maximum nonzero values, priority short-circuiting, and vtable replacement
+      by the first query. Standalone host smoke also exercises the root caller.
+      match.py preserves both slot loads, BLX calls, conditional early return,
+      and second vtable load; LLVM adds a frame pointer and extra saves and
+      rearranges the first result comparison. The archive BL is relocatable.
+
   - address: 0x08051e0c
     ghidra: FUN_08051e0c
     name: current_calendar_unix_seconds
@@ -58268,7 +58298,7 @@ functions:
     renames:
       param_1/r0: root
       uVar1: media_query_result
-      FUN_08051c1c: media_query (verified unported retail boundary)
+      FUN_08051c1c: media_player_query_code (ported)
     notes: >-
       Raw extent 0x081115f4..0x0811160c, ending in e8bd8010 before
       the next real function's e92d4038 prologue. One outgoing plain BL
@@ -58280,12 +58310,11 @@ functions:
       Callee raw code ignores the argument, calls media_player_get at
       0x0817ceb4, and returns 1 for nonzero virtual slot +0x190, else
       2 for nonzero slot +0x194, else 0. No guessed playback semantics.
-      ARM retains the unported callee address; hosts install a native
-      operation. Volatile word load preserves the original access.
-      context_match_string_id now calls this canonical port.
-      match.py confirms LDR +0x30 and BLX to literal 0x08051c1c;
-      LLVM uses CLZ / LSR #5 for exact-zero rather than RSBS / MOVCC,
-      with an fp frame instead of the original spare r4 save.
+      Calls the canonical media_player_query_code port on ARM and hosts.
+      Volatile word load preserves the original access despite the callee
+      ignoring its argument. context_match_string_id calls this canonical
+      root predicate. The obsolete retail-address and host-operation seams
+      have been removed.
 
   - address: 0x08177ce0
     ghidra: FUN_08177ce0
