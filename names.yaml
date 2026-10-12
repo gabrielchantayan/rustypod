@@ -248355,3 +248355,38 @@ functions:
       LLVM retains three calls and the reader tail branch, uses explicit
       branches instead of predicated loads, and materializes -65536 without
       a literal. No device execution.
+
+  - address: 0x080528ac
+    ghidra: FUN_080528ac
+    name: ui_tdat_node_at
+    size: 64
+    sig: "u32 ui_tdat_node_at(const u8 *element, u32 index)"
+    module: ui/tdat_node_at
+    status: ported
+    vars:
+      param_1/r0/r3: element
+      param_2/r1/r2: index
+      uVar2/r1: position
+      iVar1/r0: node
+    renames:
+      FUN_0806aa3c: ui_element_is_tdat_class
+    notes: >-
+      Raw A32 extent 0x080528ac..0x080528ec is exactly 64 bytes;
+      the next function begins with push {r4,r5,r6,r7,r8,lr}.
+      Independent whole-image aligned BL decoding finds two plain incoming
+      calls at 0x080ab0c4 and 0x080ab41c, zero predicated incoming calls.
+      The body contains one plain outgoing BL to the already-ported tdat
+      class predicate at 0x0806aa3c, zero predicated outgoing calls.
+      Reject NULL/wrong class, then reject unsigned index >= element+0x24
+      count. Load the raw head at +0x28 and traverse exactly index successor
+      words at node+4. No node validation or early NULL termination is added;
+      index zero returns even an opaque or NULL head without dereferencing it.
+      Callers restore playlist tracks from serialized master-track indices.
+      Deliberate deviation: reuse the Rust class predicate directly; aligned
+      u32 fields retain target pointer width on hosts. Host edge tests and
+      full host suite pass; standalone source executable exercises first and
+      successor lookups, bounds rejection, wrong class and NULL. ARM build-std
+      release succeeds. match.py exits 1: 16 stock versus 19 Rust instructions;
+      LLVM uses explicit class/bounds branches and a countdown loop instead
+      of ADS predication and a count-up loop. The class-call relocation and
+      +0x24/+0x28/+4 field accesses are verified. No device execution.

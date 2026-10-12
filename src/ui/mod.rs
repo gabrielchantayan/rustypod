@@ -13,6 +13,7 @@ pub mod plst_enable_tdat;
 pub mod ui_element_word_pair_set;
 pub mod object_backend_set_control_byte;
 pub mod tdat_node_clear_state;
+pub mod tdat_node_at;
 pub mod plst_reference_state_refresh;
 pub mod curve_scan_reflected;
 pub use curve_scan_reflected::*;
