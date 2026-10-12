@@ -2948,6 +2948,35 @@ functions:
       Parallel host suite SIGSEGVed in sqlite/error_message; serialized suite
       passes 15497 tests. ARM release build and 50-registration executable
       smoke pass. match.py exits 1: 23 instructions each, same bounded scan,
+  - address: 0x08042658
+    ghidra: FUN_08042658
+    name: hfs_allocation_range_release
+    size: 64
+    sig: "u32 hfs_allocation_range_release(u8 *volume, u32 start_block, u32 block_count)"
+    module: fs/hfs_allocation_range_release
+    status: ported
+    vars:
+      param_1/r0: volume
+      param_2/r1: start_block
+      param_3/r2: block_count
+      r4: volume
+      r5: block_count
+    notes: >-
+      Raw words establish [0x08042658,0x08042698), 64 bytes, followed by
+      an independent PUSH entry. Two incoming plain BLs at 0x0804bc2c and
+      0x08064580; one outgoing plain BL at 0x08042674 to bitmap range clear
+      0x08042b4c; no predicated BLs in either direction. Zero count returns
+      zero without dereferencing volume or calling firmware. Nonzero count
+      clears allocation bits through the verified firmware address, propagates
+      errors unchanged, and only on success adds count modulo 2^32 to
+      volume+0x168 before ORing the header halfword with 0xff00. No target
+      behavior deviations; host tests substitute the unported bitmap clear.
+      The existing extent-record caller now calls this Rust wrapper.
+      Host suite and ARM build pass. Standalone smoke verifies bitmap changes,
+      wrapping free-block accounting, flags, error propagation and zero count.
+      match.py exits 1: 21 Rust instructions versus 16 stock, with a literal
+      BLX replacing direct BL and branches replacing predicated field updates;
+      zero-count bypass and success-only accounting remain equivalent.
   - address: 0x0806451c
     ghidra: FUN_0806451c
     name: hfs_extent_record_release
@@ -2973,12 +3002,9 @@ functions:
       Signature 0x482b selects eight HFS+ extents, all others three.
       Reads target-width start/count word pairs, stops on zero count with
       termination one, propagates the first release error, and accumulates
-      only successful counts modulo 2^32. The firmware-owned allocation
-      bitmap range release at 0x08042658 calls 0x08042b4c to clear bitmap
-      bits, then increments volume+0x168 and ORs header flags with 0xff00
-      on success; neither callee has a registry entry or existing Rust seam.
-      Calls its verified raw address without porting that second function.
-      No target behavioral deviations; host release is test-only.
+      only successful counts modulo 2^32. Calls the Rust allocation-range
+      release wrapper, which retains firmware bitmap clear at 0x08042b4c.
+      No target behavioral deviations; host bitmap clear is test-only.
       Host edge tests cover both limits, every terminator and failure
       position, full-width errors, wrapping totals and adjacent byte guards.
       All 15493 host tests pass; ARM release build passes. A standalone

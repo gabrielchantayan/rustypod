@@ -14,6 +14,8 @@ pub mod validated_file_read;
 pub mod validated_file_write;
 /// Validated backing-stream seek @ 0x0805b804.
 pub mod validated_file_seek;
+/// Release an HFS allocation bitmap range @ 0x08042658.
+pub mod hfs_allocation_range_release;
 /// Release an HFS/HFS+ extent record @ 0x0806451c.
 pub mod hfs_extent_record_release;
 /// Release a file fork's inline and overflow extents @ 0x08048138.
