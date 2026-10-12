@@ -65,6 +65,11 @@ pub unsafe extern "C" fn hfs_extent_record_release(
 }
 
 #[cfg(test)]
+pub(crate) fn set_test_release_failure(index: usize, status: u32) {
+    tests::configure_failure(index, status);
+}
+
+#[cfg(test)]
 mod tests {
     extern crate std;
     use super::*;
@@ -74,6 +79,10 @@ mod tests {
     std::thread_local! {
         static STATE: RefCell<(Vec<(u32, u32)>, usize, u32)> =
             RefCell::new((Vec::new(), usize::MAX, 0));
+    }
+
+    pub(super) fn configure_failure(index: usize, status: u32) {
+        STATE.with(|state| *state.borrow_mut() = (Vec::new(), index, status));
     }
 
     pub unsafe fn release_range(volume: *mut u8, start: u32, count: u32) -> u32 {
