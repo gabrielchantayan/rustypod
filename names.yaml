@@ -16,6 +16,40 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0804af10
+    ghidra: FUN_0804af10
+    name: evp_pkey_size
+    size: 32
+    sig: "int evp_pkey_size(const EvpPkey *key)"
+    module: crypto/evp_pkey
+    status: ported
+    renames:
+      param_1/r0: key
+      r1: pkey_type
+      FUN_08063040: rsa_size
+    notes: >-
+      Raw osos.dec establishes eight ARM words, 0x0804af10..0x0804af30;
+      the next real entry is EVP_PKEY_type at 0x0804af30. Whole-image
+      A32 BL decoding finds exactly two inbound plain BL sites at
+      0x0805fcd0 and 0x08060154, zero predicated BL sites. There is no
+      outbound BL: LDREQ r0,[r0,#12] followed by BEQ 0x08063040
+      tail-dispatches the RSA payload to the already-ported RSA_size.
+      NULL and every type other than 6 return zero, including raw RSA2
+      tag 19; no normalization is performed. This is OpenSSL
+      EVP_PKEY_size, supported by the neighboring EVP constructor,
+      destructor and type normalizer and the verified RSA_size callee.
+      Ghidra's C incorrectly folds the tail callee into this function.
+      Reuses EvpPkey's repr(C) fields, which retain target offsets while
+      widening host pointers; no new seam. Inherits RSA_size and
+      BN_num_bits's documented worker/table deviations. Host tests
+      cover NULL, unsupported tags with NULL payload, zero-top modulus
+      with NULL limbs, byte-rounding boundaries and multi-limb moduli,
+      using the actual ported bit-length worker under its existing lock.
+      ARM match.py confirms NULL/type gates, payload load at +0x0c,
+      tail branch and zero return; LLVM adds a frame and uses a branch
+      instead of LDREQ. The relocation-bearing tail branch is RSA_size,
+      not recursive dispatch despite objdump's unresolved label.
+
   - address: 0x0804be3c
     ghidra: FUN_0804be3c
     name: retail_runtime_initialize_once
