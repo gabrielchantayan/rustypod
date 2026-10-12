@@ -1,4 +1,6 @@
 //! retailOS-native utility functions (CRC, itoa, byte swaps, ...).
+pub mod counted_wstr_append;
+pub use counted_wstr_append::*;
 pub mod array_record_initialize;
 pub mod retail_runtime_initialize_once;
 pub mod stream_read_be16_or_zero;
