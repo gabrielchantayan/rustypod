@@ -16,6 +16,29 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08049f88
+    ghidra: FUN_08049f88
+    name: evp_cipher_update
+    size: 48
+    sig: "int evp_cipher_update(uint32_t *ctx, uint8_t *output, int32_t *output_len, const uint8_t *input, int32_t len)"
+    module: crypto/evp_cipher_update
+    status: ported
+    renames:
+      param_1/r0: ctx
+      r1: output
+      r2: output_len
+      r3: input
+      stack_arg_0: len
+      FUN_0804aa88: evp_encrypt_update
+      FUN_0804a43c: evp_decrypt_update
+    notes: >-
+      Raw ARM confirms extent 0x08049f88..0x08049fb8 (12 words), two
+      outgoing plain BLs and no predicated BLs. Whole-image decoding finds
+      two incoming plain BLs at 0x080ef328 and 0x080f48e0, no predicated
+      BLs. Context u32 word 2 selects encrypt for any nonzero value and
+      decrypt for zero. Preserves five arguments and worker return value;
+      Ghidra's void one-argument signature is incomplete. Workers remain
+      stock firmware calls through volatile seams, not additional ports.
   - address: 0x0804add8
     ghidra: FUN_0804add8
     name: evp_pkey_copy_parameters
