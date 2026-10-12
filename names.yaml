@@ -16,6 +16,32 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08044d3c
+    ghidra: FUN_08044d3c
+    name: artwork_database_release
+    size: 28
+    sig: "void artwork_database_release(u32 *owner)"
+    module: app/artwork_database_release
+    status: ported
+    renames:
+      param_1/r0: owner
+      FUN_080490b8: media_allocation_release
+    notes: >-
+      Raw words e92d4010 e1a04000 e5900f9c eb0010da e3a00000
+      e5840f9c e8bd8010 establish extent [0x08044d3c,0x08044d58).
+      The next independent PUSH begins another function. Whole-image aligned
+      raw BL decoding verifies one plain inbound BL at 0x08068f94 and one
+      predicated BLNE at 0x0805824c; the sole outbound BL at 0x08044d48
+      reaches 0x080490b8 unconditionally. The Artwork/ArtworkDB caller
+      establishes the field role. Release owner+0xf9c, including a zero
+      word, then clear the field after return. Reuses MEDIA_SLOT_RELEASE_OPS
+      without a new callee seam; the callee's complete identity remains
+      unrecovered. Deliberate deviation: the reused typed ops seam generates
+      LDRD/BLX rather than direct BL, plus LLVM frame setup; load, call,
+      zero-store ordering matches. Host edge tests cover null and high-bit
+      words, release-before-clear, callback mutation, and adjacent storage.
+      Host suite passed 15743 tests; ARM release build and standalone
+      exported-path smoke passed. match.py structural diff reviewed.
   - address: 0x08044d90
     ghidra: FUN_08044d90
     name: media_slot_release
