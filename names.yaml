@@ -248880,3 +248880,35 @@ functions:
       instructions. LLVM adds push/mov frame setup and returns with
       pop instead of bx lr; the same ldr +0xf00 and ldrb +0xb78 remain.
       The exported symbol is present with no added calls or semantic changes.
+
+  # --- Board-version tail-branch veneer (sysinfo) ---
+  - address: 0x080515e4
+    ghidra: thunk_FUN_080e624c
+    name: board_version_veneer
+    size: 4
+    sig: "u32 board_version_veneer(void)"
+    module: sysinfo
+    status: ported
+    renames:
+      FUN_080e624c: board_version
+      return/r0: cached_board_version_word
+    notes: >-
+      Raw word 0xea025318 is the single unconditional b 0x080e624c.
+      True extent [0x080515e4,0x080515e8) ends at the independent
+      ldr r0,[r0,#0xf00] getter. Whole-image aligned A32 BL decoding
+      independently finds two plain inbound calls at 0x08103c3c and
+      0x082a1a7c, zero predicated calls, and zero outbound BLs.
+      The callers classify the high/low halfwords and split them into
+      u16 outputs respectively. Return the complete lazily cached
+      board-version word unchanged through the existing Rust board_version
+      port; no new fixed-address seam. The target splitter now calls this
+      Rust veneer; its host recording seam remains for splitter tests.
+      Host tests cover NULL-context retry, a sentinel-valued source,
+      refresh to zero, cached-zero retention, and asymmetric cached words.
+      Standalone host smoke exercised NULL retry, refresh to 0x00100006,
+      cache retention, and refresh to 0xffffffff using the ported bodies.
+      Host suite and ARM release build passed; no device execution.
+      match.py exited 1 with a structural diff: LLVM adds push/mov/pop
+      frame instructions before the tail branch. The archive relocation
+      is R_ARM_JUMP24 board_version, preserving the original dispatch;
+      match.py displays the unresolved branch as a self-reference.

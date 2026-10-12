@@ -179,6 +179,28 @@ pub unsafe extern "C" fn board_version() -> u32 {
     cache.read_volatile()
 }
 
+/// board_version_veneer — retailOS `thunk_FUN_080e624c` @ 0x080515e4.
+///
+/// True extent: 4 bytes, before the independent getter at 0x080515e8.
+/// Raw word 0xea025318 is `b 0x080e624c`, not BL or an indirect load.
+/// Whole-image aligned A32 decoding finds two inbound plain BLs at
+/// 0x08103c3c and 0x082a1a7c, zero predicated BLs, and no outbound BLs.
+/// Tail-dispatch to the lazily cached board-version getter, returning its
+/// complete u32 word unchanged. Callers classify or split the two halfwords.
+///
+/// Deviation: the branch resolves to the existing Rust [`board_version`]
+/// port instead of the stock address; host storage follows that port.
+/// LLVM may use a call/return rather than the original tail branch.
+///
+/// # Safety
+/// Same writable cache, readable shared context, and external serialization
+/// requirements as [`board_version`].
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn board_version_veneer() -> u32 {
+    board_version()
+}
+
 /// iram_copy_start_offset — retailOS `FUN_082bc600` at `0x082bc600`.
 ///
 /// True extent: 8 bytes, ending before the independent literal-load getter
@@ -592,6 +614,29 @@ mod tests {
 
         fn write_version_word(&mut self, word: u32) {
             self.0[CONTEXT_BOARD_VERSION_OFFSET / 4] = word;
+        }
+    }
+
+    #[test]
+    fn veneer_retries_missing_and_sentinel_context_then_keeps_cached_zero() {
+        let _fixture = Fixture::install(BOARD_VERSION_SENTINEL, core::ptr::null_mut());
+        assert_eq!(unsafe { board_version_veneer() }, BOARD_VERSION_SENTINEL);
+
+        let mut context = Context::with_version_word(BOARD_VERSION_SENTINEL);
+        unsafe { crate::ui::object_state::host_install_shared_context(context.as_ptr()) };
+        assert_eq!(unsafe { board_version_veneer() }, BOARD_VERSION_SENTINEL);
+        context.write_version_word(0);
+        assert_eq!(unsafe { board_version_veneer() }, 0);
+        context.write_version_word(u32::MAX);
+        assert_eq!(unsafe { board_version_veneer() }, 0);
+    }
+
+    #[test]
+    fn veneer_preserves_cached_halfwords_without_refreshing() {
+        let mut context = Context::with_version_word(0x000b_0010);
+        for cached in [0x000b_0011, 0x0010_0006, 0x8000_ffff, u32::MAX] {
+            let _fixture = Fixture::install(cached, context.as_ptr());
+            assert_eq!(unsafe { board_version_veneer() }, cached);
         }
     }
 
