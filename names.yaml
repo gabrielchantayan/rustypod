@@ -49563,6 +49563,37 @@ functions:
       body preserves r3 = 6 through the existing message_dispatch_veneer
       seam; pad words 6/7 zeroed rather than left uninitialized.
 
+  - address: 0x08047edc
+    ghidra: FUN_08047edc
+    name: gateway_request_tag3
+    size: 100
+    sig: "void gateway_request_tag3(u32 payload)"
+    module: kernel/gateway_request_blocking
+    status: ported
+    vars: {param_1: payload, local_2c: request_frame}
+    renames:
+      FUN_080c8304: gateway_wait_ready
+      thunk_EXT_FUN_22003fd0: rom_sem_wait
+      thunk_EXT_FUN_2200418c: mailbox_send_gateway_mode1
+      thunk_EXT_FUN_220042b4: rom_sem_signal
+    notes: >-
+      Raw extent [0x08047edc,0x08047f40) is 100 bytes, ending before the
+      next PUSH. Independent whole-image ARM BL decoding finds two plain
+      incoming calls at 0x08068df0 and 0x0813af1c, no predicated calls;
+      callers pass payloads 3 and 18 and discard r0. Four plain outgoing
+      BL instructions, no predicated BL. Waits for readiness, posts the
+      nine-word frame {0,0,0,0,3,payload,pad,pad,0} through mailbox 1,
+      priority 5, semaphore 6, bracketed by semaphore 9. Dispatch and
+      release still run after wait failure. Reuses the established ready
+      and kernel seams; mailbox veneer targets the IRAM mirror, not ROM.
+      Deviations: zeroes tag padding and unwritten words 6/7; returns void
+      because callers discard the final signal status. Host coverage:
+      zero, observed IDs, high-bit and all-one payloads, four-byte frame
+      words, ordering and release after wait failure. Runtime smoke
+      exercised the exported helper through real mode-1 mailbox dispatch.
+      match.py confirms frame offsets and four-call sequence; differences
+      are full-word stores, FP prologue and three indirect seam calls.
+
   - address: 0x08048064
     ghidra: FUN_08048064
     name: gateway_request_blocking_flag_one
