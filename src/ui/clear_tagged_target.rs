@@ -9,9 +9,9 @@
 //! Increment source link_count even if the dispatch accessor returns null.
 //! Decrement busy, destroy storage, and zero exactly 56 target bytes.
 //!
-//! Deliberate deviations: reuse ported callees and the existing injectable
-//! storage destruction boundary. Host IndexedObject slots are native pointers;
-//! record pointers remain u32 words. No algorithmic deviations.
+//! Deliberate deviations: reuse ported callees, including embedded storage
+//! destruction. Host IndexedObject slots are native pointers; record pointers
+//! remain u32 words. No algorithmic deviations.
 
 use core::ptr;
 use super::object_state::{indexed_object_element, indexed_object_offset, IndexedObject};
@@ -30,7 +30,7 @@ type DestroyStorage = unsafe extern "C" fn(*mut u8) -> u32;
 /// Null is accepted. Matching active targets must own a writable 56-byte
 /// object and valid indexed storage. Source record words must point to
 /// complete writable source objects with valid reciprocal indexed storage.
-/// Storage destruction must be available or installed by the host caller.
+/// Embedded storage must satisfy embedded_list_storage_destroy's contract.
 #[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn clear_tagged_target(target: *mut u8) {

@@ -39,6 +39,7 @@ extern crate std;
 /// six files. Each region is at most 0x0100_0000 wide, so neighbours cannot
 /// overlap.
 pub mod hints {
+    pub const EMBEDDED_LIST_STORAGE_DESTROY: usize = 0x720a_0000;
     pub const CLEAR_TAGGED_LIST: usize = 0x7208_0000;
     pub const CLEAR_TAGGED_TARGET: usize = 0x7209_0000;
     pub const TDAT_DESTROY: usize = 0x7207_0000;
