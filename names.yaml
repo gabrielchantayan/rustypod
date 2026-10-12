@@ -16,6 +16,50 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0803e200
+    ghidra: FUN_0803e200
+    name: bn_add_word
+    size: 220
+    sig: "int bn_add_word(BigNum *a, u32 word)"
+    module: crypto/bn_add_word
+    status: ported
+    vars:
+      param_1: a
+      param_2: word
+      uVar1: result
+      piVar2: expanded_a
+      iVar3: limb_index_or_top
+      uVar4: sum
+      bVar5: single_limb
+    renames:
+      FUN_08040b30: bn_sub_word
+      FUN_082b8174: bn_expand_words
+    notes: >-
+      Raw A32 extent [0x0803e200,0x0803e2dc) is 220 bytes; next
+      entry begins with an independent PUSH. Binary-wide decoding finds
+      two incoming plain BLs at 0x0803e8d8 and 0x08040b74, zero predicated
+      BLs. Two outgoing plain BLs at 0x0803e228 and 0x0803e280 reach
+      BN_sub_word and the verified capacity worker. No prior canonical
+      entry existed for this address or the capacity worker; reuse the
+      existing BN_EXPAND_WORDS seam and ported BN_sub_word, replacing
+      BN_sub_word's obsolete addition slot with a direct Rust call.
+      Positive addition reserves top+1 before writes, propagates carry,
+      and extends top only at the former end. Empty magnitude plus zero
+      becomes top=1; negative empty zero retains neg=1. Negative inputs
+      clear neg, subtract, then flip zero/one sign only for nonzero
+      magnitude. Failure preserves storage but retains stock sign effects.
+      Deviations: native-pointer repr(C) host layout and volatile capacity
+      dispatch instead of direct BL. Tests cover signed boundaries, full
+      carry chains, zero forms, relocation, failure and write bounds;
+      15774 host tests pass. ARM release build passes. Actual-source smoke
+      proves carry extension, direct subtraction cutover, negative addition
+      and guard preservation. Full non-test host build is blocked by four
+      unrelated missing symbols in prepare_entry_metadata,
+      shared_payload_select_kind and calendar_schedule; smoke directly
+      compiles the affected modules. match.py exits 1: 55 stock versus 77
+      Rust instructions. LLVM splits the first carry iteration, adds a
+      frame pointer and uses BLX for capacity; signed capacity comparison,
+      failure return, carry propagation and conditional sign flip survive.
   - address: 0x0803f4b8
     ghidra: FUN_0803f4b8
     name: bn_lshift1
@@ -104,13 +148,15 @@ functions:
       Raw A32 extent [0x08040b30,0x08040bf0) is 192 bytes; next entry
       begins with independent PUSH. Two inbound plain BLs, zero predicated
       BLs; one outgoing plain BL at 0x08040b74 to BN_add_word 0x0803e200.
-      Its carry loop and signed recursion verify identity; no canonical
-      names entry exists for that callee. Ghidra's third argument is scratch
+      Its carry loop and signed recursion verify identity; the callee now
+      has a canonical ported entry. Ghidra's third argument is scratch
       r2, not an input. Subtract word with borrow; single-limb underflow
       reverses sign. Zero or negative magnitude delegates to addition and
       sets neg=1 even on failure. Trim at most one high zero limb.
-      Deviations: native-pointer repr(C) BigNum on hosts and volatile add
-      slot producing BLX. Host suite passed 15765 tests; ARM build passed.
+      Deviation: native-pointer repr(C) BigNum on hosts. Addition now calls
+      the Rust BN_add_word directly; its obsolete dispatch slot and test
+      model are removed. Updated host suite and ARM release build pass.
+      The following comparison describes the original subtraction port.
       Actual-source smoke verifies 2^64-1 and guard preservation. Reviewed
       match.py diff: 48 versus 70 instructions; LLVM splits the borrow loop.
   - address: 0x080437e8
