@@ -3,6 +3,7 @@
 pub mod media_player_selected_payload_index;
 pub mod settings_scale_midpoint;
 pub mod controller_context_value;
+pub mod controller_context_word_index;
 pub mod scoped_context_contains_playlist;
 pub mod queue_insert_veneer;
 pub mod callback_table_random_seed;

@@ -12,7 +12,7 @@
 //! the exported function retains the original address and behavior.
 
 #[inline(always)]
-unsafe fn find_word(value: u32, output: *mut u32, table: *const u32) -> i32 {
+pub(super) unsafe fn find_word(value: u32, output: *mut u32, table: *const u32) -> i32 {
     if output.is_null() {
         return -50;
     }
