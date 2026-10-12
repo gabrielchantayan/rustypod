@@ -10,7 +10,7 @@
 //! decrement busy, destroy embedded storage, and zero exactly 52 bytes.
 //!
 //! Deliberate deviations: existing Rust ports replace their stock calls;
-//! three verified unported routines use injectable firmware boundaries.
+//! two verified unported routines use injectable firmware boundaries.
 //! Hosts retain IndexedObject's native storage slot; record pointers remain
 //! u32 firmware words. No algorithmic deviations.
 
@@ -23,6 +23,7 @@ use crate::util::object_counter_increment::object_counter_increment;
 use crate::util::positive_counter_decrement::positive_counter_decrement;
 use crate::util::dynamic_array_remove::dynamic_array_remove;
 use crate::libc::bzero::bzero;
+use super::embedded_list_storage_destroy::embedded_list_storage_destroy;
 
 type Notify = unsafe extern "C" fn(*mut u8, u32, *mut u8, u32, u32);
 type FindSource = unsafe extern "C" fn(*mut TaggedLinkTarget, *mut TaggedLinkSource) -> u32;
@@ -48,15 +49,9 @@ unsafe extern "C" fn retail_find_source(target: *mut TaggedLinkTarget, source: *
     #[cfg(not(target_os = "none"))]
     { let _ = (target, source); panic!("install reciprocal source lookup boundary"); }
 }
-unsafe extern "C" fn retail_destroy_storage(list: *mut u8) -> u32 {
-    #[cfg(target_os = "none")]
-    { let call: DestroyStorage = core::mem::transmute(0x0804_8230usize); call(list) }
-    #[cfg(not(target_os = "none"))]
-    { let _ = list; panic!("install embedded storage destruction boundary"); }
-}
 
 pub const DEFAULT_CLEAR_TAGGED_LIST_OPS: ClearTaggedListOps = ClearTaggedListOps {
-    notify: retail_notify, find_source: retail_find_source, destroy_storage: retail_destroy_storage,
+    notify: retail_notify, find_source: retail_find_source, destroy_storage: embedded_list_storage_destroy,
 };
 pub static mut CLEAR_TAGGED_LIST_OPS: ClearTaggedListOps = DEFAULT_CLEAR_TAGGED_LIST_OPS;
 

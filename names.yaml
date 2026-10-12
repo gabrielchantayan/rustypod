@@ -249949,3 +249949,31 @@ functions:
       the NULL test before the frame, combines wrapping subtractions, and
       replaces predicated returns with branches; the guarded move and post-copy
       halfword reload/subtract/store remain intact.
+
+  - address: 0x08048230
+    ghidra: FUN_08048230
+    name: embedded_list_storage_destroy
+    size: 40
+    sig: "u32 embedded_list_storage_destroy(u8 *list)"
+    module: ui/embedded_list_storage_destroy
+    status: ported
+    vars: {param_1/r4: list, r0: handle}
+    renames:
+      FUN_0805d028: memh_handle_destroy
+      FUN_0805cfb4: bzero
+    notes: >-
+      Raw A32 words establish [0x08048230,0x08048258), 40 instruction
+      bytes; the next independent PUSH begins at 0x08048258. Whole-image
+      aligned-word decoding finds two inbound plain BLs at 0x080488c0
+      and 0x0804897c, zero predicated inbound BLs. Outgoing calls are
+      BLNE at 0x08048240 to memh_handle_destroy and BL at 0x0804824c
+      to bzero. Load the handle word at list+24, destroy it if nonzero,
+      zero exactly 36 bytes, and return zero without validating the list
+      tag or accepting NULL. Target-width word indexing retains field
+      spacing on hosts. Existing tagged-list and tagged-target cleanup
+      defaults now use the Rust port instead of the firmware boundary.
+      Host tests cover absent handles, invalid magic, valid handles with
+      and without payload, exact clearing bounds, and repeat cleanup.
+      ARM match review confirms conditional destruction, 36-byte zeroing,
+      and zero return; LLVM uses a branch around BL instead of BLNE and
+      saves extra frame registers. No algorithmic deviations.
