@@ -251675,3 +251675,39 @@ functions:
       early rejection, all three calls, the post-ensure NULL check, the
       +0x20 load/+0x5c write and zero/nonzero status collapse. Differences
       are register allocation, frame pointer and conditional return layout.
+
+  - address: 0x0803a310
+    ghidra: FUN_0803a310
+    name: asn1_string_print
+    size: 188
+    sig: "i32 asn1_string_print(BIO *bio, const ASN1_STRING *string)"
+    module: crypto/asn1_string_print
+    status: ported
+    renames:
+      param_1/r0/r9: bio
+      param_2/r1/r5: string
+      r6: data
+      r4: index
+      r2: used
+      local_6c/sp_plus_4: buffer
+      FUN_0803da74: bio_write
+    notes: >-
+      OpenSSL ASN1_STRING_print. Raw extent is 188 bytes through 0x0803a3c8;
+      the next real function prologue starts at 0x0803a3cc, with no literal
+      pool. Independently decoded body has two plain BLs to BIO_write at
+      0x0803a37c and 0x0803a3ac, no predicated BLs. Full-image decoding
+      finds two plain inbound BLs at 0x08088f48 and 0x080f5164, no predicated
+      inbound BLs. Sanitizes counted bytes to ASCII 32..126 plus CR/LF,
+      replacing all others with dots, and writes chunks of 80 plus a tail.
+      NULL string returns zero; zero or negative signed length returns one.
+      Nonpositive writes fail immediately; positive short writes succeed
+      without retry. Data is captured once and length is reloaded on each
+      iteration. Reuses OwnedBuffer target-layout prefix and the existing
+      i2a_asn1_object BIO_write seam; no behavioral deviations. Host suite
+      passed 15805 tests, including byte-domain, chunk-boundary, signed-length,
+      failure and callback length-mutation cases. Standalone actual-source
+      stdout smoke rendered 81 sanitized bytes and returned one. ARM release
+      build passed. match.py exits 1 with 57 versus 47 instructions: LLVM
+      retains both writes, 80-byte batching, signed length reload and return
+      gates, using BLX through the verified address literal instead of BL,
+      different registers, a frame pointer and equivalent ASCII predicates.
