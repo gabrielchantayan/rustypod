@@ -16,6 +16,42 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0803dbd8
+    ghidra: FUN_0803dbd8
+    name: bn_blinding_invert
+    size: 120
+    sig: "int bn_blinding_invert(BigNum *value, TwoBufferOwner *owner, TaggedWordBufferPool *ctx)"
+    module: crypto/bn_blinding_invert
+    status: ported
+    renames:
+      param_1/r0: value
+      param_2/r1/r4: owner
+      param_3/r2/r6: ctx
+      r5: multiply_status
+      FUN_0803ff80: bn_mod_mul
+      FUN_0803dd00: bn_blinding_update
+      FUN_08049a84: diag_ring_record
+    notes: >-
+      Raw extent 0x0803dbd8..0x0803dc50 is 120 bytes, ending at the next
+      independent factory prologue. Three outbound plain BL instructions
+      (0x0803dc0c, 0x0803dc20, 0x0803dc34), no predicated BL. Two inbound
+      plain BL callers (0x080cba48, 0x080cbda8), no predicated callers.
+      RSA callers apply this after private exponentiation. Missing first or
+      second factor diagnoses (3,0x65,0x6b,0,0) and returns zero; otherwise
+      multiply value in place by second modulo trailing[0], then update
+      factors. A negative multiply result skips update and is returned;
+      zero still updates. Update failure returns zero without undoing the
+      multiplication. Uses existing bn_mod_mul and target-layout
+      TwoBufferOwner. Unported BN_BLINDING_update at 0x0803dd00 is reached
+      through a volatile slot with a stock target default. Its raw words
+      and C show two sequential factor self-multiplies modulo trailing[0].
+      Host tests cover signed errors, zero product, update failure and factor
+      progression. match.py shows the expected factor gates and in-place
+      multiply followed by an indirect update; LLVM removes the signed
+      negative branch because the existing bn_mod_mul returns only 0 or 1.
+      Standalone host library smoke is blocked by existing missing host
+      symbols prepare_metadata, extract_metadata, configure_shared_payload_kind,
+      and notify_calendar_change; the algorithm is separately smoke-executed.
   - address: 0x0803e200
     ghidra: FUN_0803e200
     name: bn_add_word
