@@ -16,6 +16,38 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0803bb60
+    ghidra: FUN_0803bb60
+    name: parameter_template_new
+    size: 132
+    sig: "int parameter_template_new(u32 *output, const u32 *template, u32 incoming_r2, u32 context)"
+    module: runtime/parameter_template_new
+    status: ported
+    vars:
+      param_1/r0/r4: output
+      param_2/r1/r2: template
+      r3: context
+      uVar1: flags
+      puVar6: item
+    renames:
+      FUN_080adf88: optional_template_initialize
+      FUN_08369778: ata_call_with_zero
+      FUN_08049a84: diag_ring_record
+      FUN_080d3a78: parameter_descriptor_resolve
+    notes: >-
+      Raw extent 0x0803bb60..0x0803bbe4 is 132 bytes; the next real
+      entry is an independent LDR/B descriptor veneer. Three plain
+      outbound BL instructions at 0x0803bb84, 0x0803bbac, 0x0803bbcc;
+      zero predicated BL. Ghidra incorrectly includes the tail target.
+      Optional bit 1 precedes ADB mask 0x300, which precedes collection
+      mask 6. Optional initialization always returns success; ADB clears
+      output. Empty-stack allocation failure preserves output and records
+      (13,133,65,0,0). Otherwise tail-resolve item word 4 with flags & 0x400
+      and incoming r3. Existing stack factory and diagnostic ports reused.
+      Deviations: verified unported workers use absolute function pointers;
+      LLVM emits BLX for optional initialization and BX for resolver tail.
+      Host edge tests and public allocation-failure smoke pass; ARM build
+      passes. match.py exits 1: 33 stock versus 42 Rust lines, preserving
   - address: 0x0803c5e8
     ghidra: FUN_0803c5e8
     name: counted_wstr_append
