@@ -16,6 +16,51 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080443b4
+    ghidra: FUN_080443b4
+    name: item_refresh_primary_string
+    size: 92
+    sig: "u32 item_refresh_primary_string(PrimaryStringItem *item)"
+    module: ui/item_refresh_primary_string
+    status: ported
+    renames:
+      param_1/r0/r4: item
+      item+0x0: owner
+      item+0x2c: string_id
+      item+0x30: derived_string_id
+      item+0x15: primary_string_flag_byte
+      local_c: payload
+      local_10: byte_length
+      FUN_080d6e50: indexed_payload_lookup_mode_one
+      FUN_08059c68: counted_wstr_validate
+      FUN_080dca4c: resident_refresh_derived_string
+    notes: >-
+      Raw ARM establishes [0x080443b4,0x08044410), 92 bytes, no literals;
+      the next independent PUSH begins at 0x08044410. Whole-image aligned
+      immediate decoding finds two incoming plain BLs at 0x08067c10 and
+      0x08095cfc, zero predicated incoming BLs, three outgoing plain BLs
+      at 0x080443d0, 0x080443e8 and 0x08044408, and zero predicated
+      outgoing BLs. The assigned count of two is incoming, not outgoing.
+      Look up id +0x2c in owner+0x118, ignore status, logically halve byte
+      length, validate with flags 0x1d, replace only flag bit 4 at +0x15,
+      then invoke resident 0x080dca4c. That helper manages derived id +0x30
+      in owner+0x170 and refreshes its flag through 0x08044410; its raw
+      epilogue returns a boolean in r0, preserved despite Ghidra's void
+      wrapper signature. Canonical names confirm both initial callees are
+      ported and neither this entry nor 0x080dca4c had an existing record.
+      The helper's product identity is unresolved: retain its verified
+      address behind a typed resident/host seam, not a fake implementation.
+      Host default fails loudly; tests inject dependent state changes.
+      Deviations: initialized scratch outputs, repr(C) native host owner
+      width, and indirect resident call. Validator flags force rejection;
+      retain both real callees rather than replacing them with a bit clear.
+      Host tests cover every flag byte, empty/failed lookup, signed id
+      extremes, neighboring state and dependent-update ordering. Host suite
+      passes 15751 tests; ARM release build passes. Standalone actual-library
+      smoke confirms ff to ef, dependent refresh sees the new flag, and
+      zero return is preserved. match.py exits 1: 28 versus 23 instructions,
+      with LLVM frame setup, scratch initialization and BLX seam; index/id
+      offsets, logical halving and flag store remain.
   - address: 0x08044900
     ghidra: FUN_08044900
     name: refcounted_buffer_owner_release
