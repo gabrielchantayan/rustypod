@@ -324,6 +324,7 @@ pub mod ptrmap_put;
 pub mod ptrmap_put_overflow_cell;
 pub mod read_schema;
 pub mod release_mem_array;
+pub mod vdbe_clear_object;
 pub mod schema_to_index;
 pub mod verify_table_locks;
 pub mod verify_named_schema_locks;

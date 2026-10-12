@@ -13,9 +13,9 @@
 //! clear its owned execution state, restore `VDBE_MAGIC_INIT`, clear `expired`,
 //! and return `rc & db->errMask`.
 //!
-//! Deliberate deviations: `sqlite3VdbeHalt` and `sqlite3VdbeClearObject` are
-//! unavailable ports, so target builds call their verified retail addresses and
-//! host tests install replaceable recorders. The firmware's `zErrMsg` pointer
+//! Deliberate deviations: `sqlite3VdbeHalt` is unavailable, so target builds
+//! call its verified retail address and host tests install a recorder.
+//! ClearObject defaults to its Rust port. The firmware's `zErrMsg` pointer
 //! is stored as a target-width word to preserve the following `pResultSet`
 //! offset on 64-bit hosts.
 
@@ -24,7 +24,6 @@ use super::value_set_str::sqlite_value_set_str;
 use super::vdbe::Vdbe;
 
 pub const VDBE_HALT_ADDRESS: usize = 0x0838_b084;
-pub const VDBE_CLEAR_OBJECT_ADDRESS: usize = 0x0804_4c78;
 const VDBE_MAGIC_INIT: u32 = 0x26bc_eaa5;
 
 pub type VdbeHalt = unsafe extern "C" fn(*mut Vdbe);
@@ -36,21 +35,12 @@ unsafe extern "C" fn retail_vdbe_halt(statement: *mut Vdbe) {
     halt(statement);
 }
 
-#[cfg(target_os = "none")]
-unsafe extern "C" fn retail_vdbe_clear_object(statement: *mut Vdbe, arg: *mut u8) {
-    let clear: VdbeClearObject = core::mem::transmute(VDBE_CLEAR_OBJECT_ADDRESS);
-    clear(statement, arg);
-}
 
 #[cfg(not(target_os = "none"))]
 unsafe extern "C" fn missing_vdbe_halt(_statement: *mut Vdbe) {
     panic!("sqlite_vdbe_reset requires retail helper @ 0x0838b084")
 }
 
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_vdbe_clear_object(_statement: *mut Vdbe, _arg: *mut u8) {
-    panic!("sqlite_vdbe_reset requires retail helper @ 0x08044c78")
-}
 
 #[derive(Clone, Copy)]
 pub struct VdbeResetOps {
@@ -61,13 +51,13 @@ pub struct VdbeResetOps {
 #[cfg(target_os = "none")]
 pub const DEFAULT_VDBE_RESET_OPS: VdbeResetOps = VdbeResetOps {
     halt: retail_vdbe_halt,
-    clear_object: retail_vdbe_clear_object,
+    clear_object: super::vdbe_clear_object::vdbe_clear_object,
 };
 
 #[cfg(not(target_os = "none"))]
 pub const DEFAULT_VDBE_RESET_OPS: VdbeResetOps = VdbeResetOps {
     halt: missing_vdbe_halt,
-    clear_object: missing_vdbe_clear_object,
+    clear_object: super::vdbe_clear_object::vdbe_clear_object,
 };
 
 pub static mut VDBE_RESET_OPS: VdbeResetOps = DEFAULT_VDBE_RESET_OPS;
