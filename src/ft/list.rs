@@ -1,8 +1,8 @@
-//! FreeType `ftlist.c` — the doubly-linked list primitives shared by the
-//! module, service, and driver registries. This file currently ports the
-//! search primitive only.
+//! FreeType `ftlist.c` — doubly-linked list search, removal, and finalization
+//! shared by the module, service, and driver registries.
 
 use core::ptr;
+use crate::ft::memory::{ft_mem_free, FtMemory};
 
 /// `FT_ListNodeRec` — the node the original walks. On ARM it is 12
 /// bytes: `prev` @ +0, `next` @ +4, `data` @ +8. `ft_list_find` touches
@@ -105,6 +105,46 @@ pub unsafe extern "C" fn ft_list_remove(list: *mut FtList, node: *mut FtListNode
     } else {
         ptr::write_volatile(ptr::addr_of_mut!((*next).prev), prev);
     }
+}
+
+/// FreeType `FT_List_Finalize` — original `FUN_0804cac8` @ **0x0804cac8**.
+/// Raw A32 extent is 92 bytes, [0x0804cac8,0x0804cb24); the next real
+/// function is `ft_list_find`. Verified outgoing calls: one plain BL to
+/// `ft_mem_free`, zero predicated BLs, and one BLXNE through the destructor.
+/// Two incoming plain BLs at 0x0807c340 and 0x08086930; no predicated BLs.
+///
+/// Snapshot each node's data and next link, optionally destroy its payload
+/// with `(memory, data, user)`, then free the node using the saved allocator.
+/// Follow the saved next link even if callbacks modify the current node.
+/// Clear head and tail only after the traversal, including for an empty list.
+///
+/// Deliberate deviations: native host pointers widen the repr(C) fields;
+/// target fields retain the original four-byte layout. No algorithm changes.
+///
+/// # Safety
+/// `list` must be writable and its head must lead to a finite valid node chain.
+/// Nonempty lists require a valid allocator able to free every node. Callbacks
+/// must preserve the list header and all saved successor nodes until visited.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn ft_list_finalize(
+    list: *mut FtList,
+    destroy: Option<unsafe extern "C" fn(*mut FtMemory, *mut core::ffi::c_void, *mut core::ffi::c_void)>,
+    memory: *mut FtMemory,
+    user: *mut core::ffi::c_void,
+) {
+    let mut node = ptr::read_volatile(ptr::addr_of!((*list).head));
+    while !node.is_null() {
+        let data = ptr::read_volatile(ptr::addr_of!((*node).data));
+        let next = ptr::read_volatile(ptr::addr_of!((*node).next));
+        if let Some(destroy) = destroy {
+            destroy(memory, data, user);
+        }
+        ft_mem_free(memory, node.cast());
+        node = next;
+    }
+    ptr::write_volatile(ptr::addr_of_mut!((*list).head), ptr::null_mut());
+    ptr::write_volatile(ptr::addr_of_mut!((*list).tail), ptr::null_mut());
 }
 
 #[cfg(test)]
@@ -251,3 +291,95 @@ mod tests {
         assert!(singleton.tail.is_null());
     }
 }
+
+#[cfg(test)]
+mod finalize_tests {
+    extern crate std;
+    use super::*;
+    use core::ffi::c_void;
+    use std::{boxed::Box, vec::Vec};
+
+    struct State {
+        list: *mut FtList,
+        expected_head: *mut FtListNode,
+        expected_tail: *mut FtListNode,
+        current: *mut FtListNode,
+        events: Vec<(bool, usize)>,
+    }
+
+    unsafe extern "C" fn alloc(_: *mut FtMemory, _: i32) -> *mut u8 {
+        panic!("finalization must not allocate")
+    }
+
+    unsafe extern "C" fn realloc(_: *mut FtMemory, _: i32, _: i32, _: *mut u8) -> *mut u8 {
+        panic!("finalization must not reallocate")
+    }
+
+    unsafe extern "C" fn free(memory: *mut FtMemory, block: *mut u8) {
+        let state = &mut *((*memory).user as *mut State);
+        assert_eq!((*state.list).head, state.expected_head);
+        assert_eq!((*state.list).tail, state.expected_tail);
+        let node = Box::from_raw(block as *mut FtListNode);
+        state.current = node.prev;
+        state.events.push((false, node.data as usize));
+    }
+
+    unsafe extern "C" fn destroy(memory: *mut FtMemory, data: *mut c_void, user: *mut c_void) {
+        assert_eq!((*memory).user, user);
+        let state = &mut *(user as *mut State);
+        assert_eq!((*state.list).head, state.expected_head);
+        assert_eq!((*state.list).tail, state.expected_tail);
+        state.events.push((true, data as usize));
+        // Sever the current link: traversal must already have saved it.
+        let node = state.current;
+        assert_eq!((*node).data, data);
+        (*node).next = ptr::null_mut();
+    }
+
+    fn run(payloads: &[usize], with_destroy: bool) -> Vec<(bool, usize)> {
+        let mut head = ptr::null_mut();
+        let mut tail: *mut FtListNode = ptr::null_mut();
+        // Keep the saved successor in prev for the allocator test fixture.
+        for &data in payloads.iter().rev() {
+            let node = Box::into_raw(Box::new(FtListNode {
+                prev: head, next: head, data: data as *mut c_void,
+            }));
+            if tail.is_null() { tail = node; }
+            head = node;
+        }
+        let mut list = FtList { head, tail };
+        let mut state = State {
+            list: &mut list, expected_head: head, expected_tail: tail, current: head, events: Vec::new(),
+        };
+        let user = &mut state as *mut State as *mut c_void;
+        let mut memory = FtMemory { user, alloc, free, realloc };
+        unsafe {
+            ft_list_finalize(&mut list, if with_destroy { Some(destroy) } else { None }, &mut memory, user);
+        }
+        assert!(list.head.is_null());
+        assert!(list.tail.is_null());
+        state.events
+    }
+
+    #[test]
+    fn destroys_payload_before_free_and_uses_saved_successor() {
+        assert_eq!(run(&[11, 0, 23], true),
+                   [(true, 11), (false, 11), (true, 0), (false, 0), (true, 23), (false, 23)]);
+    }
+
+    #[test]
+    fn absent_destructor_still_frees_every_node() {
+        assert_eq!(run(&[7, 0], false), [(false, 7), (false, 0)]);
+        assert_eq!(run(&[19], false), [(false, 19)]);
+    }
+
+    #[test]
+    fn empty_list_clears_stale_tail_without_using_allocator() {
+        let mut stale = FtListNode { prev: ptr::null_mut(), next: ptr::null_mut(), data: ptr::null_mut() };
+        let mut list = FtList { head: ptr::null_mut(), tail: &mut stale };
+        unsafe { ft_list_finalize(&mut list, Some(destroy), ptr::null_mut(), ptr::null_mut()) };
+        assert!(list.head.is_null());
+        assert!(list.tail.is_null());
+    }
+}
+
