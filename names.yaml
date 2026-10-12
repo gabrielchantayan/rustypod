@@ -16,6 +16,44 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0804ec00
+    ghidra: FUN_0804ec00
+    name: ft_set_char_size
+    size: 100
+    sig: "int32_t ft_set_char_size(FT_Face face, int32_t width, int32_t height, uint32_t horizontal_resolution, uint32_t vertical_resolution)"
+    module: ft/size
+    status: ported
+    renames:
+      param_1/r0: face
+      param_2/r1: width
+      param_3/r2: height
+      param_4/r3: horizontal_resolution
+      param_5/stack: vertical_resolution
+      local_18: request
+      return/r0: error
+    notes: >-
+      Raw A32 establishes [0x0804ec00,0x0804ec64), 100 bytes; the next
+      real function begins by checking r0 for NULL. Whole-image aligned
+      BL decoding finds two plain incoming calls at 0x0812e31c and
+      0x0812e5d8, zero predicated incoming calls, one plain outgoing
+      call at 0x0804ec58 to stock FT_Request_Size at 0x0804e980 and
+      zero predicated outgoing calls. The callee has no ledger entry
+      or existing Rust port; its raw validation, size-driver dispatch,
+      bitmap-strike path and FT_Request_Size trace string establish
+      its identity. Construct a 20-byte request with byte kind zero,
+      signed 26.6 width/height at +4/+8 and unsigned resolutions at
+      +12/+16. Copy a zero dimension from the other before clamping
+      each to 64; default each zero DPI independently to 72. Preserve
+      the callee error in r0, contrary to Ghidra's void signature;
+      both callers inspect it. ARM retains the stock call boundary;
+      host builds expose a replaceable request seam, not an emulation.
+      No behavioral deviations; padding remains unspecified as in stock.
+      Host signed-boundary/default tests, the complete host suite and
+      ARM release build pass. Actual-source API smoke verifies zero
+      dimension copying, independent DPI defaults and error passthrough.
+      match.py exits 1: LLVM uses a larger frame and literal-loaded BLX
+      instead of BL, but normalization, field offsets and the callee
+      target 0x0804e980 agree.
   - address: 0x08050c14
     ghidra: FUN_08050c14
     name: ui_context_first_flagged_tdat
