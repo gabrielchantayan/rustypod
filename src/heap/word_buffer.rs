@@ -243,6 +243,55 @@ pub unsafe extern "C" fn word_buffer_reset_optional_singleton(
     1
 }
 
+/// word_buffer_set_bit — original: `FUN_080407a0` @ 0x080407a0.
+/// True extent: 140 bytes, 0x080407a0..0x0804082c. Two unconditional
+/// incoming BL sites, zero predicated BL sites; one outgoing BL to
+/// [`word_buffer_reserve`] @ 0x082b8174.
+///
+/// Divide the signed bit index by 32 toward zero. If its word lies beyond
+/// the signed length, reserve enough capacity, zero the newly exposed words,
+/// and publish the new length. OR the selected bit into the word and return
+/// one; reserve failure returns zero without mutation.
+///
+/// Deliberate deviations: none. Negative remainders retain ARM's low-byte
+/// register shift semantics (shifts >= 32 produce zero, not a masked shift).
+///
+/// # Safety
+///
+/// `buffer` must be an aligned writable header. Its data pointer must permit
+/// the signed word offset and any newly exposed words; negative indices are
+/// not validated by retailOS. Length and capacity comparisons are signed.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn word_buffer_set_bit(buffer: *mut WordBuffer, bit_index: i32) -> u32 {
+    let word_index = bit_index / 32;
+    let mut len = unsafe { core::ptr::addr_of!((*buffer).len).read_volatile() as i32 };
+    if len <= word_index {
+        let required = word_index.wrapping_add(1);
+        let capacity = unsafe { core::ptr::addr_of!((*buffer).capacity).read_volatile() as i32 };
+        if capacity < required
+            && unsafe { word_buffer_reserve(buffer, required as u32) }.is_null()
+        {
+            return 0;
+        }
+        len = unsafe { core::ptr::addr_of!((*buffer).len).read_volatile() as i32 };
+        while len < required {
+            let data = unsafe { core::ptr::addr_of!((*buffer).data).read_volatile() as usize as *mut u32 };
+            unsafe { data.offset(len as isize).write_volatile(0) };
+            len = len.wrapping_add(1);
+        }
+        unsafe { core::ptr::addr_of_mut!((*buffer).len).write_volatile(required as u32) };
+    }
+    let shift = (bit_index % 32) as u8;
+    let mask = if shift < 32 { 1u32 << shift } else { 0 };
+    let data = unsafe { core::ptr::addr_of!((*buffer).data).read_volatile() as usize as *mut u32 };
+    unsafe {
+        let word = data.offset(word_index as isize);
+        word.write_volatile(word.read_volatile() | mask);
+    }
+    1
+}
+
 /// marked_word_buffer_compare — original: `FUN_0803e640` @ 0x0803e640
 /// (168 bytes exactly, 0x0803e640..0x0803e6e8; four unconditional direct
 /// `bl` callers and no predicated direct callers).
@@ -438,6 +487,58 @@ mod tests {
             TRACED_FREE_HOOKS = old_free;
         }
         drop(guard);
+    }
+
+    #[test]
+    fn set_bit_preserves_old_words_zeroes_gaps_and_handles_signed_remainders() {
+        let (guard, old_grow, old_free) = install();
+        let slab = try_map_u32_slab(hints::WORD_BUFFER_SET_BIT, 0x100)
+            .expect("set-bit target-width fixture");
+        let words = slab.cast::<u32>();
+        unsafe {
+            let storage = core::slice::from_raw_parts_mut(words, 16);
+            for bit in [-31, -1, 0, 1, 31, 32, 63, 64, 127] {
+                storage.fill(0xa5a5_a5a5);
+                let mut expected = [0xa5a5_a5a5; 16];
+                let index = (bit / 32) as usize;
+                let len = 2usize.max(index + 1);
+                expected[2..len].fill(0);
+                if bit >= 0 { expected[index] |= 1 << (bit % 32); }
+                let mut buffer = WordBuffer { data: words as usize as u32, len: 2, capacity: 16 };
+                assert_eq!(word_buffer_set_bit(&mut buffer, bit), 1);
+                assert_eq!(storage, &expected);
+                assert_eq!((buffer.len, buffer.capacity), (len as u32, 16));
+                assert_eq!(word_buffer_set_bit(&mut buffer, bit), 1);
+                assert_eq!(storage, &expected);
+            }
+            // A negative exact multiple addresses the preceding word.
+            let mut buffer = WordBuffer { data: words.add(1) as usize as u32, len: 1, capacity: 1 };
+            storage[0] = 0x8000_0000;
+            assert_eq!(word_buffer_set_bit(&mut buffer, -32), 1);
+            assert_eq!(storage[0], 0x8000_0001);
+            restore(guard, old_grow, old_free);
+        }
+    }
+
+    #[test]
+    fn set_bit_growth_failure_is_atomic_and_success_initializes_new_words() {
+        let (guard, old_grow, old_free) = install();
+        let slab = try_map_u32_slab(hints::WORD_BUFFER_SET_BIT_GROW, 0x100)
+            .expect("set-bit growth fixture");
+        let words = slab.cast::<u32>();
+        unsafe {
+            let storage = core::slice::from_raw_parts_mut(words, 8);
+            storage.fill(0xdead_beef);
+            let mut buffer = WordBuffer { data: 0, len: 0, capacity: 0 };
+            assert_eq!(word_buffer_set_bit(&mut buffer, 95), 0);
+            assert_eq!((buffer.data, buffer.len, buffer.capacity), (0, 0, 0));
+            assert_eq!(storage, &[0xdead_beef; 8]);
+            GROW_RESULT = words;
+            assert_eq!(word_buffer_set_bit(&mut buffer, 95), 1);
+            assert_eq!((buffer.data, buffer.len, buffer.capacity), (words as usize as u32, 3, 3));
+            assert_eq!(storage, &[0, 0, 0x8000_0000, 0xdead_beef, 0xdead_beef, 0xdead_beef, 0xdead_beef, 0xdead_beef]);
+            restore(guard, old_grow, old_free);
+        }
     }
 
     #[test]
