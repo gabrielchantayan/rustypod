@@ -116,6 +116,33 @@ pub unsafe extern "C" fn owned_buffer_assign(
     1
 }
 
+/// owned_buffer_assign_veneer — `thunk_FUN_0803a3cc` @ 0x0803a258.
+///
+/// True extent [0x0803a258, 0x0803a25c): 4 bytes, raw word 0xea00005b
+/// (`b 0x0803a3cc`), before the independent PUSH at 0x0803a25c.
+/// Two incoming plain BLs (0x08088990, 0x082d43b8), zero predicated BLs;
+/// zero outgoing BLs and one unconditional tail branch. Assigns an owned
+/// buffer using the existing worker, preserving all three arguments and
+/// its success/failure result. No algorithmic deviations; Rust delegates
+/// directly to the ported worker rather than branching to firmware.
+///
+/// ARM emulator smoke matches the linked production veneer against raw
+/// firmware for six explicit/negative/zero-length and NULL-source cases,
+/// comparing status, all four owner words, and the guarded destination.
+///
+/// # Safety
+/// The same owner, source, and allocation requirements as
+/// [`owned_buffer_assign`] apply.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn owned_buffer_assign_veneer(
+    owner: *mut OwnedBuffer,
+    source: *const u8,
+    requested_length: i32,
+) -> u32 {
+    owned_buffer_assign(owner, source, requested_length)
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -247,6 +274,44 @@ mod tests {
             destroy_and_record(&mut owner),
             [&mut data as *mut u8 as usize, &mut owner as *mut OwnedBuffer as usize],
         );
+    }
+
+    #[test]
+    fn veneer_explicit_binary_length_and_zero_length_preserve_neighbors() {
+        let mut data = [0xa5u8; 8];
+        let mut owner = OwnedBuffer {
+            length: 7, source: 0xfeed_cafe,
+            data: data.as_mut_ptr(), context: 0x1234_5678,
+        };
+        let source = [b'a', 0, b'b', b'c'];
+        assert_eq!(unsafe { owned_buffer_assign_veneer(&mut owner, source.as_ptr(), 3) }, 1);
+        assert_eq!(data, [b'a', 0, b'b', 0, 0xa5, 0xa5, 0xa5, 0xa5]);
+        assert_eq!(owner.length, 3);
+        assert_eq!(unsafe { owned_buffer_assign_veneer(&mut owner, source.as_ptr(), 0) }, 1);
+        assert_eq!(owner.length, 0);
+        assert_eq!(data, [0, 0, b'b', 0, 0xa5, 0xa5, 0xa5, 0xa5]);
+        assert_eq!((owner.source, owner.context), (0xfeed_cafe, 0x1234_5678));
+        assert_eq!(owner.data, data.as_mut_ptr());
+    }
+
+    #[test]
+    fn veneer_negative_null_source_rejects_even_a_null_owner() {
+        assert_eq!(unsafe {
+            owned_buffer_assign_veneer(core::ptr::null_mut(), core::ptr::null(), i32::MIN)
+        }, 0);
+    }
+
+    #[test]
+    fn veneer_failed_initial_allocation_leaves_owner_unchanged() {
+        let _hooks = install_assign_hooks(core::ptr::null_mut(), core::ptr::null_mut());
+        let mut owner = OwnedBuffer {
+            length: 99, source: 0xfeed_cafe,
+            data: core::ptr::null_mut(), context: 0x1234_5678,
+        };
+        assert_eq!(unsafe { owned_buffer_assign_veneer(&mut owner, b"x".as_ptr(), 1) }, 0);
+        assert_eq!(owner.length, 99);
+        assert!(owner.data.is_null());
+        assert_eq!((owner.source, owner.context), (0xfeed_cafe, 0x1234_5678));
     }
 
     #[test]
