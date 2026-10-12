@@ -196,6 +196,41 @@ pub unsafe extern "C" fn object_commit_touch(object: *mut u8) -> i32 {
     unsafe { record_magic_validate(object) }
 }
 
+/// Commit and mark modified — `FUN_08050f04` at `0x08050f04`.
+///
+/// True extent: 72 bytes (`0x08050f04..0x08050f4c`), ending before the
+/// separately entered validation helper's push prologue. One outgoing plain
+/// BL, zero predicated BL; inbound calls are BL at 0x080486c4 and BLNE at
+/// 0x0804bd6c. Ghidra's 124 bytes incorrectly include the validation helper.
+///
+/// Dereference the target word at +0x154 twice, commit that backend, and
+/// sign-extend the low 16 bits of its status. On success, backend byte +0x0c
+/// bit 7 gates ORing the object's first halfword with 0xff00 and tail
+/// validation at 0x08050f4c. Unlike object_commit_touch, no timestamp changes.
+/// Deliberate deviations: reuse the existing retail veneers and host seams;
+/// LLVM may use a normal call/return instead of the original tail branch.
+///
+/// # Safety
+/// `object` must be aligned, writable through +0x158, with a valid target
+/// u32 pointer at +0x154 to a target u32 backend pointer. The backend and
+/// object must satisfy the retail commit and validation routines' contracts.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn object_commit_mark_modified(object: *mut u8) -> i32 {
+    let link = unsafe { object.cast::<u32>().add(0x154 / 4).read() };
+    let backend = unsafe { (link as usize as *const u32).read() } as usize as *mut u8;
+    let status = unsafe { backend_record_commit(backend) } as i16 as i32;
+    if status != 0 {
+        return status;
+    }
+    if unsafe { backend.add(BACKEND_GATE_OFFSET).read() } & BACKEND_TOUCH_GATE == 0 {
+        return 0;
+    }
+    let flags = object.cast::<u16>();
+    unsafe { flags.write(flags.read() | 0xff00) };
+    unsafe { record_magic_validate(object) }
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -325,6 +360,43 @@ mod tests {
             previous_validate,
             previous_timestamp,
             _lock: lock,
+        }
+    }
+
+    #[test]
+    fn mark_modified_status_gate_and_exact_write_extent() {
+        let Some(slab) = crate::testing::try_map_u32_slab(
+            crate::testing::hints::OBJECT_COMMIT_MARK_MODIFIED, 0x1000,
+        ) else { return };
+        // All target pointers are four-byte words, including on the host.
+        let object = slab;
+        let link = unsafe { slab.add(0x200).cast::<u32>() };
+        let backend = unsafe { slab.add(0x300) };
+        for (commit, gate, validate, expected, modified) in [
+            (0x1234_8001, 0x80, 77, -32767, false),
+            (0x1234_5678, 0x80, 77, 0x5678, false),
+            (0x1234_0000, 0x7f, 77, 0, false),
+            (0x1234_0000, 0x80, -123456, -123456, true),
+            (0, 0xff, 0, 0, true),
+        ] {
+            let _mock = install(commit, validate, 999);
+            unsafe {
+                ptr::write_bytes(object, 0x5a, 0x158);
+                object.cast::<u16>().write(0x1234);
+                object.cast::<u32>().add(0x154 / 4).write(link as u32);
+                link.write(backend as u32);
+                backend.add(BACKEND_GATE_OFFSET).write(gate);
+            }
+            let before = unsafe { core::slice::from_raw_parts(object, 0x158) }.to_vec();
+            let result = unsafe { object_commit_mark_modified(object) };
+            assert_eq!(result, expected);
+            let mut expected_bytes = before;
+            if modified {
+                expected_bytes[1] = 0xff;
+            }
+            assert_eq!(unsafe { core::slice::from_raw_parts(object, 0x158) }, expected_bytes);
+            assert_eq!(VALIDATE_CALLS.load(Ordering::Relaxed), u32::from(modified));
+            assert_eq!(TIMESTAMP_CALLS.load(Ordering::Relaxed), 0);
         }
     }
 
