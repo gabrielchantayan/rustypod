@@ -249634,3 +249634,33 @@ functions:
       repr(C) pointers widen host fixtures only; volatile helper dispatch
       prevents builtin substitution. Tests cover rejection, callback replacement,
       poison-before-free, absent descriptors and absent state.
+
+  - address: 0x08049a2c
+    ghidra: FUN_08049a2c
+    name: pending_message_next_result
+    size: 36
+    sig: "u32 pending_message_next_result()"
+    module: runtime/pending_message_discard
+    status: ported
+    renames:
+      r0: queued_result
+      FUN_0809ae9c: take_pending_message
+    notes: >-
+      Raw ARM words establish nine instructions, 36 bytes, from 0x08049a2c
+      through 0x08049a4c; the next real function pushes at 0x08049a50.
+      Independent aligned whole-image BL decoding finds two plain incoming
+      calls at 0x080a133c and 0x080d4b54, zero predicated incoming calls,
+      and one plain outgoing call at 0x08049a48 to 0x0809ae9c.
+      Pass remove=0, peek=0 and four null outputs to the existing queue seam.
+      Return the next queued result without changing read index, result words
+      or payload ownership; an empty queue returns zero. The selector chooses
+      (read_index + 1) modulo 16, not the newest entry. Ghidra's void return
+      is deliberately corrected to u32 because the raw epilogue preserves r0
+      and both callers inspect it. Reuses runtime/pending_message_discard's
+      verified fixed-address seam; no new module or callee port.
+      Host queue-model tests cover repeated reads, wraparound, subsequent
+      discard, empty queues, zero-valued entries and high-bit results.
+      Executable host smoke confirms non-consuming reads followed by discard.
+      ARM release build succeeds. match.py reports a structural diff:
+      LLVM uses a frame and literal-loaded BLX to the same 0x0809ae9c,
+      preserves all six zero arguments and returns r0 unchanged.
