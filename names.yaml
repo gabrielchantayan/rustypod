@@ -16,6 +16,51 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08048804
+    ghidra: FUN_08048804
+    name: clear_tagged_target
+    size: 208
+    sig: "void clear_tagged_target(u8 *target)"
+    module: ui/clear_tagged_target
+    status: ported
+    vars:
+      param_1/r5: target
+      r6: index
+      r4: source_record
+      reciprocal: reciprocal_index
+    renames:
+      FUN_080c67b8: tagged_link_target_is_valid
+      FUN_0805c1a4: object_counter_increment
+      FUN_080512cc: indexed_object_element
+      FUN_080b49a4: tagged_link_source_is_valid
+      FUN_080e2d70: source_contains_target
+      FUN_08055ed0: indexed_object_offset
+      FUN_080646b8: dynamic_array_remove
+      FUN_0806c030: positive_counter_decrement
+      FUN_08048230: embedded_list_storage_destroy
+      FUN_0805cfb4: bzero
+    notes: >-
+      Raw extent [0x08048804,0x080488d4), 208 instruction bytes; next
+      independent PUSH starts at 0x080488d4. Aligned whole-image decoding
+      finds two inbound plain BLs at 0x08049280 and 0x0804952c, zero
+      predicated; body has nine plain BLs, zero predicated, and a tail B
+      to bzero. Validate target, increment list busy at target+12, scan
+      one-based source records with freshly loaded unsigned target+20 count.
+      Find target in each valid source's reciprocal list. Idle sources remove
+      one reciprocal; dispatching sources mark record byte+4 deleted when
+      accessor succeeds. Increment source+12 even if that accessor is null,
+      using wrapping arithmetic. Decrement busy, destroy storage, zero 56
+      bytes. Existing Rust callees and the established storage destruction
+      boundary are reused, with no algorithmic deviations. Host record words
+      remain u32 and IndexedObject storage slots retain native pointers.
+      Host tests cover invalid/inactive targets, null records, deletion-byte
+      preservation, wrapping counter and exact zero extent. Public API dispatch
+      smoke passed; idle host smoke was not established because native pointer
+      slots cannot directly alias a 32-bit MemH header with its following magic
+      word. ARM release build passed; match.py shows the same decision paths
+      with LLVM frame/register differences, an indirect destruction call, and
+      the final bzero tail branch. The tdat destruction caller now uses this
+      port directly rather than its obsolete retail clear_handler boundary.
   - address: 0x080488d4
     ghidra: FUN_080488d4
     name: clear_tagged_list
@@ -116,7 +161,7 @@ functions:
       r7: owner_tagged_list
       FUN_080491dc: destroy_plst
       FUN_080488d4: clear_tagged_list
-      FUN_08048804: clear_handler
+      FUN_08048804: clear_tagged_target
       FUN_080da928: release_resources
     notes: >-
       Raw extent 0x08049468..0x08049580: 256 instruction bytes followed by

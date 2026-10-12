@@ -40,6 +40,7 @@ extern crate std;
 /// overlap.
 pub mod hints {
     pub const CLEAR_TAGGED_LIST: usize = 0x7208_0000;
+    pub const CLEAR_TAGGED_TARGET: usize = 0x7209_0000;
     pub const TDAT_DESTROY: usize = 0x7207_0000;
     pub const EVP_PKEY_SIZE: usize = 0x7206_0000;
     pub const CONTEXT_FIRST_FLAGGED_TDAT: usize = 0x7205_0000;
