@@ -249267,3 +249267,42 @@ functions:
       Archive relocation R_ARM_CALL names liti_field_class_check; the
       apparent self-call in match.py is an unresolved relocation.
       No physical-device verification.
+  - address: 0x0804d348
+    ghidra: FUN_0804d348
+    name: ft_new_face
+    size: 48
+    sig: "i32 ft_new_face(FtLibrary *library, void *pathname, i32 face_index, u32 *face_out)"
+    module: ft/new_face
+    status: ported
+    renames:
+      param_1/r0: library
+      param_2/r1: pathname
+      r2: face_index
+      r3: face_out
+      local_24: open_args
+      FUN_0804d6b8: FT_Open_Face (verified unported retail callee)
+    notes: >-
+      Raw A32 establishes the 48-byte extent 0x0804d348..0x0804d378;
+      the next function starts with PUSH r1-r11,lr. Whole-image aligned
+      BL decoding finds two plain incoming calls at 0x0812e460 and
+      0x0819d9a0, zero predicated incoming calls, one plain outgoing
+      call at 0x0804d36c to 0x0804d6b8, and zero predicated outgoing calls.
+      This is FT_New_Face: reject null pathname with error 6; otherwise
+      set FT_OPEN_PATHNAME and pathname in stack FT_Open_Args, forwarding
+      library, face_index and face_out to FT_Open_Face and returning its
+      full error unchanged. Ghidra's void two-argument prototype is wrong;
+      both callers supply four arguments and consume the returned status.
+      Callee identity follows its FT_Open_Face trace strings, driver
+      selection and face construction; no canonical port exists for it.
+      Reuse repr(C) FtOpenArgs and the existing fixed-address target call /
+      host dependency seam convention. Inactive fields are deliberately
+      zeroed rather than left uninitialized; flags exclude their use.
+      Host tests cover null pathname with extreme signed indices, null
+      library/output, and preservation of output storage. Full host suite
+      passed; standalone host smoke exercised null rejection, successful
+      creation, negative-index probing, and full-width error propagation.
+      ARM release build passed. Required match.py printed an expected
+      structural diff: 22 versus 12 instructions, preserving null guard,
+      error 6, flags/pathname fields and r2/r3 forwarding; extra stores
+      initialize inactive fields, and BLX uses literal 0x0804d6b8 instead
+      of direct BL. No physical-device verification.
