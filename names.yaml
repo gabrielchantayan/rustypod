@@ -16,6 +16,34 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08040b30
+    ghidra: FUN_08040b30
+    name: bn_sub_word
+    size: 192
+    sig: "int bn_sub_word(BigNum *a, u32 word)"
+    module: crypto/bn_sub_word
+    status: ported
+    vars:
+      param_1: a
+      param_2: word
+      iVar1: limb_index_or_top
+      uVar3: limb
+      iVar4: remainder_or_new_top
+    renames:
+      FUN_0803e200: bn_add_word
+    notes: >-
+      Raw A32 extent [0x08040b30,0x08040bf0) is 192 bytes; next entry
+      begins with independent PUSH. Two inbound plain BLs, zero predicated
+      BLs; one outgoing plain BL at 0x08040b74 to BN_add_word 0x0803e200.
+      Its carry loop and signed recursion verify identity; no canonical
+      names entry exists for that callee. Ghidra's third argument is scratch
+      r2, not an input. Subtract word with borrow; single-limb underflow
+      reverses sign. Zero or negative magnitude delegates to addition and
+      sets neg=1 even on failure. Trim at most one high zero limb.
+      Deviations: native-pointer repr(C) BigNum on hosts and volatile add
+      slot producing BLX. Host suite passed 15765 tests; ARM build passed.
+      Actual-source smoke verifies 2^64-1 and guard preservation. Reviewed
+      match.py diff: 48 versus 70 instructions; LLVM splits the borrow loop.
   - address: 0x080437e8
     ghidra: FUN_080437e8
     name: record_interface_initialize
