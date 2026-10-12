@@ -16,6 +16,43 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0804add8
+    ghidra: FUN_0804add8
+    name: evp_pkey_copy_parameters
+    size: 56
+    sig: "int evp_pkey_copy_parameters(EvpPkey *destination, const EvpPkey *source)"
+    module: crypto/evp_pkey
+    status: ported
+    renames:
+      param_1/r0: destination
+      param_2/r1: source
+      iVar1: destination_type
+      iVar2: source_type
+      FUN_08049a84: diag_ring_record
+    notes: >-
+      Raw osos.dec confirms 14 ARM words, true extent
+      0x0804add8..0x0804ae10, ending before the next independent entry's
+      MOV ip,r0. Whole-image A32 BL decoding finds one inbound plain BL
+      at 0x08070d28 and one inbound BLNE at 0x08070d4c. One outbound plain
+      BL at 0x0804ae04 calls the already-ported diag_ring_record; there
+      are zero outbound predicated BLs. Certificate-key parameter caller
+      0x08070c68 and neighboring EVP_PKEY APIs identify this as the retail
+      EVP_PKEY_copy_parameters. It only compares the raw first-word types:
+      equality returns 1 without copying any fields; mismatch logs
+      (ERR_LIB_EVP=6, EVP_F_EVP_PKEY_COPY_PARAMETERS=103,
+      EVP_R_DIFFERENT_KEY_TYPES=101, 0, 0) and returns 0. No type
+      normalization, payload reads, NULL guards, new seams or behavioral
+      deviations. Aligned i32 reads preserve the first-word-only contract
+      even when host EvpPkey pointer fields widen. Host tests cover equal
+      unsupported and signed-boundary tags, aliasing, RSA/RSA2 mismatches,
+      unchanged input words and actual diagnostic-ring state. Full host
+      suite and ARM release build pass. Actual-source smoke confirms
+      equal return 1/no event and unequal return 0/tag 0x06067065.
+      match.py exits 1 with 18 Rust versus 14 retail instructions:
+      LLVM adds a frame and uses a saved return register, but retains
+      the two word loads, equality gate, mismatch-only diagnostic BL,
+      exact five diagnostic arguments, and 1/0 return.
+
   - address: 0x0804aeac
     ghidra: FUN_0804aeac
     name: evp_pkey_missing_parameters

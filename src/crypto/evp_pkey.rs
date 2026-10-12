@@ -149,6 +149,101 @@ pub unsafe extern "C" fn evp_pkey_new() -> *mut EvpPkey {
     pkey
 }
 
+/// Retail `EVP_PKEY_copy_parameters` — `FUN_0804add8` @ **0x0804add8**.
+///
+/// True extent: 56 bytes, 0x0804add8..0x0804ae10; the next function begins
+/// with `mov ip,r0`. Raw A32 decoding verifies one inbound plain BL
+/// (0x08070d28), one inbound BLNE (0x08070d4c), and one outbound plain BL
+/// to `diag_ring_record` (no outbound predicated BL).
+/// Compares only the raw key type words. Equal types return 1 without copying
+/// any parameters; unequal types record (6, 103, 101, 0, 0) and return 0.
+/// RSA and RSA2 are not normalized. No deliberate behavioral deviations;
+/// host pointer fields widen in the existing repr(C) wrapper.
+///
+/// # Safety
+///
+/// Both pointers must have readable, aligned type fields. Neither may be NULL.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn evp_pkey_copy_parameters(
+    destination: *mut EvpPkey,
+    source: *const EvpPkey,
+) -> i32 {
+    if destination.cast::<i32>().read() == source.cast::<i32>().read() {
+        return 1;
+    }
+    diag_ring_record(6, 0x67, 0x65, 0, 0);
+    0
+}
+
+#[cfg(test)]
+mod copy_parameters_tests {
+    extern crate std;
+    use super::{evp_pkey_copy_parameters, EvpPkey};
+    use crate::kernel::diag_ring_record::{BlockGetter, DiagEventRing, DIAG_RING_BLOCK_GETTER};
+    use crate::testing::DIAG_RING_TEST_LOCK;
+    use core::ptr;
+    use std::cell::Cell;
+
+    std::thread_local! {
+        static RING: Cell<*mut DiagEventRing> = const { Cell::new(ptr::null_mut()) };
+    }
+
+    unsafe extern "C" fn ring() -> *mut DiagEventRing {
+        RING.with(Cell::get)
+    }
+
+    struct RestoreGetter(Option<BlockGetter>);
+    impl Drop for RestoreGetter {
+        fn drop(&mut self) {
+            unsafe { ptr::addr_of_mut!(DIAG_RING_BLOCK_GETTER).write(self.0) };
+            RING.with(|slot| slot.set(ptr::null_mut()));
+        }
+    }
+
+    #[test]
+    fn raw_type_equality_never_copies_and_mismatch_reports_error() {
+        let _lock = DIAG_RING_TEST_LOCK.lock().unwrap();
+        let _restore = RestoreGetter(unsafe { ptr::addr_of!(DIAG_RING_BLOCK_GETTER).read() });
+        let mut diagnostics: DiagEventRing = unsafe { core::mem::zeroed() };
+        RING.with(|slot| slot.set(&mut diagnostics));
+        unsafe { ptr::addr_of_mut!(DIAG_RING_BLOCK_GETTER).write(Some(ring)) };
+        // Only these words are readable key storage; touching later fields
+        // would violate the original's first-word-only contract.
+        for tag in [0, 6, 19, 28, 116, -1, i32::MIN, i32::MAX] {
+            let mut destination = tag;
+            let source = tag;
+            assert_eq!(unsafe {
+                evp_pkey_copy_parameters(
+                    (&mut destination as *mut i32).cast::<EvpPkey>(),
+                    (&source as *const i32).cast::<EvpPkey>(),
+                )
+            }, 1);
+            assert_eq!(destination, tag);
+            assert_eq!(diagnostics.head, 0, "equal types must not log");
+            let same = (&mut destination as *mut i32).cast::<EvpPkey>();
+            assert_eq!(unsafe { evp_pkey_copy_parameters(same, same) }, 1);
+        }
+        for (destination_tag, source_tag) in [(6, 19), (19, 6), (0, -1), (i32::MIN, i32::MAX)] {
+            let mut destination = destination_tag;
+            let source = source_tag;
+            let previous_head = diagnostics.head;
+            assert_eq!(unsafe {
+                evp_pkey_copy_parameters(
+                    (&mut destination as *mut i32).cast::<EvpPkey>(),
+                    (&source as *const i32).cast::<EvpPkey>(),
+                )
+            }, 0);
+            assert_eq!(destination, destination_tag);
+            assert_eq!(source, source_tag);
+            assert_eq!(diagnostics.head, previous_head + 1);
+            let slot = diagnostics.head as usize;
+            assert_eq!(diagnostics.tags[slot], 0x06_067_065);
+            assert_eq!((diagnostics.data0[slot], diagnostics.data1[slot]), (0, 0));
+        }
+    }
+}
+
 /// OpenSSL `EVP_PKEY_missing_parameters` — `FUN_0804aeac` @ **0x0804aeac**.
 ///
 /// True size: 8 bytes, ending at `EVP_PKEY_new` @ 0x0804aeb4.
