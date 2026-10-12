@@ -54716,6 +54716,28 @@ functions:
       host/target seam for 0x080db840 preserves the unported shared tail
       helper rather than inventing its identity or duplicating it.
   # --- FreeType glyph loader ---
+  - address: 0x0804c91c
+    ghidra: FUN_0804c91c
+    name: ft_glyphloader_new
+    size: 48
+    sig: "i32 ft_glyphloader_new(FtMemory *memory, FtGlyphLoader **output)"
+    module: ft/glyph_loader
+    status: ported
+    vars:
+      param_1/r4: memory
+      param_2/r5: output
+      puVar1/r0: loader
+      local_10: error
+    renames: {FUN_082cfaa4: ft_mem_alloc}
+    notes: >-
+      Raw A32 words establish [0x0804c91c,0x0804c94c), 48 bytes with
+      the next push prologue at 0x0804c94c. Two incoming plain BLs at
+      0x0804c0fc and 0x0804d428; one outgoing plain BL at 0x0804c930
+      to ported ft_mem_alloc (0x082cfaa4); no predicated BLs. Allocates
+      0x58 zeroed bytes, stores memory at +0, and publishes output only
+      on success; failure preserves output. Discards Ghidra's spurious
+      r2/r3 arguments. Host storage widens native pointers and retains
+      the four-byte opaque tail after the represented loader fields.
   - address: 0x0804c9f4
     ghidra: FUN_0804c9f4
     name: ft_glyph_loader_rewind
