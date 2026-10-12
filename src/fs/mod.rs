@@ -172,6 +172,8 @@ pub mod hfs_btree_prepare_record_request;
 pub mod hfs_btree_key_length;
 /// Validated HFS B-tree key lookup wrapper with resident dispatch seams @ 0x08058ba4.
 pub mod hfs_btree_lookup_key;
+/// HFS B-tree allocation-map capacity threshold @ 0x08044224.
+pub mod hfs_btree_map_capacity;
 /// File-path layer failure-status accessor @ 0x0829dcf8.
 pub mod error_status;
 /// Mapped allocation-bitmap block completion @ 0x0806448c.
