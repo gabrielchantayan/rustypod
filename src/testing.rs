@@ -2704,6 +2704,8 @@ pub mod hints {
     // object, class-target, and table fixture; mappings never unmap, so no
     // other user may share this hint.
     pub const LITI_INDEXED_ENTRY_LOOKUP: usize = 0xa1d0_0000;
+    // Dedicated raw-u32 object, class, table, and entries for key lookup.
+    pub const LITI_ENTRY_FIND_BY_KEY: usize = 0xc530_0000;
     // 0xa200_0000: dedicated to app/liti_entry_next's raw-u32 entry and
     // class-target fixture; mappings never unmap, so no other user may share
     // this hint.

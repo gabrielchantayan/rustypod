@@ -249101,3 +249101,43 @@ functions:
       exact halfword merge, and tail branch through existing veneers;
       differences are frame setup, split shifts, and ldrsb/cmn gate testing.
       No target behavioral deviations.
+  - address: 0x0805038c
+    ghidra: FUN_0805038c
+    name: liti_entry_find_by_key
+    size: 96
+    sig: "u32 liti_entry_find_by_key(const u8 *object, u32 key)"
+    module: app/liti_entry_find_by_key
+    status: ported
+    renames:
+      param_1/r0: object
+      param_2/r1/r4: key
+      r12: count
+      lr: table
+      r0_loop: index
+      r3: entry
+      FUN_08057bb4: liti_field_class_check
+    notes: >-
+      Raw aligned A32 words establish the 96-byte extent
+      0x0805038c..0x080503ec: the next independently entered function starts
+      with MOV r3,r1 and PUSH lr at 0x080503ec. Whole-image decoding finds
+      two plain inbound BLs at 0x08106e44 and 0x08106ec0, zero predicated
+      inbound BLs, one internal plain BL at 0x08050398 to the existing
+      ported liti_field_class_check, and zero internal predicated BLs.
+      Only r0 and r1 are inputs; Ghidra's third and fourth parameters are
+      spurious. Reject non-liti objects and null +0x1c tables. Search the
+      unsigned +0x18 count of target-width entry pointers for the first
+      matching +0x0c key, returning its u32 pointer or zero. Both callers
+      subsequently search the selected entry for image metadata.
+      Deliberate deviations: reuse the Rust predicate and omit its
+      redundant accepted-object null check; no new seams or target behavior
+      changes. Host tests cover null/rejected objects, zero and high-bit
+      keys, first duplicate, misses, count bounds, empty tables, and null
+      tables. Host suite and ARM release build passed. Standalone host
+      smoke passed second-entry match, miss, first duplicate, and empty
+      table cases. Required match.py exited 1 with a structural diff:
+      LLVM emits 21 versus 24 instructions, using a decrementing count and
+      post-indexed table load instead of an increasing index, preserving
+      predicate/table guards, key load, first-match return, and zero miss.
+      Archive relocation R_ARM_CALL names liti_field_class_check; the
+      apparent self-call in match.py is an unresolved relocation.
+      No physical-device verification.
