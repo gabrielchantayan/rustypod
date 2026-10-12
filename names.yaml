@@ -16,6 +16,39 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080522fc
+    ghidra: FUN_080522fc
+    name: tdat_node_list_head
+    size: 24
+    sig: "u32 tdat_node_list_head(const u8 *element)"
+    module: ui/tdat_node_list_head
+    status: ported
+    vars:
+      param_1/r0/r2: element
+      return/r0: head
+    renames:
+      FUN_0806aa3c: ui_element_is_tdat_class
+    notes: >-
+      Raw extent [0x080522fc,0x08052314) is six ARM words:
+      e1a02000 e52de004 eb0061cc e1b00000 15920028 e49df004.
+      Next real function starts with ldr r0,[r0,#0xf64]. Whole-image
+      aligned word decoding finds two plain inbound BLs at 0x08050cd8
+      and 0x08050d4c, zero predicated; one plain outbound BL at
+      0x08052304 to 0x0806aa3c, zero predicated. Validate the tdat class
+      and return the aligned word at element+0x28 unchanged, or zero
+      without accessing the head on rejection, including NULL.
+      Deliberate deviation: reuse the existing Rust class predicate.
+      Both identifier lookups now call this port directly; remove the
+      stock-address dispatch and host stub, and use real fixture heads.
+      Host tests cover rejection with prefix-only storage, empty heads,
+      all-bit preservation, adjacent-field isolation and class changes.
+      Full x86_64 host suite and ARM build-std release build pass.
+      Actual-source smoke returns 0xfedcba98 for an accepted object and
+      zero for wrong-class and NULL objects. match.py exit 1: six stock
+      versus eight Rust instructions; LLVM saves r4/frame registers and
+      explicitly clears the rejected result, retaining the predicate BL
+      and conditional aligned +0x28 load. R_ARM_CALL relocation confirms
+      ui_element_is_tdat_class; no intentional symbol folding.
   - address: 0x08052328
     ghidra: FUN_08052328
     name: ft_service_metadata_byte_at_b4c
@@ -36699,7 +36732,7 @@ functions:
       param_3/r2: id_lo
       param_4/r3: id_hi
       FUN_0806aa3c: ui_element_is_tdat_class
-      FUN_080522fc: tdat_node_list_head (seam, unported)
+      FUN_080522fc: tdat_node_list_head
       FUN_08053d54: tdat_node_next
     notes: >-
       Raw ARM extent is exactly 0x08050d10..0x08050d84; the next function's
@@ -36707,7 +36740,7 @@ functions:
       size. The function validates element with the ported
       ui_element_is_tdat_class at 0x0806aa3c, rejects the all-zero 64-bit
       identifier (cmp r6,#0; cmpeq r0,r2 with r2 zeroed), then walks the
-      node list whose head is the word at element+0x28 via the unported
+      node list whose head is the word at element+0x28 via the ported
       tdat-class-gated getter 0x080522fc and whose successor step is the
       scoped_context_owner_validity-gated word at node+0x4 via the
       ported selector 0x08053d54, returning the first node whose word
@@ -36720,8 +36753,8 @@ functions:
       0x08094c9c, 0x080ab39c, 0x0813e44c, 0x082a5fd4), zero predicated
       forms; the function itself contains 3 unconditional bl instructions
       and zero predicated ones, not Ghidra's reported 5 call sites (that
-      count is its caller count). Only the list-head getter remains behind
-      TDAT_NODE_FIND_OPS; successor and class checks call Rust directly.
+      count is its caller count). Head, successor and class checks now call
+      Rust directly; the obsolete list-head dispatch seam has been removed.
       Original lookup match.py review:
       crate fp frame and blx seam dispatch vs ADS bl, LLVM orr zero-id
       test, and an ldreq low-word load replacing the unconditional
@@ -36740,7 +36773,7 @@ functions:
       param_3/r2: id_lo
       param_4/r3: id_hi
       FUN_0806aa3c: ui_element_is_tdat_class
-      FUN_080522fc: tdat_node_list_head (seam, unported)
+      FUN_080522fc: tdat_node_list_head
       FUN_08053d54: tdat_node_next
     notes: >-
       Raw ARM extent is exactly 0x08050c9c..0x08050d10; the sibling
@@ -36751,7 +36784,7 @@ functions:
       node+0x110/+0x114 (primary key): validate element with the ported
       ui_element_is_tdat_class at 0x0806aa3c, reject the all-zero 64-bit
       identifier, then walk the node list whose head is the word at
-      element+0x28 via the unported tdat-class-gated getter 0x080522fc and
+      element+0x28 via the ported tdat-class-gated getter 0x080522fc and
       whose successor step is the scoped_context_owner_validity-gated word
       at node+0x4 via the ported selector 0x08053d54, returning the
       first node whose word pair at node+0x118/+0x11c equals
@@ -36764,8 +36797,8 @@ functions:
       (0x081598cc, 0x0815991c, 0x08159a58, 0x0816edb4, 0x0816eed4), zero
       predicated forms; the function itself contains 3 unconditional bl
       instructions and zero predicated ones (Ghidra's "5 bl call sites"
-      counts the callers). Only the list-head getter shares the sibling's
-      TDAT_NODE_FIND_OPS seam; successor and class checks call Rust directly.
+      counts the callers). Head, successor and class checks now call Rust
+      directly; the obsolete list-head dispatch seam has been removed.
       Original lookup match.py review: crate fp frame
       and blx seam dispatch vs ADS bl, LLVM orr zero-id test, and an ldreq
       low-word load replacing the unconditional ldr/cmpeq pair; the guard
