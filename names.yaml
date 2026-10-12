@@ -249917,3 +249917,35 @@ functions:
       ARM release build succeeds. match.py reports a structural diff:
       LLVM uses a frame and literal-loaded BLX to the same 0x0809ae9c,
       preserves all six zero arguments and returns r0 unchanged.
+
+  - address: 0x08048750
+    ghidra: FUN_08048750
+    name: counted_u16_delete
+    size: 92
+    sig: "void counted_u16_delete(u16 *text, u32 start, u32 count)"
+    module: cxx/counted_u16_delete
+    vars: {param_1: text, param_2: start, param_3: count}
+    renames: {FUN_0805d0f4: bcopy_guarded}
+    status: ported
+    notes: >-
+      Raw A32 extent 0x08048750..0x080487ac ends at the next independent
+      push {r4,lr}. Whole-image aligned BL decoding finds two inbound plain
+      calls at 0x08044a10 and 0x080b4b8c, no predicated calls. One outbound
+      plain BL at 0x08048798 calls the already-ported bcopy_guarded; no
+      predicated outbound BL. Callers remove a matched prefix at index one
+      or a two-unit substitution marker. NULL returns. Only start zero
+      rejects wrapping start+count-1 greater than the u16 prefix. Copy
+      (prefix-start-count+1)*2 bytes from text[start+count] to text[start],
+      using wrapping u32 arithmetic and the callee's signed-length guard.
+      Reload prefix after copying, then subtract count modulo 65536; index
+      zero can replace the prefix before subtraction. Negative byte lengths
+      skip copying but still update the prefix. The only deliberate deviation
+      is directly calling the existing Rust callee. Host tests exhaust valid
+      ranges for lengths 0..16, preserve arbitrary surrogate units and trailing
+      storage, and cover NULL, index-zero rejection/reload, negative lengths
+      and prefix underflow. Host suite and ARM release build pass. Actual-source
+      executable smoke deletes the middle three units of a five-unit string.
+      match.py exits 1 with 25 Rust versus 23 stock instructions: LLVM moves
+      the NULL test before the frame, combines wrapping subtractions, and
+      replaces predicated returns with branches; the guarded move and post-copy
+      halfword reload/subtract/store remain intact.

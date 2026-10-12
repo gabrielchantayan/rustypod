@@ -726,6 +726,7 @@ pub mod string_encoding;
 pub mod utf8_iterator_next;
 pub mod utf8_to_pascal_mac_roman;
 pub mod counted_u16_copy;
+pub mod counted_u16_delete;
 pub mod string_export_counted_utf16;
 pub mod byte_key_tree_find_predecessor;
 pub mod red_black_tree_leftmost_descendant;
