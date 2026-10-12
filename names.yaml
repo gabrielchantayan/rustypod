@@ -251796,3 +251796,33 @@ functions:
       retaining the length early return, memcmp call with length in r2,
       and conditional type subtraction. Object relocation R_ARM_CALL
       at +0x28 verifies memcmp despite match.py's unresolved BL display.
+  - address: 0x0803a240
+    ghidra: FUN_0803a240
+    name: release_opaque_allocation_0890619c
+    size: 12
+    sig: "void release_opaque_allocation_0890619c(void *allocation)"
+    module: cxx/opaque_allocation_release_0890619c
+    status: ported
+    renames:
+      param_1/r0: allocation
+      DAT_0803a248/r1: opaque_allocation_descriptor_0890619c
+      FUN_0803b3a4: typed_allocation_release_helper
+    notes: >-
+      Raw words e59f1000 ea000456 0890619c establish a twelve-byte extent
+      including the descriptor literal, ending at the next real function
+      0x0803a24c (independent literal load and tail branch). Whole-image
+      ARM decoding finds two plain inbound BLs at 0x0805fae8 and 0x080ec2c0,
+      zero predicated BLs, zero outbound BLs, and one tail B to 0x0803b3a4.
+      Load the fixed opaque descriptor into r1 and preserve allocation in r0,
+      including NULL. Reuse ported typed_allocation_release_helper and its
+      existing unresolved engine seam; no concrete descriptor type invented.
+      Ghidra incorrectly incorporates the downstream engine call into this
+      wrapper. ARM uses an absolute literal-loaded PC tail transfer rather
+      than a placement-dependent B, retaining the tail return edge with
+      16 emitted bytes versus 12 original; hosts use the existing Rust helper.
+      Host regression and
+      actual-source executable exercise owned payload destruction exactly
+      once and NULL delegation with the exact descriptor and mode zero.
+      Full host suite passes 15813 tests; ARM release build passes.
+      match.py exits 1: stock LDR/B versus LDR/LDR-PC plus two literals,
+      verifying the descriptor and placement-independent absolute destination.

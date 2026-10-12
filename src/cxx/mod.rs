@@ -870,6 +870,7 @@ pub mod transition_addon;
 pub mod typed_allocation_release;
 pub mod opaque_allocation_release;
 pub mod opaque_allocation_release_08939b88;
+pub mod opaque_allocation_release_0890619c;
 pub mod opaque_descriptor_lookup;
 pub mod tagged_entry_value_table_initialize;
 pub mod opaque_indexed_handle_initialize;
