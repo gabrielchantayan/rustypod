@@ -49563,6 +49563,33 @@ functions:
       body preserves r3 = 6 through the existing message_dispatch_veneer
       seam; pad words 6/7 zeroed rather than left uninitialized.
 
+  - address: 0x08047eac
+    ghidra: FUN_08047eac
+    name: global_byte_flags_any_set
+    size: 48
+    sig: "u32 global_byte_flags_any_set(void)"
+    module: runtime/global_byte_flags
+    status: ported
+    vars: {iVar1: index, DAT_08047ed8: global_byte_flags}
+    notes: >-
+      Raw extent [0x08047eac,0x08047edc) contains 44 bytes of code and
+      the four-byte literal 0x08a11f50 at 0x08047ed8; the next real function
+      starts with PUSH at 0x08047edc. Whole-image A32 decoding finds two
+      incoming plain BL calls at 0x081a5460 and 0x08289854, no predicated
+      BL calls, and no outgoing calls. Scans 61 global bytes in ascending
+      order, returning u32 1 on the first nonzero byte, otherwise 0.
+      Both callers consume the result as a predicate. The table's subsystem
+      identity is unverified; no callee seams are needed. Deviations:
+      volatile byte reads preserve live-state observation and early exit;
+      host builds use private backing instead of the fixed target address.
+      Host tests cover all-zero, every position with every nonzero byte
+      value, and all-set state.
+      Full host suite: 15725 passed. Standalone runtime smoke verifies
+      zero, last-byte high-bit set, then cleared state. ARM release build
+      succeeds. match.py verifies the same byte scan, 61-entry bound,
+      early exit, u32 result and literal address; LLVM uses a negative
+      counter with subtract-indexed loads and adds a frame-pointer prologue.
+
   - address: 0x08047edc
     ghidra: FUN_08047edc
     name: gateway_request_tag3

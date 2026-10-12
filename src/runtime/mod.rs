@@ -26,6 +26,7 @@ pub mod i2c0_idle;
 pub mod i2c0_configure_and_strobe;
 pub mod global_state;
 pub mod global_status_flags;
+pub mod global_byte_flags;
 pub mod global_object_address;
 pub mod i2c0_transfer;
 pub mod lib_init;
