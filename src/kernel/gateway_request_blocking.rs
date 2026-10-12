@@ -176,6 +176,38 @@ pub unsafe extern "C" fn gateway_request_empty_tag5() {
     task_lock::rom_sem_signal(REQUEST_LOCK);
 }
 
+/// gateway_request_tag3 — original: FUN_08047edc @ 0x08047edc (100 bytes).
+/// Raw extent ends at the next PUSH at 0x08047f40. Two incoming plain BL
+/// calls, zero predicated calls; four outgoing plain BL calls.
+///
+/// Waits for readiness, then posts `{0, 0, 0, 0, 3, payload, pad, pad, 0}`
+/// through mailbox 1 with priority 5 and semaphore 6, holding semaphore 9.
+/// Semaphore statuses are ignored, including a failed wait. Deliberate
+/// deviations: zeros the unwritten tag padding and words 6/7, and uses the
+/// existing ready-wait/kernel dispatch seams rather than fixed addresses.
+/// Callers discard the final semaphore status, so the Rust ABI returns void.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn gateway_request_tag3(payload: u32) {
+    tag3_with(payload, |frame| {
+        mailbox_send_gateway_mode1(
+            GATEWAY_MAILBOX,
+            frame.as_mut_ptr() as usize as u32,
+            GATEWAY_PRIORITY,
+            GATEWAY_SEMAPHORE,
+        );
+    });
+}
+
+#[inline(always)]
+unsafe fn tag3_with(payload: u32, send: impl FnOnce(&mut [u32; FRAME_SLOTS])) {
+    ready_wait()();
+    let mut frame = [0, 0, 0, 0, 3, payload, 0, 0, 0];
+    task_lock::rom_sem_wait(REQUEST_LOCK);
+    send(&mut frame);
+    task_lock::rom_sem_signal(REQUEST_LOCK);
+}
+
 /// gateway_request_tag1_result — original: FUN_08047d90 @ 0x08047d90 (100
 /// bytes; three verified unconditional incoming `bl` call sites, no
 /// predicated calls). Waits for gateway readiness, then builds the tag-1
@@ -356,6 +388,37 @@ mod tests {
                 saved_dispatch,
                 saved_ready_wait,
             }
+        }
+    }
+
+    unsafe extern "C" fn failed_sem_wait(sem: usize) -> usize {
+        mock_sem_wait(sem);
+        9
+    }
+
+    #[test]
+    fn tag3_preserves_payload_bits_and_releases_even_after_failed_wait() {
+        let _installed = install();
+        unsafe {
+            (*addr_of_mut!(task_lock::ROM_KERNEL)).rom_sem_wait = failed_sem_wait;
+            for payload in [0, 3, 0x12, 0x8000_0000, u32::MAX] {
+                (*addr_of_mut!(CALL_LOG)).clear();
+                tag3_with(payload, |frame| {
+                    assert_eq!(*addr_of!(CALL_LOG), ["ready", "wait"]);
+                    assert_eq!(*frame, [0, 0, 0, 0, 3, payload, 0, 0, 0]);
+                    assert_eq!(core::mem::size_of_val(frame), 36);
+                    mailbox_send_gateway_mode1(
+                        GATEWAY_MAILBOX, frame.as_mut_ptr() as usize as u32,
+                        GATEWAY_PRIORITY, GATEWAY_SEMAPHORE,
+                    );
+                });
+                assert_eq!(*addr_of!(CALL_LOG), ["ready", "wait", "dispatch", "signal"]);
+                assert_eq!(*addr_of!(WAIT_ARG), 9);
+                assert_eq!(*addr_of!(SIGNAL_ARG), 9);
+            }
+            (*addr_of_mut!(CALL_LOG)).clear();
+            gateway_request_tag3(0x12);
+            assert_eq!(*addr_of!(CALL_LOG), ["ready", "wait", "dispatch", "signal"]);
         }
     }
 
