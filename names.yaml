@@ -16,6 +16,29 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08051e30
+    ghidra: FUN_08051e30
+    name: settings_scale_midpoint
+    size: 8
+    sig: "u32 settings_scale_midpoint(void)"
+    module: app/settings_scale_midpoint
+    status: ported
+    vars: {return/r0: midpoint_value}
+    notes: >-
+      Raw words e3a00037 e12fff1e prove [0x08051e30,0x08051e38),
+      ending before the next independent push {r4,lr}. Whole-image
+      aligned ARM decoding finds two incoming plain BLs at 0x080e677c
+      and 0x08112798, zero predicated, and no outgoing BLs of either
+      kind. Return immutable 55 without arguments or memory access.
+      The settings curve uses this as its input-50 output; query 0x63f8
+      compares it with 100. No callees, new seams or behavioral deviations.
+      Existing settings_value_scale now uses this port rather than an
+      embedded midpoint constant. Host suite passes all 15650 tests,
+      including curve boundaries and signed wrapping extremes; ARM
+      release build passes. Production-source smoke returns 55 and true
+      for the query comparison. match.py exits 1: two stock versus four
+      Rust instructions, with unchanged mov r0,#55 and LLVM frame
+      push/mov/pop replacing bx lr. Exported symbol verified; no device run.
   - address: 0x080522fc
     ghidra: FUN_080522fc
     name: tdat_node_list_head
