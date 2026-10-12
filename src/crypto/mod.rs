@@ -40,6 +40,7 @@
 //! [`bn_ucmp`] ports its unsigned magnitude comparison from the same
 //! file.
 pub mod evp_cipher_ctx_cleanup;
+pub mod bn_rand;
 pub mod evp_cipher_update;
 pub mod add_lock;
 pub mod lock_needs_acquire;

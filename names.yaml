@@ -250954,3 +250954,39 @@ functions:
       frame pointer and explicit failure branch, retains signed division,
       reserve call, zeroing loop and OR store, and suppresses the OR for
       negative remainders. The exported symbol is present; no fold.
+
+  - address: 0x08040548
+    ghidra: FUN_08040548
+    name: bn_rand
+    size: 32
+    sig: "int bn_rand(BIGNUM *result, int bits, int top, int bottom)"
+    module: crypto/bn_rand
+    status: ported
+    renames:
+      param_1/r0: result
+      param_2/r1: bits
+      param_3/r2: top
+      param_4/r3: bottom
+    notes: >-
+      Raw words e92d4008 e58d3000 e1a03002 e1a02001 e1a01000
+      e3a00000 eb02a17a e8bd9000 establish the 32-byte extent;
+      the next real entry at 0x08040568 begins a separate range wrapper.
+      Binary-wide A32 BL decoding finds two incoming plain BLs at
+      0x08082420 and 0x080824bc, zero predicated BLs, and one outgoing
+      plain BL at 0x08040560 to 0x080e8b50. This is OpenSSL BN_rand:
+      select mode 0 of the random-bignum worker, pass result/bits/top
+      in r1/r2/r3 and bottom at stack word 0, preserve its integer return.
+      Worker identity is verified from its raw zero-bit BN_set_word path,
+      random-byte fill via 0x080620f8, top-bit/parity masks, BN_bin2bn
+      conversion at 0x0803e2dc, and cleanse/free cleanup. Both raw callers
+      pass top=-1 and bottom=0 and test the returned success flag.
+      The unported worker retains its verified stock address through a
+      volatile dispatch slot, following existing crypto seam conventions.
+      Host deterministic-source tests exercise zero bits, byte and word
+      boundaries, top-bit constraints, oddness, and failure preservation;
+      these model the worker and do not establish RNG quality or device
+      execution. Host suite passes; public API smoke produces magnitude
+      0x12345679 with top=1. ARM release build passes. match.py exits 1:
+      eight original instructions versus fifteen Rust instructions.
+      LLVM adds a frame pointer, slot loads, and BLX instead of direct BL;
+      mode selection, argument order, stack bottom, and return are intact.
