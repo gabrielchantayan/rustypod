@@ -16,6 +16,43 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08044c78
+    ghidra: FUN_08044c78
+    name: vdbe_clear_object
+    size: 196
+    sig: "void vdbe_clear_object(Vdbe *statement, void *freebuffer)"
+    module: sqlite/vdbe_clear_object
+    status: ported
+    renames:
+      param_1/r4: statement
+      param_2/r5: freebuffer
+      iVar1: register_or_context_index
+      iVar2: register_cell
+      FUN_082c387c: vdbe_close_all_cursors
+      FUN_083675c0: release_mem_array
+      FUN_0838af4c: vdbe_frame_list_clear
+      FUN_083906f4: tracked_free
+    notes: >-
+      Raw ARM establishes [0x08044c78,0x08044d3c), ending in POP before
+      an independent PUSH. Whole-image decoding verifies two inbound plain
+      BLs at 0x08386d38 and 0x0838cbdc, six outbound plain BLs, and no
+      predicated BLs. SQLite VDBE execution-state cleanup closes cursors,
+      marks registers 1..=nMem NULL preserving upper flags, releases their
+      guts, clears main and context pending-frame lists, frees the context
+      array and error message, and resets ownership fields. Reserved register
+      zero is untouched; signed loop bounds are reread. Reuses four verified
+      Rust callees and replaces reset's retail-address ClearObject default.
+      Deliberate deviations: target pointer fields stay u32 on hosts;
+      host-only free interception supports headerless low-address fixtures.
+      Host tests cover signed register bounds, sentinel cells, context stride,
+      descriptor clearing before release, NULL context and error pointers.
+      Host suite passed 15744 tests and ARM release build passed. match.py
+      reviewed: 49 original versus 54 Rust instructions, same two loops,
+      six direct BL relocations, strides, and ownership clearing; LLVM
+      strength-reduces offsets and schedules independent loads/stores.
+      Standalone exported-path smoke with real callees passed using a
+      test-config host rlib because the normal host library build has
+      unrelated missing metadata/calendar helper definitions.
   - address: 0x08044d3c
     ghidra: FUN_08044d3c
     name: artwork_database_release
