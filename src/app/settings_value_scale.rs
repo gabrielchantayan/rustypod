@@ -16,16 +16,15 @@
 //!
 //! ## Deliberate deviation
 //!
-//! The two direct callee getters are unported, but raw decoding proves they
-//! return immutable constants: `FUN_080539cc` (`0x080539cc`) returns 6 and
-//! `FUN_08051e30` (`0x08051e30`) returns 55. This port embeds those verified
-//! values instead of adding dispatch seams for constant-return leaves. Their
-//! values make the stock `upper == 100` arm unreachable.
+//! The lower getter remains an embedded, raw-verified constant:
+//! `FUN_080539cc` (`0x080539cc`) returns 6. The midpoint now uses the
+//! ported `settings_scale_midpoint` getter (`0x08051e30`), which returns 55.
+//! These immutable values make the stock `upper == 100` arm unreachable.
 
 use crate::runtime::rt_div::__rt_sdiv;
+use crate::app::settings_scale_midpoint::settings_scale_midpoint;
 
 const LOWER_VALUE: i32 = 6;
-const MIDPOINT_VALUE: i32 = 55;
 const MIDPOINT_INPUT: i32 = 50;
 const MAXIMUM_VALUE: i32 = 100;
 
@@ -38,13 +37,14 @@ const MAXIMUM_VALUE: i32 = 100;
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn settings_value_scale(value: u32) -> u32 {
     let value = value as i32;
+    let midpoint_value = settings_scale_midpoint() as i32;
     let result = if value > MIDPOINT_INPUT {
         let remaining_input = MAXIMUM_VALUE.wrapping_sub(value);
-        let remaining_value = MAXIMUM_VALUE.wrapping_sub(MIDPOINT_VALUE);
+        let remaining_value = MAXIMUM_VALUE.wrapping_sub(midpoint_value);
         let quotient = unsafe { __rt_sdiv(remaining_input.wrapping_mul(remaining_value), MIDPOINT_INPUT) };
         MAXIMUM_VALUE.wrapping_sub(quotient)
     } else {
-        let value_range = MIDPOINT_VALUE.wrapping_sub(LOWER_VALUE);
+        let value_range = midpoint_value.wrapping_sub(LOWER_VALUE);
         let quotient = unsafe { __rt_sdiv(value.wrapping_mul(value_range), MIDPOINT_INPUT) };
         LOWER_VALUE.wrapping_add(quotient)
     };
