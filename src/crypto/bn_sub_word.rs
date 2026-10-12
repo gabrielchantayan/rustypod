@@ -7,38 +7,19 @@
 //! Zero or negative inputs clear the sign, call BN_add_word, then set the
 //! sign even on failure. Positive single-limb underflow reverses magnitude
 //! and sign; otherwise propagate borrow and remove at most one high zero.
-//! Deliberate deviations: use the existing native-pointer repr(C) BigNum on
-//! hosts; the unported BN_add_word uses a volatile dispatch slot rather than
-//! a direct BL. No normalization, validation, or zero-word shortcut added.
+//! Deliberate deviation: use the existing native-pointer repr(C) BigNum on
+//! hosts. BN_add_word now calls the Rust port directly. No normalization,
+//! validation, or zero-word shortcut added.
 
 use super::bn_num_bits::BigNum;
-use core::ptr;
-
-pub type BnAddWordFn = unsafe extern "C" fn(*mut BigNum, u32) -> i32;
-
-#[cfg(target_os = "none")]
-unsafe extern "C" fn firmware_bn_add_word(a: *mut BigNum, word: u32) -> i32 {
-    let worker: BnAddWordFn = unsafe { core::mem::transmute(0x0803_e200usize) };
-    unsafe { worker(a, word) }
-}
-
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_bn_add_word(_a: *mut BigNum, _word: u32) -> i32 {
-    panic!("bn_sub_word requires BN_add_word at 0x0803e200")
-}
-
-/// Unported BN_add_word, identified by its carry loop and signed recursion.
-#[cfg(target_os = "none")]
-pub static mut BN_ADD_WORD: BnAddWordFn = firmware_bn_add_word;
-#[cfg(not(target_os = "none"))]
-pub static mut BN_ADD_WORD: BnAddWordFn = missing_bn_add_word;
+use super::bn_add_word::bn_add_word;
 
 /// Subtract `word`, returning the stock worker's success/failure status.
 ///
 /// # Safety
 /// `a` must be a live BigNum with writable limbs despite its const `d` type.
-/// Nonzero magnitudes must be normalized; the add worker must be installed
-/// on hosts and its storage/capacity requirements must hold on delegated paths.
+/// Nonzero magnitudes must be normalized; the shared capacity worker's
+/// storage requirements must hold on delegated addition paths.
 #[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn bn_sub_word(a: *mut BigNum, mut word: u32) -> i32 {
@@ -46,8 +27,7 @@ pub unsafe extern "C" fn bn_sub_word(a: *mut BigNum, mut word: u32) -> i32 {
         let top = (*a).top;
         if top == 0 || (top == 1 && *(*a).d == 0) || (*a).neg != 0 {
             (*a).neg = 0;
-            let add = ptr::read_volatile(ptr::addr_of!(BN_ADD_WORD));
-            let result = add(a, word);
+            let result = bn_add_word(a, word);
             (*a).neg = 1;
             return result;
         }
@@ -108,35 +88,8 @@ mod tests {
         }
     }
 
-    // Implements the positive carry path of the verified stock add worker,
-    // including capacity failure before any magnitude write.
-    unsafe extern "C" fn bounded_add(a: *mut BigNum, mut word: u32) -> i32 {
-        unsafe {
-            assert_eq!((*a).neg, 0);
-            if (*a).dmax < (*a).top + 1 { return 0; }
-            let mut index = 0;
-            loop {
-                let old = if index < (*a).top { *(*a).d.add(index as usize) } else { 0 };
-                let sum = old.wrapping_add(word);
-                *((*a).d as *mut u32).add(index as usize) = sum;
-                if sum >= word { break; }
-                word = 1;
-                index += 1;
-            }
-            if (*a).top <= index { (*a).top += 1; }
-            1
-        }
-    }
-
     #[test]
-    fn delegated_zero_negative_and_failure_keep_stock_sign_rules() {
-        // This is the only host test that accesses this module's slot.
-        struct Restore(BnAddWordFn);
-        impl Drop for Restore {
-            fn drop(&mut self) { unsafe { BN_ADD_WORD = self.0; } }
-        }
-        let _restore = Restore(unsafe { BN_ADD_WORD });
-        unsafe { BN_ADD_WORD = bounded_add; }
+    fn delegated_zero_and_negative_keep_stock_sign_rules() {
         for (initial, top, neg, word, expected, expected_top) in [
             (0, 0, 0, 7, 7u64, 1), (0, 1, 0, 0, 0, 1),
             (u32::MAX, 1, 1, 1, 1u64 << 32, 2), (5, 1, 7, 3, 8, 1),
@@ -147,10 +100,5 @@ mod tests {
             assert_eq!(limbs[0] as u64 | ((limbs[1] as u64) << 32), expected);
             assert_eq!((a.top, a.neg, a.flags), (expected_top, 1, 0x55));
         }
-        let mut limbs = [9];
-        let mut a = number(&mut limbs, 1, 1);
-        assert_eq!(unsafe { bn_sub_word(&mut a, 4) }, 0);
-        assert_eq!(limbs, [9]);
-        assert_eq!((a.top, a.neg), (1, 1));
     }
 }

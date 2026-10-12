@@ -35,6 +35,9 @@ pub static mut BN_EXPAND_WORDS: BnExpandWordsFn = firmware_bn_expand_words;
 #[cfg(not(target_os = "none"))]
 pub static mut BN_EXPAND_WORDS: BnExpandWordsFn = missing_bn_expand_words;
 
+#[cfg(test)]
+pub(crate) static EXPAND_TEST_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
+
 /// Shift `a` left one bit into `result`, returning one on success, zero on failure.
 ///
 /// # Safety
@@ -132,7 +135,7 @@ mod tests {
 
     #[test]
     fn relocation_and_failure_preserve_stock_state_transitions() {
-        // Only this test accesses this module's dispatch slot.
+        let _serial = EXPAND_TEST_LOCK.lock();
         struct Restore(BnExpandWordsFn);
         impl Drop for Restore {
             fn drop(&mut self) { unsafe { BN_EXPAND_WORDS = self.0; } }
