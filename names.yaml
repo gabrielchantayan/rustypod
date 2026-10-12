@@ -251023,3 +251023,45 @@ functions:
       eight original instructions versus fifteen Rust instructions.
       LLVM adds a frame pointer, slot loads, and BLX instead of direct BL;
       mode selection, argument order, stack bottom, and return are intact.
+
+  - address: 0x08040518
+    ghidra: FUN_08040518
+    name: bn_pseudo_rand
+    size: 32
+    sig: "int bn_pseudo_rand(BigNum *result, int bits, int top, int bottom)"
+    module: crypto/bn_pseudo_rand
+    status: ported
+    vars:
+      param_1/r0: result
+      param_2/r1: bits
+      param_3/r2: top
+      param_4/r3: bottom
+    renames:
+      FUN_080e8b50: bn_random_worker
+    notes: >-
+      Raw words e92d4008 e58d3000 e1a03002 e1a02001 e1a01000
+      e3a00001 eb02a186 e8bd9000 establish [0x08040518,0x08040538),
+      32 bytes, ending before the independent range wrapper. Binary-wide
+      aligned A32 decoding finds two inbound plain BLs at 0x08082418 and
+      0x080824b4, zero predicated BLs. One outgoing plain BL at 0x08040530
+      reaches 0x080e8b50; zero outgoing predicated BLs. OpenSSL
+      BN_pseudo_rand selects mode 1, moves result/bits/top to r1/r2/r3,
+      passes bottom at stack word zero, and preserves the integer return.
+      Both callers request top=-1 and bottom=0 and check success.
+      No prior assigned-address or worker-address record exists; the
+      existing BN_rand port already identifies and exposes this worker.
+      Raw worker mode branch calls 0x080621b4 for nonzero mode and treats
+      -1 as failure, unlike the mode-zero source at 0x080620f8.
+      Deliberate deviation: reuse the existing volatile BN_RANDOM slot
+      rather than create a second seam. The worker remains stock firmware.
+      Shared deterministic-source host tests cover pseudo-mode magnitudes,
+      bit boundaries, top constraints, parity, zero bits, and unchanged
+      output on modeled allocation failure, not RNG quality or hardware.
+      Host suite passed 15769 tests; ARM release build passed. Standalone
+      actual-module public API smoke produced magnitude 0xa5 and top=1.
+      Normal host rlib smoke build was blocked by four unrelated missing
+      metadata/shared-payload/calendar helpers; isolated source smoke passed.
+      match.py exits 1: eight stock instructions versus fifteen Rust lines,
+      including a relocation word. LLVM adds frame setup and dispatch-slot
+      loads and replaces BL with BLX; mode, argument order, stack bottom,
+      and unchanged return survive. No allocation added.
