@@ -9,15 +9,13 @@
 //! For a resource slot index in `0..=3`, load its handle from the controller's
 //! `+0xf7c` four-word handle table. A null handle leaves the matching `+0xf8c`
 //! result word unchanged; otherwise select the requested item from the handle
-//! and store that result. Deliberate deviation: host builds use a typed seam
-//! for the still-retail item selector; ARM builds call it at `0x08052560`.
+//! and store that result. Both builds call the canonical Rust
+//! `image_library_entry_at` port.
 
 #[cfg(not(target_os = "none"))]
 const HANDLE_TABLE_OFFSET: usize = 0xf7c;
 #[cfg(not(target_os = "none"))]
 const RESULT_TABLE_OFFSET: usize = 0xf8c;
-
-type SelectItem = unsafe extern "C" fn(*mut u8, u32) -> *mut u8;
 
 #[cfg(target_os = "none")]
 core::arch::global_asm!(
@@ -33,27 +31,12 @@ resource_slot_select_item:
     cmp r0, #0
     ldmeq sp!, {{r4, pc}}
     mov r1, r2
-    bl 0x08052560
+    bl image_library_entry_at
     str r0, [r4, #0xf8c]
     ldmia sp!, {{r4, pc}}
     .size resource_slot_select_item, . - resource_slot_select_item
 "#
 );
-
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_select_item(_handle: *mut u8, _item_index: u32) -> *mut u8 {
-    panic!("install resource-slot select-item host seam before calling this port")
-}
-
-/// Host replacement for retail item selector `FUN_08052560`.
-#[cfg(not(target_os = "none"))]
-pub static mut RESOURCE_SLOT_SELECT_ITEM: SelectItem = missing_select_item;
-
-#[cfg(not(target_os = "none"))]
-#[inline(always)]
-unsafe fn select_item(handle: *mut u8, item_index: u32) -> *mut u8 {
-    unsafe { RESOURCE_SLOT_SELECT_ITEM(handle, item_index) }
-}
 
 /// Selects `item_index` from a controller resource handle slot.
 ///
@@ -72,63 +55,20 @@ pub unsafe extern "C" fn resource_slot_select_item(controller: *mut u8, slot_ind
         if handle.is_null() {
             return;
         }
-        let item = select_item(handle, item_index);
-        (controller.add(RESULT_TABLE_OFFSET + slot_offset) as *mut u32).write_volatile(item as u32);
+        let item = crate::app::image_library_entry_at::image_library_entry_at(handle, item_index);
+        (controller.add(RESULT_TABLE_OFFSET + slot_offset) as *mut u32).write_volatile(item);
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use core::sync::atomic::{AtomicUsize, Ordering};
-    use parking_lot::Mutex;
-
-    static TEST_LOCK: Mutex<()> = Mutex::new(());
-    static CALLS: AtomicUsize = AtomicUsize::new(0);
-    static SEEN_HANDLE: AtomicUsize = AtomicUsize::new(0);
-    static SEEN_INDEX: AtomicUsize = AtomicUsize::new(0);
-
-    unsafe extern "C" fn select_fixture(handle: *mut u8, item_index: u32) -> *mut u8 {
-        CALLS.fetch_add(1, Ordering::SeqCst);
-        SEEN_HANDLE.store(handle as usize, Ordering::SeqCst);
-        SEEN_INDEX.store(item_index as usize, Ordering::SeqCst);
-        0x1234_5678 as *mut u8
-    }
-
-    fn reset() {
-        CALLS.store(0, Ordering::SeqCst);
-        SEEN_HANDLE.store(0, Ordering::SeqCst);
-        SEEN_INDEX.store(0, Ordering::SeqCst);
-    }
-
     #[test]
-    fn selects_and_stores_the_requested_slot_item() {
-        let _lock = TEST_LOCK.lock();
-        let mut controller = [0u32; 1000];
-        controller[(HANDLE_TABLE_OFFSET / 4) + 3] = 0x1020_3040;
-        unsafe { RESOURCE_SLOT_SELECT_ITEM = select_fixture; }
-        reset();
-
-        unsafe { resource_slot_select_item(controller.as_mut_ptr() as *mut u8, 3, 17); }
-
-        assert_eq!(CALLS.load(Ordering::SeqCst), 1);
-        assert_eq!(SEEN_HANDLE.load(Ordering::SeqCst), 0x1020_3040);
-        assert_eq!(SEEN_INDEX.load(Ordering::SeqCst), 17);
-        assert_eq!(controller[(RESULT_TABLE_OFFSET / 4) + 3], 0x1234_5678);
-    }
-
-    #[test]
-    fn null_handle_and_out_of_range_slot_do_not_write_or_select() {
-        let _lock = TEST_LOCK.lock();
+    fn null_handle_and_out_of_range_slot_leave_results_unchanged() {
         let mut controller = [0u32; 1000];
         controller[RESULT_TABLE_OFFSET / 4] = 0xa5a5_a5a5;
-        unsafe { RESOURCE_SLOT_SELECT_ITEM = select_fixture; }
-        reset();
-
-        unsafe { resource_slot_select_item(controller.as_mut_ptr() as *mut u8, 0, 1); }
-        unsafe { resource_slot_select_item(controller.as_mut_ptr() as *mut u8, 4, 2); }
-
-        assert_eq!(CALLS.load(Ordering::SeqCst), 0);
+        unsafe { resource_slot_select_item(controller.as_mut_ptr().cast(), 0, 1); }
+        unsafe { resource_slot_select_item(controller.as_mut_ptr().cast(), 4, 2); }
         assert_eq!(controller[RESULT_TABLE_OFFSET / 4], 0xa5a5_a5a5);
     }
 }
