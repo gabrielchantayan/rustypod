@@ -60,6 +60,7 @@ pub mod memh_handle;
 pub mod memh_handle_release;
 pub mod refcounted_payload_create;
 pub mod refcounted_buffer_owner_destroy;
+pub mod refcounted_buffer_owner_release;
 pub mod memh_buffer_create;
 pub mod memh_get_len;
 pub mod memh_set_len;
