@@ -48339,6 +48339,39 @@ functions:
       traversal, key comparison, sentinel-state test, and zero-on-exhaustion
       shape; LLVM omits the permanently unreachable fallback path.
 
+  - address: 0x080522a4
+    ghidra: FUN_080522a4
+    name: image_library_first_container
+    size: 24
+    sig: "u32 image_library_first_container(const u8 *database)"
+    module: app/image_library_first_container
+    status: ported
+    renames:
+      param_1/r0/r2: database
+      param_1_plus_0x0c: first_container
+      FUN_08057c2c: image_library_is_liti_class
+    notes: >-
+      Raw words e1a02000 e52de004 eb00165e e1b00000 1592000c e49df004
+      establish mov r2,r0; push {lr}; bl 0x08057c2c; movs r0,r0;
+      ldrne r0,[r2,#0x0c]; pop {pc}. True extent is 24 bytes, ending at
+      the independent entry_match_first prologue at 0x080522bc.
+      Return the database+0x0c first-container link only if the existing
+      NULL-guarded liti class predicate succeeds, otherwise zero.
+      Callers 0x0805e310 and 0x08063e9c walk it with the already-ported
+      liti_container_successor at 0x08053ba0. Full raw-word scan verifies
+      two plain inbound BLs (0x0805e31c, 0x0806410c), zero predicated BLs;
+      the body contains one plain BL to image_library_is_liti_class.
+      Deliberate deviation: directly call that Rust port. Aligned loads
+      and the returned target-width u32 remain unchanged. Host tests cover
+      NULL, one-word rejected classes, exact fourth-word selection, zero
+      and high-bit links, and class transitions. Standalone execution
+      verifies valid-link, rejected-class and NULL paths. Host suite and
+      ARM release build pass. match.py shows LLVM's r4/frame and
+      cmp/ldrne/moveq versus ADS r2 and movs/ldrne, retaining the guarded
+      +0x0c load. ARM relocation confirms the BL targets the existing
+      image_library_is_liti_class symbol. Reference C:
+      decomp/c/003/080522a4_FUN_080522a4.c.
+
   - address: 0x080522bc
     ghidra: FUN_080522bc
     name: entry_match_first
