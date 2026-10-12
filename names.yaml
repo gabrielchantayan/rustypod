@@ -16,6 +16,56 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080488d4
+    ghidra: FUN_080488d4
+    name: clear_tagged_list
+    size: 192
+    sig: "void clear_tagged_list(u8 *source)"
+    module: ui/clear_tagged_list
+    status: ported
+    vars:
+      param_1/r5: source
+      r6: index
+      r4: record
+      r2: reciprocal_index
+      DAT_08048990: died_event
+    renames:
+      FUN_080b49a4: tagged_link_source_is_valid
+      FUN_08066bb8: tagged_list_notify
+      FUN_0805c1a4: object_counter_increment
+      FUN_080512cc: indexed_object_element
+      FUN_080c67b8: tagged_link_target_is_valid
+      FUN_080e2dc8: reciprocal_source_index
+      FUN_080646b8: dynamic_array_remove
+      FUN_0806c030: positive_counter_decrement
+      FUN_08048230: embedded_list_storage_destroy
+      FUN_0805cfb4: bzero
+    notes: >-
+      Raw extent [0x080488d4,0x08048994): 188 instruction bytes plus event
+      literal 0x64696564. Next independent PUSH begins at 0x08048994.
+      Full-image aligned BL decoding finds two plain inbound calls at
+      0x08049288 and 0x08049524, zero predicated. Body has nine plain BLs
+      and one BLNE at 0x0804895c; r2 retains the reciprocal lookup index.
+      Validate source, reject nonzero dispatch depth at +8, notify died,
+      increment list busy, scan freshly loaded unsigned length, validate
+      each target, remove this source from its reciprocal list, decrement
+      busy, destroy embedded storage, and zero exactly 52 bytes.
+      Existing Rust ports replace their stock calls. Three verified unported
+      routines remain injectable firmware boundaries: notification at
+      0x08066bb8, reciprocal lookup at 0x080e2dc8, storage destruction at
+      0x08048230. Raw reciprocal lookup scans target+12 for the source word
+      and returns its one-based index; storage destruction frees nonzero
+      list+24 storage then zeroes 36 bytes. Host IndexedObject retains its
+      native pointer slot; records remain u32 pointers. Existing tdat
+      destruction now defaults to the Rust port, removing its stock seam.
+      Host suite and ARM release build pass. Standalone public-API smoke
+      confirms notification, balanced busy state, exact 52-byte clearing,
+      and preserved trailing sentinel using a test-configured host library.
+      Normal host library compilation is blocked by unrelated missing
+      cfg-gated metadata/payload/calendar functions. match.py reports the
+      expected structural diff: indirect verified boundaries, unsigned
+      scan, r2 reciprocal index, and final bzero tail branch.
+
   - address: 0x08048b34
     ghidra: FUN_08048b34
     name: task_dispose_message
