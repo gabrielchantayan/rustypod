@@ -250004,3 +250004,48 @@ functions:
       ARM match review confirms conditional destruction, 36-byte zeroing,
       and zero return; LLVM uses a branch around BL instead of BLNE and
       saves extra frame registers. No algorithmic deviations.
+  - address: 0x08048138
+    ghidra: FUN_08048138
+    name: hfs_fork_extents_release
+    size: 76
+    sig: "u32 hfs_fork_extents_release(u8 *volume, u32 file_id, u32 fork_type, const AllocationExtent *extents, u8 *modified)"
+    module: fs/hfs_fork_extents_release
+    status: ported
+    vars:
+      param_1/r4: volume
+      param_2/r5: file_id
+      param_3/r6: fork_type
+      param_4/r1: extents
+      param_5/r7: modified
+      stack_8: released_blocks
+      stack_4_byte: terminated
+    renames:
+      FUN_0806451c: hfs_extent_record_release
+      FUN_0806b68c: hfs_overflow_extents_release
+    notes: >-
+      Raw A32 extent [0x08048138,0x08048184) is 76 bytes; the next
+      independent PUSH is at 0x08048184. Whole-image word decoding finds
+      two incoming plain BLs at 0x0804868c and 0x080486ac, no incoming
+      predicated BLs, two outgoing plain BLs at 0x08048158 to 0x0806451c
+      and 0x0804817c to 0x0806b68c, no outgoing predicated BLs.
+      Ghidra's void signature is wrong: r0 preserves the inline release
+      error or overflow release result, and both caller sites consume it.
+      Reuses the existing inline extent-record Rust port. On an error or
+      zero-count terminator, returns without accessing modified. A full
+      record continues with the wrapping released-block total, fork type,
+      file ID, and caller-owned byte marker. Raw 0x0806b68c searches via
+      0x080500d8, releases via 0x0806451c, deletes via 0x08048540, sets
+      modified after successful deletion, advances by released blocks,
+      and treats search status 0x20 as success. No registry entry or Rust
+      seam exists for that callee; it remains firmware-owned at its
+      verified address, not ported here. No target behavioral deviations.
+      Host edge tests exercise both extent limits, all termination and
+      error positions, full-width errors, wrapping block totals, marker
+      guards and overflow errors after mutation, using the real Rust
+      inline-record release and test-only firmware boundary models.
+      All 15720 host tests pass; ARM release build passes. Standalone
+      smoke passes 22 termination/error cases with a null modified pointer
+      and validates free-block accounting. match.py exits 1 with a
+      structural diff: 19 stock versus 28 Rust instructions; equivalent
+      error/termination gate, relocated inline-release BL, extra frame
+      setup, and a literal-address overflow tail BX instead of a BL.
