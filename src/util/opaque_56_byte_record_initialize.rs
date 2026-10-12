@@ -4,7 +4,7 @@
 //! the `pop {r4, r5, r6, pc}` at 0x08047704; the vtable literal at
 //! 0x08047708 is data and the next independently entered function starts at
 //! 0x0804770c. The body has two plain outgoing `bl` instructions (`bzero`
-//! and the unported initializer at 0x080470bc), no predicated `bl`
+//! and array_record_initialize), no predicated `bl`
 //! instructions, and three plain inbound `bl` calls (0x08047c68, 0x08058680,
 //! and 0x0805e494), with no predicated inbound calls.
 //!
@@ -12,38 +12,16 @@
 //! store the supplied values at +48 and +52, initialize the 36-byte embedded
 //! subobject at +12 with `(4, 0, 0)`, and install the record vtable on success.
 //!
-//! Deliberate deviation: 0x080470bc has no recovered semantic identity and
-//! remains a direct retailOS call on target builds. Host builds reproduce only
-//! its observed output layout so this outer initializer is testable.
+//! The embedded subobject uses the shared array_record_initialize port on
+//! both host and target builds. No deliberate behavioral deviations.
 
 use crate::bzero::bzero;
+use super::array_record_initialize::array_record_initialize;
 use core::ptr;
 
 const RECORD_BYTES: i32 = 0x38;
 const EMBEDDED_SUBOBJECT_OFFSET: usize = 0x0c;
 const RECORD_VTABLE: u32 = 0x4d52_6376;
-#[cfg(target_os = "none")]
-const RETAIL_EMBEDDED_SUBOBJECT_INITIALIZE: usize = 0x0804_70bc;
-
-#[cfg(target_os = "none")]
-unsafe fn initialize_embedded_subobject(subobject: *mut u8) -> i32 {
-    let initialize: unsafe extern "C" fn(u32, u32, u8, *mut u8) -> i32 =
-        core::mem::transmute(RETAIL_EMBEDDED_SUBOBJECT_INITIALIZE);
-    initialize(4, 0, 0, subobject)
-}
-
-#[cfg(not(target_os = "none"))]
-unsafe fn initialize_embedded_subobject(subobject: *mut u8) -> i32 {
-    const SUBOBJECT_BYTES: i32 = 0x24;
-    const SUBOBJECT_VTABLE: u32 = 0x6172_6179;
-
-    bzero(subobject, SUBOBJECT_BYTES);
-    ptr::write(subobject.cast::<u32>(), SUBOBJECT_VTABLE);
-    ptr::write(subobject.add(4).cast::<u32>(), 4);
-    ptr::write(subobject.add(0x20), 0);
-    ptr::write(subobject.add(0x21), 1);
-    0
-}
 
 /// Initializes a caller-provided opaque 56-byte record.
 #[inline(never)]
@@ -60,7 +38,7 @@ pub unsafe extern "C" fn opaque_56_byte_record_initialize(
     bzero(record, RECORD_BYTES);
     ptr::write(record.add(48).cast::<u32>(), first_value);
     ptr::write(record.add(52).cast::<u32>(), second_value);
-    let status = initialize_embedded_subobject(record.add(EMBEDDED_SUBOBJECT_OFFSET));
+    let status = array_record_initialize(4, 0, 0, record.add(EMBEDDED_SUBOBJECT_OFFSET));
     if status == 0 {
         ptr::write(record.cast::<u32>(), RECORD_VTABLE);
     }
