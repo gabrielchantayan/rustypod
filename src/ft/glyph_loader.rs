@@ -1,6 +1,6 @@
 //! FreeType glyph-loader subglyph storage.
 
-use crate::ft::memory::{ft_mem_realloc, FtMemory};
+use crate::ft::memory::{ft_mem_alloc, ft_mem_realloc, FtMemory};
 use crate::ft::types::{FtOutline, FtVector};
 
 /// `FT_SubGlyphRec` is 32 bytes in this FreeType build. Its contents are
@@ -35,6 +35,39 @@ pub struct FtGlyphLoader {
     pub base: FtGlyphLoad,
     pub current: FtGlyphLoad,
 }
+
+/// FreeType `FT_GlyphLoader_New` — original `FUN_0804c91c` at 0x0804c91c.
+/// True extent: 48 bytes, ending at the next prologue at 0x0804c94c.
+/// Raw-word scan: two incoming plain BLs, one outgoing plain BL to
+/// `ft_mem_alloc` (0x082cfaa4), and no predicated BLs in either direction.
+///
+/// Allocate and clear 0x58 bytes, store the memory allocator in the first
+/// field, and publish the loader only on success. Failure leaves the output
+/// untouched. The four bytes after the represented loader are also cleared.
+/// Deviations: discard Ghidra's unused r2/r3 arguments; host allocation grows
+/// with native pointer fields, retaining the four-byte opaque tail.
+///
+/// # Safety
+/// `memory` must satisfy [`ft_mem_alloc`]; `output` must be writable on
+/// success. The allocator must return suitably aligned, disjoint storage.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn ft_glyphloader_new(
+    memory: *mut FtMemory,
+    output: *mut *mut FtGlyphLoader,
+) -> i32 {
+    let mut error = 0;
+    let size = core::mem::size_of::<FtGlyphLoader>() + 4;
+    let loader = ft_mem_alloc(memory, size as i32, &mut error).cast::<FtGlyphLoader>();
+    if error == 0 {
+        (*loader).memory = memory;
+        *output = loader;
+    }
+    error
+}
+
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 0x58] = [0; core::mem::size_of::<FtGlyphLoader>() + 4];
 
 /// FreeType `FT_GlyphLoader_CheckSubGlyphs` (`ftgloadr.c`) — original:
 /// `FUN_0804c798` @ 0x0804c798 (120 bytes; true extent through 0x0804c810;
@@ -120,6 +153,56 @@ mod tests {
             base: unsafe { core::mem::zeroed() },
             current: unsafe { core::mem::zeroed() },
         }
+    }
+
+    unsafe extern "C" fn dirty_alloc(_: *mut FtMemory, size: i32) -> *mut u8 {
+        let layout = Layout::from_size_align(
+            size as usize, core::mem::align_of::<FtGlyphLoader>(),
+        ).unwrap();
+        let block = std::alloc::alloc(layout);
+        if !block.is_null() {
+            core::ptr::write_bytes(block, 0xa5, size as usize);
+        }
+        block
+    }
+
+    unsafe extern "C" fn fail_alloc(_: *mut FtMemory, _: i32) -> *mut u8 {
+        core::ptr::null_mut()
+    }
+
+    #[test]
+    fn new_clears_dirty_storage_and_records_allocator() {
+        let mut memory = FtMemory {
+            user: core::ptr::null_mut(), alloc: dirty_alloc, free, realloc,
+        };
+        let mut output = core::ptr::null_mut();
+        assert_eq!(unsafe { ft_glyphloader_new(&mut memory, &mut output) }, 0);
+        assert_eq!(unsafe { (*output).memory }, &mut memory as *mut FtMemory);
+        let size = core::mem::size_of::<FtGlyphLoader>() + 4;
+        let bytes = unsafe {
+            core::slice::from_raw_parts(output.cast::<u8>(), size)
+        };
+        assert!(bytes[core::mem::size_of::<*mut FtMemory>()..].iter().all(|b| *b == 0));
+        unsafe {
+            std::alloc::dealloc(output.cast(), Layout::from_size_align(
+                size, core::mem::align_of::<FtGlyphLoader>(),
+            ).unwrap());
+        }
+    }
+
+    #[test]
+    fn new_allocation_failure_preserves_output_and_allows_null_output() {
+        let mut memory = FtMemory {
+            user: core::ptr::null_mut(), alloc: fail_alloc, free, realloc,
+        };
+        let mut existing = loader(&mut memory);
+        let sentinel = &mut existing as *mut FtGlyphLoader;
+        let mut output = sentinel;
+        assert_eq!(unsafe { ft_glyphloader_new(&mut memory, &mut output) }, 0x40);
+        assert_eq!(output, sentinel);
+        assert_eq!(unsafe {
+            ft_glyphloader_new(&mut memory, core::ptr::null_mut())
+        }, 0x40);
     }
 
     #[test]
