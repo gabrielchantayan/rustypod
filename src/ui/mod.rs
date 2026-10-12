@@ -214,6 +214,7 @@ pub mod item_store_counted_string;
 pub mod item_refresh_string_flag;
 pub mod item_refresh_secondary_string_flag;
 pub mod item_refresh_primary_string;
+pub mod item_refresh_indexed_string_flag;
 pub mod plst_element_load_item;
 pub mod plst_element_teardown;
 pub mod empty_destructor_0806715c;
