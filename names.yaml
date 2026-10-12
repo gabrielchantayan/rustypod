@@ -3364,6 +3364,43 @@ functions:
       restored first, cleared second and intact neighbors. ARM release build
       passes. match.py shows the same two stores, with LLVM frame setup and
       pop return instead of bx lr (five instructions versus three).
+  - address: 0x08044480
+    ghidra: FUN_08044480
+    name: item_refresh_secondary_string_flag
+    size: 84
+    sig: "void item_refresh_secondary_string_flag(SecondaryStringItem *item)"
+    module: ui/item_refresh_secondary_string_flag
+    status: ported
+    renames:
+      param_1/r0/r4: item
+      item+0x0: owner
+      item+0x40: string_id
+      item+0x15: secondary_string_flag_byte
+      local_c: payload
+      local_10: byte_length
+      FUN_080d6e50: indexed_payload_lookup_mode_one
+      FUN_08059c68: counted_wstr_validate
+    notes: >-
+      Raw aligned A32 establishes [0x08044480,0x080444d4), 84 bytes,
+      no literals; the next function starts with push {r2,r3,r4,lr}.
+      Independent whole-image decoding finds two incoming plain BLs at
+      0x08067c3c and 0x08095d4c, zero predicated incoming BLs, two
+      outgoing plain BLs at 0x0804449c and 0x080444b4, and zero
+      predicated outgoing BLs. Look up the signed id at +0x40 in
+      owner+0x278, ignore status, logically halve the encoded byte length,
+      validate with flags 0x1d, and replace only flag bit 7 at +0x15.
+      Validator bit 2 forces rejection even for empty or invalid lookups;
+      preserve both real calls instead of reducing to a constant clear.
+      Ghidra's extra arguments are scratch storage, not meaningful inputs.
+      Deviations: initialize scratch outputs overwritten by lookup and
+      widen the owner pointer on hosts through repr(C). Reuse both ported
+      callees without new seams. Host tests cover every flag byte, empty
+      and failed lookups, signed id boundaries, and neighboring state.
+      Host suite passes 15750 tests and ARM release build passes.
+      Standalone real-library smoke confirms a5 to 25 on lookup failure
+      with intact neighboring state and id. match.py shows 23 versus 21
+      instructions: LLVM frame setup and scratch initialization; relocations
+      verify both real callees, with unchanged field offsets and halving.
   - address: 0x080444d4
     ghidra: FUN_080444d4
     name: item_refresh_string_flag

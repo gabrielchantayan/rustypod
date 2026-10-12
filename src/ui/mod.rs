@@ -1,6 +1,5 @@
 //! retailOS UI / graphics layer — the geometry primitives the drawing
 //! and view code is built on.
-pub mod item_refresh_secondary_string_flag;
 pub mod plst_dispatch_matching_item;
 pub use plst_dispatch_matching_item::*;
 pub mod embedded_list_storage_destroy;
@@ -213,6 +212,7 @@ pub mod plst_file_element_create;
 pub mod plst_apply_counted_string;
 pub mod item_store_counted_string;
 pub mod item_refresh_string_flag;
+pub mod item_refresh_secondary_string_flag;
 pub mod plst_element_load_item;
 pub mod plst_element_teardown;
 pub mod empty_destructor_0806715c;

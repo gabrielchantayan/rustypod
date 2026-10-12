@@ -10,6 +10,11 @@
 //! Deviations: initialize scratch outputs overwritten by lookup, reuse
 //! ported callees, and widen the owner pointer on hosts through repr(C).
 //! Ghidra's extra arguments are saved scratch registers, not inputs.
+//! Verification: 15,750 host tests pass; a standalone real-library smoke
+//! clears a failed lookup's flag byte from 0xa5 to 0x25 with neighbors intact.
+//! ARM release and match.py retain both callee relocations, +0x40 id,
+//! owner+0x278, logical halving, and +0x15 flag access (23 vs 21 instructions;
+//! LLVM adds frame setup and initialized scratch slots).
 
 use core::ptr;
 use crate::app::indexed_payload_lookup::indexed_payload_lookup_mode_one;
