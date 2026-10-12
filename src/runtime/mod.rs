@@ -45,6 +45,7 @@ pub mod opaque_tail_dispatch_veneer;
 pub mod opaque_node_context_dispatch_veneer;
 pub mod qsort;
 pub mod parameter_descriptor_value;
+pub mod parameter_descriptor_new;
 pub mod parameter_value_destroy;
 pub mod parameter_template_new;
 pub mod global_parameter_descriptor_value;
