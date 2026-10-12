@@ -58,8 +58,101 @@ pub unsafe extern "C" fn current_datetime_to_normalized_record(out: *mut DateTim
     1
 }
 
+/// current_calendar_unix_seconds — original: `FUN_08051e0c` @ 0x08051e0c.
+/// True extent: **36 bytes**, 0x08051e0c..0x08051e30; raw words verify two
+/// unconditional outgoing BLs, zero predicated BLs, and two plain BL callers.
+///
+/// Queries a normalized calendar record and, on nonzero status, returns its
+/// Unix timestamp through datetime_to_unix_seconds. Zero status returns zero.
+/// The next boundary is the independent `mov r0,#55; bx lr` constant getter.
+///
+/// Deliberate deviations: omit unused incoming registers r0..r3 (r1..r3
+/// merely supply stack storage), initialize ignored record padding, and omit
+/// the converter's dead r1=1 argument. Unlike Ghidra's void signature, preserve
+/// the returned r0 used by the caller at 0x08236688 to seed its PRNG.
+/// A volatile status read retains the original failure branch despite the
+/// current query implementation always returning one.
+///
+/// # Safety
+///
+/// The installed calendar and normalization handlers must obey their buffer
+/// contracts; DATETIME_FLOOR must reference a readable DateTime.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn current_calendar_unix_seconds() -> i32 {
+    let mut datetime = DateTime {
+        second: 0, minute: 0, hour: 0, day: 0, month: 0, reserved: 0,
+        year: 0, weekday: 0, reserved2: 0,
+    };
+    let status = current_datetime_to_normalized_record(&mut datetime);
+    if core::ptr::read_volatile(&status) == 0 {
+        0
+    } else {
+        super::datetime::datetime_to_unix_seconds(&mut datetime)
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    unsafe extern "C" fn preserve_calendar_time(_day_number: u32, out: *mut DateTime) {
+        // The real query and day-number calculation run; normalize only the
+        // already-valid calendar fields supplied by these fixtures.
+        (*out).weekday = 4;
+    }
+
+    struct FloorFixture {
+        previous: *const DateTime,
+        _lock: std::sync::MutexGuard<'static, ()>,
+    }
+
+    impl Drop for FloorFixture {
+        fn drop(&mut self) {
+            unsafe {
+                ptr::write_volatile(
+                    ptr::addr_of_mut!(super::super::datetime::DATETIME_FLOOR),
+                    self.previous,
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn current_calendar_timestamp_clamps_floor_and_wraps_signed_limit() {
+        let floor = DateTime {
+            second: 0, minute: 0, hour: 0, day: 1, month: 1, reserved: 0,
+            year: 1970, weekday: 0, reserved2: 0,
+        };
+        let lock = super::super::datetime::tests::FLOOR_LOCK.lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let _floor = unsafe {
+            let previous = ptr::read_volatile(ptr::addr_of!(super::super::datetime::DATETIME_FLOOR));
+            ptr::write_volatile(ptr::addr_of_mut!(super::super::datetime::DATETIME_FLOOR), &floor);
+            FloorFixture { previous, _lock: lock }
+        };
+        let _mocks = unsafe { install([0; 20], false) };
+        unsafe {
+            ptr::write_volatile(
+                ptr::addr_of_mut!(super::super::unix_to_datetime::DAY_NUMBER_TO_DATETIME),
+                preserve_calendar_time,
+            );
+        }
+        for (year, month, day, hour, minute, second, expected) in [
+            (1969u16, 12, 31, 23, 59, 59, 0),
+            (1970, 1, 1, 0, 0, 0, 0),
+            (1970, 1, 1, 0, 0, 1, 1),
+            (2000, 2, 29, 12, 34, 56, 951_827_696),
+            (2038, 1, 19, 3, 14, 7, i32::MAX),
+            (2038, 1, 19, 3, 14, 8, i32::MIN),
+        ] {
+            unsafe {
+                QUERY_RECORD = [0; 20];
+                QUERY_RECORD[2..7].copy_from_slice(&[second, minute, hour, day, month]);
+                QUERY_RECORD[8..10].copy_from_slice(&year.to_le_bytes());
+                assert_eq!(current_calendar_unix_seconds(), expected);
+            }
+        }
+    }
+
     extern crate std;
 
     use super::*;
