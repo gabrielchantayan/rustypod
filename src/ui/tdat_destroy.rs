@@ -15,13 +15,14 @@ use crate::util::singly_linked_list_remove::singly_linked_list_remove;
 use crate::libc::bzero::bzero;
 use crate::heap::veneers::free_tag4;
 use super::clear_tagged_list::clear_tagged_list;
+use super::clear_tagged_target::clear_tagged_target;
 
 /// Unported child destruction and embedded/resource cleanup boundaries.
 #[derive(Clone, Copy)]
 pub struct TdatDestroyOps {
     pub destroy_plst: unsafe extern "C" fn(*mut u8, u32),
     pub clear_tagged_list: unsafe extern "C" fn(*mut u8),
-    pub clear_handler: unsafe extern "C" fn(*mut u8),
+    pub clear_tagged_target: unsafe extern "C" fn(*mut u8),
     pub release_resources: unsafe extern "C" fn(*mut u8),
 }
 
@@ -48,13 +49,12 @@ macro_rules! cleanup_boundary {
         }
     };
 }
-cleanup_boundary!(retail_clear_handler, 0x0804_8804);
 cleanup_boundary!(retail_release_resources, 0x080d_a928);
 
 pub const DEFAULT_TDAT_DESTROY_OPS: TdatDestroyOps = TdatDestroyOps {
     destroy_plst: retail_destroy_plst,
     clear_tagged_list,
-    clear_handler: retail_clear_handler,
+    clear_tagged_target,
     release_resources: retail_release_resources,
 };
 pub static mut TDAT_DESTROY_OPS: TdatDestroyOps = DEFAULT_TDAT_DESTROY_OPS;
@@ -65,9 +65,9 @@ pub static mut TDAT_DESTROY_OPS: TdatDestroyOps = DEFAULT_TDAT_DESTROY_OPS;
 /// clear embedded lists/resources, zero all 0x948 bytes, free, then notify the
 /// saved owner with 'Trpa' and the saved identity (not the freed pointer).
 ///
-/// Deliberate deviations: ported dependencies are called directly; three
-/// unported cleanups use TDAT_DESTROY_OPS, whose list cleanup now defaults to
-/// the Rust port, and the existing tagged-list notify seam is reused.
+/// Deliberate deviations: ported dependencies are called directly; two
+/// unported cleanups use TDAT_DESTROY_OPS. Both tagged cleanups default to
+/// Rust ports, and the existing tagged-list notify seam is reused.
 /// The two first-plst calls per iteration and notifications after freeing
 /// the element are retained.
 ///
@@ -107,7 +107,7 @@ unsafe fn destroy_checked(
     dispatch(element, 0x7464_636c, ptr::null_mut());
     tdat_element_set_flag_20_bit_2(element, 0);
     (ops.clear_tagged_list)(element.add(0x54));
-    (ops.clear_handler)(element.add(0x88));
+    (ops.clear_tagged_target)(element.add(0x88));
     (ops.release_resources)(element);
     bzero(element, 0x948);
     free(element);
@@ -135,7 +135,7 @@ mod tests {
         event(tag);
     }
     unsafe extern "C" fn clear_list(_: *mut u8) { event(1); }
-    unsafe extern "C" fn clear_handler(_: *mut u8) { event(2); }
+    unsafe extern "C" fn clear_target(_: *mut u8) { event(2); }
     unsafe extern "C" fn resources(_: *mut u8) { event(3); }
     unsafe extern "C" fn child(node: *mut u8, mode: u32) {
         assert_eq!(mode, 0);
@@ -177,7 +177,7 @@ mod tests {
             EVENTS.with(|e| e.borrow_mut().clear());
             destroy_checked(element, TdatDestroyOps {
                 destroy_plst: child, clear_tagged_list: clear_list,
-                clear_handler, release_resources: resources,
+                clear_tagged_target: clear_target, release_resources: resources,
             }, notify, dispatch, free);
             assert_eq!(owner.add(0xb98).cast::<u32>().read(), 0);
         }
