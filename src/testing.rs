@@ -1470,6 +1470,8 @@ pub mod hints {
     // data fixture; mappings never unmap, so no other user may share this
     // hint.
     pub const TWO_BUFFER_OWNER_RELEASE: usize = 0xcd00_0000;
+    // Dedicated target-word allocation/data fixture for the paired factory.
+    pub const TWO_BUFFER_OWNER_CREATE: usize = 0xcd10_0000;
     // 0xce00_0000: dedicated to heap/bucket_chain_table's target-width
     // bucket and linked-node fixture; mappings never unmap, so no other user
     // may share this hint.

@@ -251192,3 +251192,45 @@ functions:
       LLVM adds frame setup and dispatch-slot loads, replacing multiply BL
       with BLX; empty/zero paths, signed comparison, reserve failure, length
       publication before carry store, and return behavior remain intact.
+
+  - address: 0x0803dc50
+    ghidra: FUN_0803dc50
+    name: two_buffer_owner_create
+    size: 176
+    sig: "TwoBufferOwner *two_buffer_owner_create(const MarkedWordBuffer *first_source, const MarkedWordBuffer *second_source, u32 context)"
+    module: heap/two_buffer_owner
+    status: ported
+    renames:
+      param_1/r6: first_source
+      param_2/r7: second_source
+      param_3/r5: context
+      iVar1/r4: owner
+      FUN_08043c18: traced_alloc
+      FUN_08049a84: diag_ring_record
+      thunk_EXT_FUN_2200027c: memzero_aligned
+      FUN_080403dc: tagged_word_buffer_create
+      FUN_0803e6e8: marked_word_buffer_assign
+      FUN_0803dba8: two_buffer_owner_release
+    notes: >-
+      Raw osos.dec confirms the exact 0x0803dc50..0x0803dd00 extent,
+      44 ARM words with no literal pool; the next independent function
+      starts at 0x0803dd00. Full raw BL decoding finds two inbound plain
+      BLs at 0x08062318 and 0x0808b398, eight outbound plain BLs, and no
+      predicated calls in either set. Allocate and zero a five-word owner,
+      allocate both tagged word buffers, then independently assign the
+      first and second sources in order. Publish context at +12 only on
+      success; +0 and +16 remain zero. Allocation failure records diagnostic
+      (3, 0x66, 0x41, 0, 0); partial construction failures release buffers
+      and owner through the existing destructor. All callees are ported;
+      no new seams. The zero veneer at 0x08037db8 targets the 0x2200027c
+      IRAM mirror of memzero_aligned. Deliberate deviation: volatile
+      zero-fill function pointer prevents LLVM builtin substitution and
+      produces BLX instead of BL. Ghidra's fourth argument is spurious;
+      raw code consumes only three. Host tests cover all five failure
+      stages, ordered cleanup, empty and one/five-word independent copies,
+      marker/context preservation, and untouched sources. Word-buffer tests
+      now share the allocator test lock to isolate lifecycle hooks.
+      match.py reviewed: identical allocation/assignment failure chain and
+      cleanup, diagnostic constants, target offsets and success-only context
+      store; LLVM uses explicit branches instead of predicated success
+      stores, a larger frame, and the documented zero-fill BLX.
