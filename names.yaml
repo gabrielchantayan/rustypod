@@ -250709,3 +250709,43 @@ functions:
       match.py exits 1: LLVM emits an eight-instruction/literal listing,
       a frame and indirect tail BX to 0x08046c74 instead of the direct BL.
       No algorithmic deviation or intentional symbol fold.
+
+  - address: 0x08044224
+    ghidra: FUN_08044224
+    name: hfs_btree_map_capacity
+    size: 40
+    sig: "u32 hfs_btree_map_capacity(const u8 *control)"
+    module: fs/hfs_btree_map_capacity
+    status: ported
+    vars: {param_1: control, uVar1: capacity}
+    renames:
+      r1: node_size
+      r2: node_count
+      control_plus_0x1c: node_size_halfword
+      control_plus_0x20: node_count_word
+    notes: >-
+      Raw words e1d011bc e1a02000 e5922020 e2410c01 e1a00180
+      e1520000 80800181 824000a0 8afffffb e12fff1e establish
+      40 bytes ending before the real prologue at 0x0804424c.
+      Aligned raw-word scan finds two plain incoming BLs at 0x08041300
+      and 0x08041c7c, zero predicated incoming BLs, and zero outgoing
+      BLs of either kind. Start capacity at (node_size-256)*8; while
+      unsigned capacity is below node_count, add node_size*8-160.
+      Arithmetic wraps at 32 bits; malformed inputs can fail to terminate,
+      as in retailOS. The record-insertion callers compare returned r0
+      with their proposed node count and reserve an extra map node when
+      exceeded. Ghidra incorrectly declares this function void.
+      Use aligned halfword and word reads, no pointer fields or callee
+      seams, and preserve the control block. No deliberate deviations.
+      Host tests cover exact and adjacent map boundaries, multiple map
+      increments, maximum halfword node size, and initial unsigned wrap
+      for undersized nodes.
+      Full x86_64 host suite and ARM release build pass. Public API smoke
+      returns 2048, 5984 and 9920 for node size 512 and counts 2048,
+      2049 and 5985. match.py exits 1 with a structural diff: ten stock
+      instructions versus sixteen Rust listing entries, including a literal.
+      LLVM adds a frame, folds the initial subtraction into 0xfffff800,
+      hoists the step calculation, and uses branches instead of predicated
+      updates. Aligned loads, unsigned comparisons, wrapping recurrence,
+      and r0 return remain intact. The exported symbol is present; no
+      intentional fold or device execution.
