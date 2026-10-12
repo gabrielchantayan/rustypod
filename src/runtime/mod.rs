@@ -52,6 +52,7 @@ pub mod parameter_template_new;
 pub mod global_parameter_descriptor_value;
 pub mod fixed_parameter_descriptor_value;
 pub mod opaque_parameter_descriptor_value;
+pub mod owned_buffer_descriptor_value;
 pub mod raise;
 pub mod return_zero;
 pub mod constant_zero_result;

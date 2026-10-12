@@ -16,6 +16,31 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0803a24c
+    ghidra: FUN_0803a24c
+    name: owned_buffer_descriptor_value
+    size: 12
+    sig: "u32 owned_buffer_descriptor_value(const u8 *incoming_descriptor, u32 incoming_r1, u32 incoming_r2, u32 opaque_context)"
+    module: runtime/owned_buffer_descriptor_value
+    status: ported
+    vars: {r0: fixed_owned_buffer_descriptor, r1: incoming_r1, r2: incoming_r2, r3: opaque_context}
+    renames: {DAT_0803a254: owned_buffer_descriptor, FUN_0803b468: parameter_descriptor_value}
+    notes: >-
+      Raw words e59f0000 ea000484 0890619c prove the true twelve-byte
+      extent [0x0803a24c,0x0803a258), including the descriptor literal;
+      the next entry is an independent B veneer. Ghidra merges the resolver
+      body incorrectly. Whole-image ARM word decoding finds two plain
+      incoming BLs at 0x0808897c and 0x082d43a8, no predicated BLs and
+      no outgoing BLs. Load descriptor 0x0890619c and tail-dispatch to the
+      existing parameter_descriptor_value at 0x0803b468, preserving r1/r2
+      and live r3 context. Callers assign parsed bytes or an eight-byte
+      value into the returned owned buffer. No behavioral deviations or
+      new seams. Host edge tests cover signed failure after output stores
+      and positive success without an output store. Executable host smoke
+      verifies descriptor selection, zero mode, context and status gating.
+      All 15812 host tests pass; ARM release build passes. match.py exits
+      1: two stock instructions versus six Rust lines. LLVM adds frame
+      setup/teardown; the descriptor literal and relocated tail B remain.
   - address: 0x0803a258
     ghidra: thunk_FUN_0803a3cc
     name: owned_buffer_assign_veneer
