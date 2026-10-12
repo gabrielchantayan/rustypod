@@ -16,6 +16,38 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0803a55c
+    ghidra: FUN_0803a55c
+    name: parameter_value_assign
+    size: 48
+    sig: "void parameter_value_assign(u32 *header, u32 value_type, u32 value)"
+    module: runtime/parameter_value_assign
+    status: ported
+    vars:
+      param_1/r0: header
+      param_2/r1/r4: value_type
+      param_3/r2/r5: value
+      local_18: indirect_header_slot
+    renames:
+      FUN_0803b5f0: parameter_value_destroy
+    notes: >-
+      Raw extent [0x0803a55c,0x0803a58c) is 48 bytes; the next entry
+      begins with an independent PUSH. Whole-image ARM word decoding finds
+      one plain inbound BL at 0x0806f118 and one BLNE at 0x082b4de8.
+      Outbound: zero plain BL, one BLNE at 0x0803a57c to the existing
+      parameter_value_destroy port. Destroy the old nonzero value using
+      an indirect header slot and a NULL descriptor, then overwrite both
+      type and value words verbatim. Raw r2 is live even where Ghidra
+      infers only two arguments. Deviations: omit unused stack copies of
+      replacement words; retain a u32 indirect pointer on hosts, requiring
+      low-address fixtures. Host regression covers zero-value bypass,
+      scalar/borrowed replacement, owned payload/container release before
+      new words are installed, and adjacent-word preservation. ARM build
+      and host suite pass. ARM emulator smoke compares the production port
+      against raw firmware for 132 boundary cases, executing the firmware
+      destructor. match.py exits 1: 12 stock versus 17 Rust instructions;
+      LLVM replaces BLNE with BEQ around BL and STM with two STR, retaining
+      cleanup-before-store ordering.
   - address: 0x0803b39c
     ghidra: FUN_0803b39c
     name: parameter_descriptor_new
