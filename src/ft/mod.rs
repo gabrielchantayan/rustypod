@@ -2,6 +2,7 @@
 //! `FT_Stream_Seek: invalid i/o` error strings and `ftcalc` fixed-point
 //! kernels sit in the 0x0804c000..0x08051000 neighborhood). Ported
 //! functions keep FreeType's public names in the crate's snake_case.
+pub mod done_size;
 pub mod af_detect_features;
 pub mod glyph_hints_save;
 pub mod glyph_hints_done;
