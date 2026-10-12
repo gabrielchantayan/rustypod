@@ -7,9 +7,8 @@
 //!   (116 bytes; 5 direct `bl` call sites, 0 predicated, verified by
 //!   decoding every B/BL word in `osos.dec`).
 
-use core::ptr;
-
 use crate::ui::tdat_class_check::ui_element_is_tdat_class;
+use crate::ui::tdat_node_list_head::tdat_node_list_head;
 
 /// Byte offset of the compared identifier low word on each list node
 /// (`ldr r0, [r4, #0x110]`).
@@ -26,14 +25,6 @@ const ALT_ID_LO_OFFSET: usize = 0x118;
 /// Byte offset of the compared alternate-identifier high word on each list
 /// node (`ldr r1, [r4, #0x11c]`).
 const ALT_ID_HI_OFFSET: usize = 0x11c;
-
-/// ABI of the still-unported 'tdat' node-list head getter at `0x080522fc`.
-///
-/// Raw ARM: `mov r2, r0; push {lr}; bl 0x0806aa3c; movs r0, r0;
-/// ldrne r0, [r2, #0x28]; pop {pc}` — the same shape as the ported
-/// `ui_tdat_first_plst` at `0x080522d4`, returning the word at
-/// element+0x28 instead of +0x34.
-pub type TdatNodeListHead = unsafe extern "C" fn(*const u8) -> u32;
 
 /// Node prefix: owner pointer at target +0, successor word at target +4.
 /// Host builds widen only the owner pointer.
@@ -65,40 +56,6 @@ pub unsafe extern "C" fn tdat_node_next(node: *const u8) -> u32 {
         return 0;
     }
     (*node.cast::<TdatNodeLink>()).next
-}
-
-#[cfg(target_os = "none")]
-unsafe extern "C" fn retail_node_list_head(element: *const u8) -> u32 {
-    let head: TdatNodeListHead = core::mem::transmute(0x0805_22fcusize);
-    head(element)
-}
-
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn retail_node_list_head(_element: *const u8) -> u32 {
-    0
-}
-
-
-/// Dispatch boundary for the still-unported list-head getter at 0x080522fc.
-/// Successor traversal calls the Rust port directly.
-#[derive(Clone, Copy)]
-pub struct TdatNodeFindOps {
-    pub list_head: TdatNodeListHead,
-}
-
-/// Production dispatch boundary for the node-list accessors.
-pub const DEFAULT_TDAT_NODE_FIND_OPS: TdatNodeFindOps = TdatNodeFindOps {
-    list_head: retail_node_list_head,
-};
-
-/// Active node-list accessor boundary.
-///
-/// Only 0x080522fc remains unported; owner and class predicates are Rust ports.
-pub static mut TDAT_NODE_FIND_OPS: TdatNodeFindOps = DEFAULT_TDAT_NODE_FIND_OPS;
-
-#[inline(always)]
-fn tdat_node_find_ops() -> TdatNodeFindOps {
-    unsafe { ptr::read_volatile(ptr::addr_of!(TDAT_NODE_FIND_OPS)) }
 }
 
 /// ui_tdat_find_node_by_id — original: `FUN_08050d10` @ 0x08050d10 (116 bytes).
@@ -141,7 +98,7 @@ fn tdat_node_find_ops() -> TdatNodeFindOps {
 ///
 /// Algorithm: validate `element` as a 'tdat' UI element and reject the
 /// all-zero identifier, then walk the node list whose head is the word at
-/// element+0x28 (via the unported getter `0x080522fc`) and whose successor
+/// element+0x28 (via [`tdat_node_list_head`]) and whose successor
 /// step is the validity-gated word at node+0x4 via [`tdat_node_next`].
 /// Return the first node whose 64-bit identifier word pair
 /// at node+0x110/+0x114 equals `(id_lo, id_hi)` — the high word is
@@ -156,15 +113,14 @@ fn tdat_node_find_ops() -> TdatNodeFindOps {
 /// 0x0813e44c, 0x082a5fd4), zero predicated forms. The function itself
 /// contains 3 unconditional `bl` instructions and zero predicated ones.
 ///
-/// Deliberate deviations: only `0x080522fc` uses [`TDAT_NODE_FIND_OPS`].
-/// Successor and class checks call the existing Rust ports directly.
-/// Aligned word loads and return-zero semantics are unchanged.
+/// Deliberate deviations: head, successor and class checks call the existing
+/// Rust ports directly. Aligned word loads and return-zero semantics are unchanged.
 ///
 /// # Safety
 ///
 /// `element` may be NULL. A non-NULL pointer must be readable through +0x7
-/// for the class predicate; list nodes produced by the seams must be
-/// readable through +0x117, matching the original's `ldr` pair.
+/// for the class predicate, and accepted elements through +0x2b for the head;
+/// list nodes must be readable through +0x117, matching the original's `ldr` pair.
 #[cfg_attr(target_os = "none", no_mangle)]
 #[cfg_attr(target_os = "none", link_section = ".text.ui_tdat_find_node_by_id")]
 #[inline(never)]
@@ -180,8 +136,7 @@ pub unsafe extern "C" fn ui_tdat_find_node_by_id(
         return 0;
     }
 
-    let ops = tdat_node_find_ops();
-    let mut node = (ops.list_head)(element);
+    let mut node = tdat_node_list_head(element);
     while node != 0 {
         let words = node as usize as *const u8;
         if words.add(ID_HI_OFFSET).cast::<u32>().read() == id_hi
@@ -236,8 +191,8 @@ pub unsafe extern "C" fn ui_tdat_find_node_by_id(
 /// compared identifier word pair lives at node+0x118/+0x11c (alternate
 /// key) instead of node+0x110/+0x114 (primary key). Validate `element` as
 /// a 'tdat' UI element and reject the all-zero identifier, then walk the
-/// node list whose head is the word at element+0x28 (via the unported
-/// getter `0x080522fc`) and whose successor step is the validity-gated
+/// node list whose head is the word at element+0x28 (via
+/// [`tdat_node_list_head`]) and whose successor step is the validity-gated
 /// word at node+0x4 via [`tdat_node_next`]. Return the
 /// first node whose alternate 64-bit identifier equals `(id_lo, id_hi)` —
 /// the high word is compared first, the low word only on a high-word
@@ -252,15 +207,14 @@ pub unsafe extern "C" fn ui_tdat_find_node_by_id(
 /// contains 3 unconditional `bl` instructions and zero predicated ones
 /// (Ghidra's "5 bl call sites" counts the callers).
 ///
-/// Deliberate deviations: only `0x080522fc` uses [`TDAT_NODE_FIND_OPS`];
-/// successor and class checks call Rust ports directly. Aligned identifier
-/// loads and return-zero semantics are unchanged.
+/// Deliberate deviations: head, successor and class checks call Rust ports
+/// directly. Aligned identifier loads and return-zero semantics are unchanged.
 ///
 /// # Safety
 ///
 /// `element` may be NULL. A non-NULL pointer must be readable through +0x7
-/// for the class predicate; list nodes produced by the seams must be
-/// readable through +0x11f, matching the original's `ldr` pair.
+/// for the class predicate, and accepted elements through +0x2b for the head;
+/// list nodes must be readable through +0x11f, matching the original's `ldr` pair.
 #[cfg_attr(target_os = "none", no_mangle)]
 #[cfg_attr(target_os = "none", link_section = ".text.ui_tdat_find_node_by_alt_id")]
 #[inline(never)]
@@ -276,8 +230,7 @@ pub unsafe extern "C" fn ui_tdat_find_node_by_alt_id(
         return 0;
     }
 
-    let ops = tdat_node_find_ops();
-    let mut node = (ops.list_head)(element);
+    let mut node = tdat_node_list_head(element);
     while node != 0 {
         let words = node as usize as *const u8;
         if words.add(ALT_ID_HI_OFFSET).cast::<u32>().read() == id_hi
@@ -295,27 +248,16 @@ mod tests {
     extern crate std;
 
     use super::*;
+    use core::ptr;
     use crate::testing::{hints, note_missing_u32_fixture, try_map_u32_slab};
-    use std::sync::Mutex;
 
     const TDAT_CLASS_TAG: u32 = 0x7464_6174;
     const FIXTURE_BYTES: usize = 0x2000;
     /// Three fixture nodes, each 0x120 bytes so +0x114 reads stay in bounds.
     const NODE_STRIDE: usize = 0x120;
 
-    static OPS_LOCK: Mutex<()> = Mutex::new(());
-
-    struct OpsReset(TdatNodeFindOps);
-
-    impl Drop for OpsReset {
-        fn drop(&mut self) {
-            unsafe { TDAT_NODE_FIND_OPS = self.0; }
-        }
-    }
-
     struct Fixture {
         base: *mut u8,
-        head: u32,
     }
 
     impl Fixture {
@@ -347,14 +289,10 @@ mod tests {
                         next,
                     });
                 }
-                Some(Fixture {
-                    base,
-                    head: if ids.is_empty() {
-                        0
-                    } else {
-                        node_base as u32
-                    },
-                })
+                element.add(0x28).cast::<u32>().write(
+                    if ids.is_empty() { 0 } else { node_base as u32 }
+                );
+                Some(Fixture { base })
             }
         }
 
@@ -366,26 +304,6 @@ mod tests {
             unsafe { self.base.add(0x800 + index * NODE_STRIDE) as u32 }
         }
 
-        /// Install the fixture ops: list_head returns our head word, next
-        /// follows the node+0x4 link.
-        fn install(&self) -> Option<(std::sync::MutexGuard<'static, ()>, OpsReset)> {
-            let lock = OPS_LOCK.lock().ok()?;
-            let reset = OpsReset(unsafe { TDAT_NODE_FIND_OPS });
-            let head = self.head;
-            unsafe {
-                NEXT_LOOKUP = head;
-                TDAT_NODE_FIND_OPS = TdatNodeFindOps {
-                    list_head: fixture_list_head,
-                };
-            }
-            Some((lock, reset))
-        }
-    }
-
-    static mut NEXT_LOOKUP: u32 = 0;
-
-    unsafe extern "C" fn fixture_list_head(_element: *const u8) -> u32 {
-        NEXT_LOOKUP
     }
 
 
@@ -419,7 +337,6 @@ mod tests {
             return;
         };
         unsafe { f.element().add(4).cast::<u32>().write(0x706c_7374) };
-        let _ops = f.install();
         assert_eq!(unsafe { ui_tdat_find_node_by_id(f.element(), 7, 8) }, 0);
     }
 
@@ -429,8 +346,6 @@ mod tests {
             assert!(note_missing_u32_fixture("ui/tdat_node_find"));
             return;
         };
-        // No ops installed: any list access would call the retail host stub
-        // and return 0, but the zero-id guard must return first.
         assert_eq!(unsafe { ui_tdat_find_node_by_id(f.element(), 0, 0) }, 0);
     }
 
@@ -440,7 +355,6 @@ mod tests {
             assert!(note_missing_u32_fixture("ui/tdat_node_find"));
             return;
         };
-        let _ops = f.install();
         assert_eq!(unsafe { ui_tdat_find_node_by_id(f.element(), 1, 0) }, 0);
     }
 
@@ -450,7 +364,6 @@ mod tests {
             assert!(note_missing_u32_fixture("ui/tdat_node_find"));
             return;
         };
-        let _ops = f.install();
         assert_eq!(
             unsafe { ui_tdat_find_node_by_id(f.element(), 0x1122_3344, 0x5566_7788) },
             f.node(0)
@@ -463,7 +376,6 @@ mod tests {
             assert!(note_missing_u32_fixture("ui/tdat_node_find"));
             return;
         };
-        let _ops = f.install();
         assert_eq!(
             unsafe { ui_tdat_find_node_by_id(f.element(), 0xdead_beef, 0xcafe_f00d) },
             f.node(2)
@@ -477,7 +389,6 @@ mod tests {
             assert!(note_missing_u32_fixture("ui/tdat_node_find"));
             return;
         };
-        let _ops = f.install();
         assert_eq!(
             unsafe { ui_tdat_find_node_by_id(f.element(), 0xbbbb_bbbb, 5) },
             f.node(2)
@@ -490,7 +401,6 @@ mod tests {
             assert!(note_missing_u32_fixture("ui/tdat_node_find"));
             return;
         };
-        let _ops = f.install();
         assert_eq!(unsafe { ui_tdat_find_node_by_id(f.element(), 9, 9) }, 0);
     }
 
@@ -521,14 +431,10 @@ mod tests {
                         next,
                     });
                 }
-                Some(Fixture {
-                    base,
-                    head: if ids.is_empty() {
-                        0
-                    } else {
-                        node_base as u32
-                    },
-                })
+                element.add(0x28).cast::<u32>().write(
+                    if ids.is_empty() { 0 } else { node_base as u32 }
+                );
+                Some(Fixture { base })
             }
         }
     }
@@ -545,7 +451,6 @@ mod tests {
             return;
         };
         unsafe { f.element().add(4).cast::<u32>().write(0x706c_7374) };
-        let _ops = f.install();
         assert_eq!(unsafe { ui_tdat_find_node_by_alt_id(f.element(), 7, 8) }, 0);
     }
 
@@ -564,7 +469,6 @@ mod tests {
             assert!(note_missing_u32_fixture("ui/tdat_node_find alt"));
             return;
         };
-        let _ops = f.install();
         assert_eq!(unsafe { ui_tdat_find_node_by_alt_id(f.element(), 1, 0) }, 0);
     }
 
@@ -574,7 +478,6 @@ mod tests {
             assert!(note_missing_u32_fixture("ui/tdat_node_find alt"));
             return;
         };
-        let _ops = f.install();
         assert_eq!(
             unsafe { ui_tdat_find_node_by_alt_id(f.element(), 0x1122_3344, 0x5566_7788) },
             f.node(0)
@@ -587,7 +490,6 @@ mod tests {
             assert!(note_missing_u32_fixture("ui/tdat_node_find alt"));
             return;
         };
-        let _ops = f.install();
         assert_eq!(
             unsafe { ui_tdat_find_node_by_alt_id(f.element(), 0xdead_beef, 0xcafe_f00d) },
             f.node(2)
@@ -601,7 +503,6 @@ mod tests {
             assert!(note_missing_u32_fixture("ui/tdat_node_find alt"));
             return;
         };
-        let _ops = f.install();
         assert_eq!(
             unsafe { ui_tdat_find_node_by_alt_id(f.element(), 0xbbbb_bbbb, 5) },
             f.node(2)
@@ -614,7 +515,6 @@ mod tests {
             assert!(note_missing_u32_fixture("ui/tdat_node_find alt"));
             return;
         };
-        let _ops = f.install();
         assert_eq!(unsafe { ui_tdat_find_node_by_alt_id(f.element(), 9, 9) }, 0);
     }
 
@@ -631,7 +531,6 @@ mod tests {
             node.add(ID_LO_OFFSET).cast::<u32>().write(0x1357_9bdf);
             node.add(ID_HI_OFFSET).cast::<u32>().write(0x2468_ace0);
         }
-        let _ops = f.install();
         assert_eq!(
             unsafe { ui_tdat_find_node_by_alt_id(f.element(), 0x1357_9bdf, 0x2468_ace0) },
             0
