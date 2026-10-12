@@ -16,6 +16,43 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08047bfc
+    ghidra: FUN_08047bfc
+    name: tdat_element_create
+    size: 204
+    sig: "i32 tdat_element_create(u8 *owner, u32 payload, u32 *output)"
+    module: ui/tdat_element_create
+    status: ported
+    vars:
+      param_1/r6: owner
+      param_2/r1: payload
+      param_3/r7: output
+      r4: element
+      r5: status
+    renames:
+      FUN_0805d1dc: calloc_tag4
+      FUN_08055eb8: sequence_id_next
+      FUN_0803c588: singly_linked_list_append
+      FUN_0804770c: opaque_52_byte_record_initialize
+      FUN_080476b8: opaque_56_byte_record_initialize
+      FUN_0805bc34: tagged_object_link
+      FUN_080d25d4: initialize_track_resources
+      FUN_08049468: tdat_element_destroy
+    notes: >-
+      Raw A32 extent [0x08047bfc,0x08047cc8) is 188 instruction bytes
+      plus four literals; next entry is the independently called veneer
+      at 0x08047cc8. Whole-image word decoding verifies two plain inbound
+      BLs at 0x08058974 and 0x08068f2c, eight plain outbound BLs, and no
+      predicated BLs. Allocate 0x948 zeroed bytes; OOM returns -108 without
+      output writes. Stamp tdat, owner, payload, sequence, callback, append
+      at owner+0xb98, initialize records at +0x54/+0x88, link owner+0xbac
+      to +0x88, then initialize caches/resources. First error destroys the
+      partial object and publishes NULL; NULL output is accepted. Seven
+      callees reuse ports; unported 0x080d25d4 stays a resident call with
+      its raw-verified single-pointer/status ABI, not the inlined Ghidra
+      reconstruction. Tests cover OOM, each failure stage, rollback from
+      a nonempty list, success, and optional output. ARM match retains the
+      four short-circuit stages and cleanup; resident BL becomes BLX.
   - address: 0x08048080
     ghidra: FUN_08048080
     name: calendar_to_seconds

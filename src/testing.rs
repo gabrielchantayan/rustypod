@@ -1233,6 +1233,7 @@ pub mod hints {
     // 0x7a10_0000: dedicated to util/singly_linked_list_append's raw-u32
     // head and node fixture; mappings never unmap, so no other user may share it.
     pub const SINGLY_LINKED_LIST_APPEND: usize = 0x7a10_0000;
+    pub const TDAT_ELEMENT_CREATE: usize = 0x7a30_0000;
     // 0x7a20_0000: dedicated to util/doubly_linked_list_promote_head's raw-u32
     // intrusive-list fixture; mappings never unmap, so no other user may share it.
     pub const DOUBLY_LINKED_LIST_PROMOTE_HEAD: usize = 0x7a20_0000;

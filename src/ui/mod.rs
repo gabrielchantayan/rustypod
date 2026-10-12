@@ -2,6 +2,7 @@
 //! and view code is built on.
 pub mod embedded_list_storage_destroy;
 pub mod tdat_destroy;
+pub mod tdat_element_create;
 pub mod context_first_flagged_tdat;
 pub use context_first_flagged_tdat::*;
 pub mod node_bounds_copy;
