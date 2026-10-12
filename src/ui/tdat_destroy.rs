@@ -14,6 +14,7 @@ use super::tdat_element_teardown::{TdatTeardownNotify, TDAT_ELEMENT_TEARDOWN_OPS
 use crate::util::singly_linked_list_remove::singly_linked_list_remove;
 use crate::libc::bzero::bzero;
 use crate::heap::veneers::free_tag4;
+use super::clear_tagged_list::clear_tagged_list;
 
 /// Unported child destruction and embedded/resource cleanup boundaries.
 #[derive(Clone, Copy)]
@@ -47,13 +48,12 @@ macro_rules! cleanup_boundary {
         }
     };
 }
-cleanup_boundary!(retail_clear_tagged_list, 0x0804_88d4);
 cleanup_boundary!(retail_clear_handler, 0x0804_8804);
 cleanup_boundary!(retail_release_resources, 0x080d_a928);
 
 pub const DEFAULT_TDAT_DESTROY_OPS: TdatDestroyOps = TdatDestroyOps {
     destroy_plst: retail_destroy_plst,
-    clear_tagged_list: retail_clear_tagged_list,
+    clear_tagged_list,
     clear_handler: retail_clear_handler,
     release_resources: retail_release_resources,
 };
@@ -65,10 +65,11 @@ pub static mut TDAT_DESTROY_OPS: TdatDestroyOps = DEFAULT_TDAT_DESTROY_OPS;
 /// clear embedded lists/resources, zero all 0x948 bytes, free, then notify the
 /// saved owner with 'Trpa' and the saved identity (not the freed pointer).
 ///
-/// Deliberate deviations: ported dependencies are called directly; four
-/// unported cleanups use TDAT_DESTROY_OPS, and the existing tagged-list notify
-/// seam is reused. No other algorithm changes. The two first-plst calls per
-/// iteration are retained, as are notifications after freeing the element.
+/// Deliberate deviations: ported dependencies are called directly; three
+/// unported cleanups use TDAT_DESTROY_OPS, whose list cleanup now defaults to
+/// the Rust port, and the existing tagged-list notify seam is reused.
+/// The two first-plst calls per iteration and notifications after freeing
+/// the element are retained.
 ///
 /// # Safety
 /// NULL is accepted. Non-NULL pointers must be word aligned and readable at

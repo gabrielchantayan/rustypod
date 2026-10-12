@@ -184,6 +184,7 @@ pub mod sub_record_lookup;
 pub mod range_byte_lookup;
 pub mod record_descriptor_pack;
 pub mod tagged_object_link;
+pub mod clear_tagged_list;
 pub mod tagged_link_source_is_valid;
 pub mod tagged_link_target_is_valid;
 pub mod object_payload;
