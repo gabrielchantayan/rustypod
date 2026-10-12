@@ -43137,6 +43137,33 @@ functions:
       conditional destroy, bzero, and final indirect unlock; the
       REGION_MUTEX_OPS seam adds a frame and indirect lock/unlock calls.
 
+  - address: 0x08048204
+    ghidra: FUN_08048204
+    name: plst_resource_dispatch_and_reset
+    size: 44
+    sig: "u32 plst_resource_dispatch_and_reset(u32 *element)"
+    module: ui/plst_resource_dispatch_and_reset
+    status: ported
+    renames:
+      param_1/r4: element
+      uVar1/r5: dispatch_status
+      "element+0x40": task
+      FUN_0805cde4: plst_task_resource_callback
+      FUN_080487ac: plst_resource_dispatch_pldm
+      FUN_0806c16c: plst_resource_reset
+    notes: >-
+      Raw ARM words establish [0x08048204,0x08048230), 44 instruction
+      bytes ending with pop at 0x0804822c before the next push-prologue.
+      Three outbound plain BLs, zero predicated BLs; the assignment's
+      count of two is incorrect. Complete element+0x40's task, save the
+      pldm dispatch status, always reset the element resource, then return
+      the saved status. All three calls reuse existing Rust ports without
+      new seams or semantic deviations. Host tests cover NULL tasks and
+      inactive/active task completion despite outer-class rejection.
+      Standalone execution verifies completion, dispatch, reset despite
+      callback errors, preserved status 0x80000017 and final state zero.
+      Serial host suite passes 15719 tests; parallel suite hit a SQLite
+      SIGSEGV whose exact test passes alone. ARM release build passes.
   - address: 0x080487ac
     ghidra: FUN_080487ac
     name: plst_resource_dispatch_pldm
