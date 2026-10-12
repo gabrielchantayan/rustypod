@@ -16,6 +16,34 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0804cac8
+    ghidra: FUN_0804cac8
+    name: ft_list_finalize
+    size: 92
+    sig: "void ft_list_finalize(FtList *list, FtListDestructor destroy, FtMemory *memory, void *user)"
+    module: ft/list
+    status: ported
+    vars:
+      param_1/r0: list
+      param_2/r1: destroy
+      param_3/r2: memory
+      r3: user
+      iVar1/r4: node
+      iVar2/r6: next
+    renames:
+      FUN_082cfae8: ft_mem_free
+    notes: >-
+      Raw A32 extent [0x0804cac8,0x0804cb24) is 92 bytes, ending in
+      POP PC before the independent ft_list_find function. One plain
+      outgoing BL at 0x0804cb04 calls the existing ft_mem_free port;
+      zero predicated BLs; one BLXNE at 0x0804caf8 invokes the optional
+      destructor with memory, payload, and user (Ghidra omitted user).
+      Two incoming plain BLs at 0x0807c340 and 0x08086930, no predicated
+      incoming BLs. Snapshot payload and next before callbacks, destroy
+      payload then free node, follow saved next, finally clear head and
+      tail even for an empty list. Native repr(C) host pointers widen;
+      target algorithm is unchanged. Host edge tests and a three-node
+      heap smoke pass; ARM structural diff preserves the loop and calls.
   - address: 0x0804e980
     ghidra: FUN_0804e980
     name: ft_request_size
