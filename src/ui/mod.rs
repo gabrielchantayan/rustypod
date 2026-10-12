@@ -25,6 +25,7 @@ pub use curve_scan_reflected::*;
 pub mod object_activity_history;
 pub use object_activity_history::*;
 pub mod remove_task;
+pub mod task_dispose_message;
 pub mod packed_surface_span_prepare;
 pub use packed_surface_span_prepare::*;
 pub mod packed_surface_bounds_clip;

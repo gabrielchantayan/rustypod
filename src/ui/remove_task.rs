@@ -5,14 +5,12 @@
 //! are unlinked from parent+0x24 through next links at +0x28. Return the
 //! remaining head, or request an empty-list result when requested. Flagged
 //! tasks return themselves unless release is requested, then release the
-//! element's embedded string-pool ID. Deliberate deviation: the unregistered
-//! tail helper at 0x08048b34 is expressed using its raw-verified zeroed
-//! four-word record and the existing Tdat port, not a guessed callee seam.
-//! Target words remain u32 on hosts; return usize preserves native pointers
-//! and the target's mixed pointer/status result.
+//! element's embedded string-pool ID. Empty-list dispatch calls the ported
+//! task_dispose_message helper. Target words remain u32 on hosts; return usize
+//! preserves native pointers and the target's mixed pointer/status result.
 
 use crate::util::string_pool::{string_pool_release, StringPool};
-use super::tdat_message_dispatch::tdat_dispatch_message;
+use super::task_dispose_message::task_dispose_message;
 
 /// # Safety
 /// Task and all traversed links must be valid target-word objects. A flagged
@@ -43,9 +41,7 @@ pub unsafe extern "C" fn remove_task(task: *mut u32, release: u32, notify_empty:
     }
     let head = parent.add(9).read();
     if head != 0 || notify_empty == 0 { return head as usize; }
-    let mut arguments = [parent as usize as u32, 0, 0, 0];
-    tdat_dispatch_message(parent.read() as usize as *mut u8, 0x7464_6474, arguments.as_mut_ptr().cast());
-    arguments[0] as usize
+    task_dispose_message(parent) as u32 as usize
 }
 
 #[cfg(test)]
