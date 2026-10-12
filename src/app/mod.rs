@@ -998,6 +998,7 @@ pub mod opaque_record_source_copy_item;
 pub mod vtable_record_assign;
 pub mod opaque_collection_item_at;
 pub mod opaque_secondary_collection_item_at;
+pub mod owner_pair_vector_word_at;
 pub mod opaque_collection_copy_entry;
 pub mod opaque_record_copy;
 pub mod opaque_record_table_entry;
