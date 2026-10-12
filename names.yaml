@@ -16,6 +16,43 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08043b28
+    ghidra: FUN_08043b28
+    name: crypto_lock_needs_acquire
+    size: 108
+    sig: "u32 crypto_lock_needs_acquire(void)"
+    module: crypto/lock_needs_acquire
+    status: ported
+    vars:
+      puVar1: lock_state
+      uVar2: current_context
+      uVar3: needs_acquire
+    renames:
+      DAT_08043b90: crypto_lock_state
+      FUN_08043b94: resource_op_dispatch
+      FUN_08044174: current_context_id
+    notes: >-
+      Raw A32 extent [0x08043b28,0x08043b94) is 108 bytes: 104 code
+      plus singleton literal 0x08a0ec84 at 0x08043b90; the next real
+      function begins with PUSH at 0x08043b94. Three outgoing plain
+      BLs at 0x08043b50, 0x08043b60, 0x08043b84; zero predicated
+      outgoing BLs. Two incoming plain BLs at 0x08043e4c and 0x08043e90,
+      zero predicated incoming BLs. Disabled flag bit 0 returns zero
+      without callbacks. Otherwise resource 20 operations 5/6 bracket
+      a predicate: flag bit 1 set or current context unequal to owner
+      word +0x18. Reload flags after operation 5 and owner after the
+      context callback; short-circuit context lookup when bit 1 is set.
+      Target retains verified stock dispatcher/context descriptor behavior;
+      host reuses existing Rust seams and substitutes singleton storage.
+      Volatile aligned word reads preserve callback mutation ordering.
+      Tests exercise disabled flags, same/different/full-width owners,
+      acquire-side flags and context-side owner mutation, and release
+      mutation after result computation. Public API smoke returns zero
+      for disabled storage without callbacks. ARM build and match.py
+      verify the exported symbol and both flag branches, conditional
+      context lookup, owner +24 load, and paired dispatches. LLVM uses
+      BLX through stock entry literals instead of direct BL and derives
+      0x08044174 as dispatcher+0x5e0; result and ordering are preserved.
   - address: 0x08044360
     ghidra: FUN_08044360
     name: item_refresh_indexed_string_flag

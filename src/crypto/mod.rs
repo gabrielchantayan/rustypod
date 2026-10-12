@@ -42,6 +42,7 @@
 pub mod evp_cipher_ctx_cleanup;
 pub mod evp_cipher_update;
 pub mod add_lock;
+pub mod lock_needs_acquire;
 pub mod rsa_padding_add_none;
 pub mod rsa_padding_copy_exact;
 pub mod x509_store_new;
