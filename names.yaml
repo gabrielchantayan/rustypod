@@ -248643,3 +248643,41 @@ functions:
       Non-test host builds expose existing unresolved metadata, payload-kind
       and calendar notification functions; they were not changed. No device
       execution.
+
+  - address: 0x08051c60
+    ghidra: FUN_08051c60
+    name: media_player_selected_payload_index
+    size: 132
+    sig: "u32 media_player_selected_payload_index(const void *object, u32 index)"
+    module: app/media_player_selected_payload_index
+    status: ported
+    vars:
+      param_1/r0: ignored_object
+      param_2/r1/r5: index
+      piVar1/r4: media_player
+      auStack_24: context
+      FUN_0817ceb4: media_player_get
+      FUN_08270394: scoped_context_construct
+      FUN_08270414: scoped_context_destroy
+      FUN_082a3140: object_selected_payload_index
+    notes: >-
+      Raw A32 establishes [0x08051c60,0x08051ce4), 132 bytes, ending
+      with eafffff0 to the common epilogue; the next function starts
+      e1a02000 at 0x08051ce4. Five outgoing unconditional BLs, zero
+      predicated BLs, and two virtual BLXs through +0x1a4 and +0x15c.
+      Whole-image immediate decoding finds two incoming unconditional BLs
+      at 0x081f40e0 and 0x081f4370, zero predicated BLs. Ignores r0,
+      constructs a zero-owner/mode context after obtaining the singleton,
+      returns zero for any nonzero +0x1a4 gate, otherwise reloads the
+      player vtable, fills the context through +0x15c, and invokes the
+      existing object_selected_payload_index with the unchanged u32 index.
+      Both paths destroy the context. No invented virtual-method identity.
+      Hosts use native pointer-sized slots and context fields, replacing
+      only the indexed payload operation because its port consumes target
+      word layout. Target calls all existing ports directly.
+      Host suite: 15652 passed. Standalone host execution returned indexed
+      values [120,480,900,0,0] and zero for a high-bit nonzero gate.
+      ARM release build succeeds. match.py exits 1: 33 stock instructions
+      versus 39 Rust instructions; LLVM inlines construction, removes the
+      trivial destructor, and retains both virtual calls, vtable reload,
+      branch polarity, and indexed lookup. No device execution.
