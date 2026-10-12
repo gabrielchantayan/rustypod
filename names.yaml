@@ -16,6 +16,42 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08048b34
+    ghidra: FUN_08048b34
+    name: task_dispose_message
+    size: 52
+    sig: "u64 task_dispose_message(u32 *task)"
+    module: ui/task_dispose_message
+    vars:
+      param_1/r4: task
+      uVar1/r5: element
+      local_20: arguments
+      uStack_1c: result_high
+      DAT_08048b64: disposal_message
+    renames:
+      FUN_0805cfb4: bzero
+      FUN_080442a0: tdat_dispatch_message
+    status: ported
+    notes: >-
+      Raw osos.dec establishes 48 instruction bytes plus literal 0x74646474
+      at 0x08048b64: true size 52 bytes, ending at the independent push
+      prologue at 0x08048b68. Full-image aligned branch decoding finds two
+      plain inbound BLs at 0x0806a7ec and 0x080d7260, no predicated inbound
+      BLs, and one BNE tail caller at 0x080da8e8 (remove_task). Two plain
+      outbound BLs call bzero and tdat_dispatch_message; no predicated BLs.
+      Load the element from task word zero, initialize a four-word record to
+      {task,0,0,0}, and dispatch message 0x74646474. Ignore dispatch status:
+      the final POP returns record words zero and one in r0:r1. Rust directly
+      initializes the record instead of bzero and returns u64 for those two
+      observable words; incidental restored r2:r3 are not modeled. The
+      existing remove_task caller now uses this port and consumes its low
+      result word. Host tests cover rejected elements, zero initialization,
+      handler-modified high-bit results, and ignored dispatch errors. The
+      standalone host smoke retains the task with a zero high word. Host
+      suite and ARM release build pass. The match.py structural diff shows
+      direct stack stores, one dispatcher BL, and an LDM of r0:r1; eliminating
+      bzero is deliberate. No new retailOS callee seam is introduced.
+
   - address: 0x08049468
     ghidra: FUN_08049468
     name: tdat_element_destroy
