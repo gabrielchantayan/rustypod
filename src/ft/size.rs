@@ -71,15 +71,6 @@ fn character_size_request(
     }
 }
 
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_size_request(_face: *mut FtFace, _request: *const FtSizeRequest) -> i32 {
-    panic!("install FT_Request_Size host seam")
-}
-
-/// Host replacement for the unported stock FT_Request_Size at 0x0804e980.
-#[cfg(not(target_os = "none"))]
-pub static mut FT_REQUEST_SIZE: unsafe extern "C" fn(*mut FtFace, *const FtSizeRequest) -> i32 =
-    missing_size_request;
 
 /// `FT_Set_Char_Size` — FUN_0804ec00 at 0x0804ec00, 100 bytes.
 ///
@@ -91,11 +82,10 @@ pub static mut FT_REQUEST_SIZE: unsafe extern "C" fn(*mut FtFace, *const FtSizeR
 /// and submit a nominal (kind zero) request. Return the callee's error.
 /// No behavioral deviations. Request padding is unspecified in stock;
 /// the u8 kind preserves its byte-only access rather than assuming an enum.
-/// Host builds replace only the stock call through FT_REQUEST_SIZE.
 ///
 /// # Safety
-/// `face` must meet the stock FT_Request_Size contract (NULL is accepted
-/// and returns error 0x23). Host callers must install a valid request seam.
+/// `face` must meet the FT_Request_Size contract (NULL is accepted
+/// and returns error 0x23).
 #[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn ft_set_char_size(
@@ -103,12 +93,7 @@ pub unsafe extern "C" fn ft_set_char_size(
     horizontal_resolution: u32, vertical_resolution: u32,
 ) -> i32 {
     let request = character_size_request(width, height, horizontal_resolution, vertical_resolution);
-    #[cfg(target_os = "none")]
-    let request_size: unsafe extern "C" fn(*mut FtFace, *const FtSizeRequest) -> i32 =
-        core::mem::transmute(0x0804_e980usize);
-    #[cfg(not(target_os = "none"))]
-    let request_size = FT_REQUEST_SIZE;
-    request_size(face, &request)
+    crate::ft::request_size::ft_request_size(face, &request)
 }
 
 #[cfg(test)]
@@ -140,14 +125,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn request_fields_retain_retail_word_offsets() {
-        assert_eq!(core::mem::offset_of!(super::FtSizeRequest, width), 4);
-        assert_eq!(core::mem::offset_of!(super::FtSizeRequest, height), 8);
-        assert_eq!(core::mem::offset_of!(super::FtSizeRequest, horizontal_resolution), 12);
-        assert_eq!(core::mem::offset_of!(super::FtSizeRequest, vertical_resolution), 16);
-        assert_eq!(core::mem::size_of::<super::FtSizeRequest>(), 20);
-    }
 
     #[test]
     fn rejects_null_size() {

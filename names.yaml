@@ -16,6 +16,43 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0804e980
+    ghidra: FUN_0804e980
+    name: ft_request_size
+    size: 244
+    sig: "i32 ft_request_size(FtFace *face, const FtSizeRequest *request)"
+    module: ft/request_size
+    status: ported
+    vars:
+      param_1/r0: face
+      param_2/r1: request
+      r2: driver_request_size
+      uStack_10: strike_index
+      return/r0: error
+    notes: >-
+      FreeType FT_Request_Size. Raw bytes establish the true extent
+      [0x0804e980,0x0804ea74), 244 bytes: 196 executable bytes followed
+      by a literal and trace string; the next independent helper rounds
+      signed fixed-point values. Whole-image aligned BL decoding finds
+      two plain incoming calls (0x0804ec58,0x08097a74), no predicated
+      incoming calls, three plain outgoing BLs, one BLGE to ft_error_trace,
+      and one indirect BLX to driver class request_size at +0x58.
+      Validate face, request, signed dimensions and byte kind before
+      driver access. Callback receives face->size and request. Otherwise
+      non-scalable fixed-size faces use verified stock FT_Match_Size at
+      0x0804cf38, ignore_width=0, propagate errors, trace at signed level
+      >=3 (0x08b209f8), then use existing ft_select_size. Other faces use
+      verified stock FT_Request_Metrics at 0x0804e750 and return zero.
+      Neither stock callee has a ledger entry; host seams require explicit
+      installation. Reuses the existing trace sink deviation and zeroes
+      unused variadic slots. FT_Set_Char_Size now calls this port directly.
+      Host edge tests and API smoke pass; ARM release build passes.
+      match.py exits 1 with 67 Rust versus 49 retail instructions.
+      LLVM emits a larger frame, combines flag tests, tail-BX dispatches
+      the driver callback and uses literal-loaded BLX for stock callees.
+      Validation order, ARM field offsets, stock addresses, signed trace
+      threshold and error propagation agree. Archive relocations resolve
+      the displayed placeholder BLs to ft_error_trace and ft_select_size.
   - address: 0x0804ebac
     ghidra: FUN_0804ebac
     name: ft_select_size
@@ -64,23 +101,23 @@ functions:
       BL decoding finds two plain incoming calls at 0x0812e31c and
       0x0812e5d8, zero predicated incoming calls, one plain outgoing
       call at 0x0804ec58 to stock FT_Request_Size at 0x0804e980 and
-      zero predicated outgoing calls. The callee has no ledger entry
-      or existing Rust port; its raw validation, size-driver dispatch,
-      bitmap-strike path and FT_Request_Size trace string establish
-      its identity. Construct a 20-byte request with byte kind zero,
+      zero predicated outgoing calls. The callee is now the ft_request_size
+      Rust port; its raw validation, size-driver dispatch, bitmap-strike
+      path and FT_Request_Size trace string establish its identity.
+      Construct a 20-byte request with byte kind zero,
       signed 26.6 width/height at +4/+8 and unsigned resolutions at
       +12/+16. Copy a zero dimension from the other before clamping
       each to 64; default each zero DPI independently to 72. Preserve
       the callee error in r0, contrary to Ghidra's void signature;
-      both callers inspect it. ARM retains the stock call boundary;
-      host builds expose a replaceable request seam, not an emulation.
+      both callers inspect it. ARM and host now call the ft_request_size
+      port directly; the obsolete host request seam has been removed.
       No behavioral deviations; padding remains unspecified as in stock.
       Host signed-boundary/default tests, the complete host suite and
       ARM release build pass. Actual-source API smoke verifies zero
       dimension copying, independent DPI defaults and error passthrough.
-      match.py exits 1: LLVM uses a larger frame and literal-loaded BLX
-      instead of BL, but normalization, field offsets and the callee
-      target 0x0804e980 agree.
+      Before request-size migration, match.py exited 1 for a larger frame
+      and literal-loaded stock BLX. The migrated call is now a relocatable
+      Rust call; request normalization and field offsets are unchanged.
   - address: 0x08050c14
     ghidra: FUN_08050c14
     name: ui_context_first_flagged_tdat

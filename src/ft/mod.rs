@@ -59,6 +59,7 @@ pub mod offset_buffer;
 pub mod service;
 pub mod select_metrics;
 pub mod select_size;
+pub mod request_size;
 pub mod size;
 pub mod service_metadata;
 pub mod stream;
