@@ -16,6 +16,36 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0803b39c
+    ghidra: FUN_0803b39c
+    name: parameter_descriptor_new
+    size: 8
+    sig: "int parameter_descriptor_new(u32 *output, const u8 *descriptor, u32 incoming_r2, u32 context)"
+    module: runtime/parameter_descriptor_new
+    status: ported
+    vars:
+      param_1/r0: output
+      param_2/r1: descriptor
+      r2: zero_mode
+      param_4/r3: context
+    renames:
+      FUN_080d3a78: parameter_descriptor_resolve
+    notes: >-
+      Raw words e3a02000 ea0261b4 establish the exact eight-byte extent
+      [0x0803b39c,0x0803b3a4); the next entry begins with independent PUSH.
+      Whole-image ARM word decoding finds two plain inbound BL calls at
+      0x0803ac64 and 0x0803adfc, zero predicated BL calls. No outbound BL;
+      one tail B to 0x080d3a78. Ghidra incorrectly merges that target body.
+      Set resolver mode r2 to zero, preserve live r3 context, and return
+      the exact signed resolver status. Raw resolver instructions clear
+      output in zero mode before dispatching the descriptor kind. No
+      canonical entry exists for the resolver; reuse its established name,
+      verified absolute address, and existing host resolver seam.
+      Deviation: LLVM adds frame setup and literal load, then BX replaces B.
+      Host suite passes 15802 tests; ARM release build passes. Production
+      host smoke verifies six signed status boundaries, zero mode and r3.
+      match.py exits 1: two stock instructions versus seven Rust lines,
+      including the literal; zero mode and tail dispatch are preserved.
   - address: 0x0803b5f0
     ghidra: FUN_0803b5f0
     name: parameter_value_destroy
