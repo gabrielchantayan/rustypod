@@ -249392,3 +249392,43 @@ functions:
       match.py exits 1: 13 Rust versus 12 original instructions; LLVM adds
       a frame, combines the halfword clears into one word store, retains the
       point helper BL and inlines the tail helper's shift/add/store.
+  - address: 0x0804c42c
+    ghidra: FUN_0804c42c
+    name: ft_done_size
+    size: 164
+    sig: "FT_Error ft_done_size(FtSize *size)"
+    module: ft/done_size
+    status: ported
+    vars:
+      param_1/r5: size
+      iVar2/r4: face
+      iVar3/r6: driver
+      uVar5/r8: memory
+      iVar1/r3: size_list_node
+      uVar4/r7: error
+    renames:
+      FUN_0804cb24: ft_list_find
+      FUN_0804cb4c: ft_list_remove
+      FUN_082cfae8: ft_mem_free
+      FUN_0807c3bc: size_destroy_firmware_boundary
+    notes: >-
+      FT_Done_Size. Raw A32 words establish [0x0804c42c,0x0804c4d0),
+      164 bytes, ending in POP PC before an independent CMP/PUSH entry.
+      Four outgoing plain BLs at 0x0804c46c, 0x0804c484, 0x0804c490,
+      0x0804c4c4; zero predicated BLs. Whole-image decoding finds two
+      incoming plain BLs at 0x08080a34 and 0x08080ed8, zero predicated.
+      Null size returns 0x24, missing face 0x23, missing driver 0x22,
+      absent size-list membership 0x24. Save driver allocator, unlink
+      and free the list node, then if the size is active clear it and
+      replace it with the remaining head data. Destroy size last and
+      return zero. Reuse existing list and allocator ports; unported
+      helper 0x0807c3bc remains a verified fixed-address ABI seam,
+      invoking generic/driver finalizers and freeing internal and size
+      allocations. Native repr(C) pointer fields widen on hosts only.
+      Host edge tests cover invalid handles, absent membership, active
+      and inactive removal with empty and nonempty remaining lists,
+      and callback-visible ordering. Host suite and ARM release pass.
+      match.py exits 1: 48 Rust versus 41 retail instructions; LLVM
+      adds a frame, changes registers and conditional returns, and uses
+      literal-loaded BLX for the destructor. Error gates, target field
+      offsets, unlink/free order and active-size replacement agree.
