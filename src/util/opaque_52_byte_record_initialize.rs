@@ -4,7 +4,7 @@
 //! through the `pop {r4,pc}` at 0x08047748; the vtable literal at 0x0804774c
 //! is data, and 0x08047750 starts the next independently entered function.
 //! The body has two plain outgoing `bl` instructions (`bzero` and the
-//! unported initializer at 0x080470bc) and no predicated `bl` instructions.
+//! array_record_initialize) and no predicated `bl` instructions.
 //! Whole-image disassembly finds three plain inbound `bl` calls (0x08047c50,
 //! 0x0805895c, and 0x0805e47c), with no predicated inbound calls.
 //!
@@ -12,38 +12,16 @@
 //! initialize the trailing 36-byte subobject at +16 with `(8, 0, 0)`, and on
 //! success install the record's opaque vtable word.
 //!
-//! Deliberate deviation: 0x080470bc has no recovered semantic identity and
-//! remains a direct retailOS call on target builds. Host builds reproduce only
-//! its observed output layout so the outer initializer's contract is testable.
+//! The trailing subobject uses the shared array_record_initialize port on
+//! both host and target builds. No deliberate behavioral deviations.
 
 use crate::bzero::bzero;
+use super::array_record_initialize::array_record_initialize;
 use core::ptr;
 
 const RECORD_BYTES: i32 = 0x34;
 const TRAILING_SUBOBJECT_OFFSET: usize = 0x10;
 const RECORD_VTABLE: u32 = 0x4d53_6e64;
-#[cfg(target_os = "none")]
-const RETAIL_TRAILING_SUBOBJECT_INITIALIZE: usize = 0x0804_70bc;
-
-#[cfg(target_os = "none")]
-unsafe fn initialize_trailing_subobject(subobject: *mut u8) -> i32 {
-    let initialize: unsafe extern "C" fn(u32, u32, u8, *mut u8) -> i32 =
-        core::mem::transmute(RETAIL_TRAILING_SUBOBJECT_INITIALIZE);
-    initialize(8, 0, 0, subobject)
-}
-
-#[cfg(not(target_os = "none"))]
-unsafe fn initialize_trailing_subobject(subobject: *mut u8) -> i32 {
-    const SUBOBJECT_BYTES: i32 = 0x24;
-    const SUBOBJECT_VTABLE: u32 = 0x6172_6179;
-
-    bzero(subobject, SUBOBJECT_BYTES);
-    ptr::write(subobject.cast::<u32>(), SUBOBJECT_VTABLE);
-    ptr::write(subobject.add(4).cast::<u32>(), 8);
-    ptr::write(subobject.add(0x20), 0);
-    ptr::write(subobject.add(0x21), 1);
-    0
-}
 
 /// Initializes a caller-provided opaque 52-byte record.
 #[inline(never)]
@@ -54,7 +32,7 @@ pub unsafe extern "C" fn opaque_52_byte_record_initialize(record: *mut u8) -> i3
     }
 
     bzero(record, RECORD_BYTES);
-    let status = initialize_trailing_subobject(record.add(TRAILING_SUBOBJECT_OFFSET));
+    let status = array_record_initialize(8, 0, 0, record.add(TRAILING_SUBOBJECT_OFFSET));
     if status == 0 {
         ptr::write(record.cast::<u32>(), RECORD_VTABLE);
     }

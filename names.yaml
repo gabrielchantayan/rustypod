@@ -16,6 +16,27 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080470bc
+    ghidra: FUN_080470bc
+    name: array_record_initialize
+    size: 88
+    sig: "i32 array_record_initialize(u32 element_size, u32 backing_word, u8 flag, u8 *record)"
+    module: util/array_record_initialize
+    status: ported
+    vars: {param_1: element_size, param_2: backing_word, param_3: flag, param_4: record}
+    renames: {FUN_0805cfb4: bzero}
+    notes: >-
+      Raw extent [0x080470bc,0x08047114) is 84 instruction bytes and
+      four bytes of aray tag literal; next function begins with PUSH.
+      Aligned whole-image decoding verifies two plain inbound BLs at
+      0x080476f4 and 0x08047738, zero predicated inbound BLs, one plain
+      outgoing BL to bzero, and zero predicated outgoing BLs. NULL returns
+      -50; otherwise clears 36 bytes, installs tag and element size at
+      +0/+4, backing word at +28, flag at +32 and one at +33. Zero backing
+      word forces flag zero. Backing word semantics remain unresolved.
+      Both Rust callers now reuse this port. Host edge tests and transition
+      smoke pass; ARM release build passes. match.py reports 23 versus 21
+      instructions with equivalent guards, bzero call and field stores.
   - address: 0x08047454
     ghidra: FUN_08047454
     name: ipod_control_prepare
