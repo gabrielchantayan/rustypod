@@ -252,6 +252,36 @@ pub unsafe extern "C" fn ft_glyph_loader_adjust_points(loader: *mut FtGlyphLoade
     }
 }
 
+/// `FT_GlyphLoader_Prepare` — original `FUN_0804c94c` @ `0x0804c94c`,
+/// 48 bytes (`0x0804c94c..0x0804c97c`, next function starts with PUSH).
+/// Two incoming plain BLs, zero predicated BLs; one outgoing plain BL,
+/// zero predicated BLs, and one tail B, verified from raw ARM words.
+///
+/// Clears current point, contour and subglyph counts, adjusts outline and
+/// optional extra-point cursors after the base outline, then positions the
+/// subglyph cursor after the base's 32-byte subglyph records.
+///
+/// Deliberate deviation: inline the six-instruction tail helper at
+/// `0x080e2d58` rather than create a firmware seam. Byte-pointer arithmetic
+/// wraps like the ARM shift/add, including null and overflowing addresses.
+/// Named fields preserve the ARM layout while host pointers widen.
+///
+/// # Safety
+/// `loader` must be writable and valid; base outline cursors must satisfy
+/// [`ft_glyph_loader_adjust_points`]'s signed-offset requirements.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn ft_glyph_loader_prepare(loader: *mut FtGlyphLoader) {
+    unsafe {
+        (*loader).current.outline.n_points = 0;
+        (*loader).current.outline.n_contours = 0;
+        (*loader).current.num_subglyphs = 0;
+        ft_glyph_loader_adjust_points(loader);
+        (*loader).current.subglyphs = (*loader).base.subglyphs.cast::<u8>()
+            .wrapping_add((*loader).base.num_subglyphs.wrapping_shl(5) as usize).cast();
+    }
+}
+
 /// Firmware load address of the unported glyph-loader grow path
 /// `FT_GlyphLoader_CheckPoints` @ 0x0804c638, which [`cff_check_points`]
 /// tail-branches when the inlined head finds the outlines need to grow.
@@ -994,5 +1024,75 @@ mod tests {
         assert_eq!(loader.current.outline.tags, tags.as_mut_ptr());
         assert_eq!(loader.current.outline.contours, contours.as_mut_ptr());
         assert_eq!(loader.current.extra_points, old_extra.as_mut_ptr());
+    }
+
+    #[test]
+    fn prepare_resets_current_without_discarding_base_or_flags() {
+        for &(point_count, contour_count, subglyph_count, use_extra) in
+            &[(0i16, 0i16, 0u32, 0u32), (2, 1, 2, 1), (-1, -1, 1, 0)]
+        {
+            let mut points = [FtVector { x: 3, y: -4 }; 8];
+            let mut tags = [0xa5u8; 8];
+            let mut contours = [7i16; 8];
+            let mut extra = [FtVector { x: 8, y: 9 }; 8];
+            let mut subglyphs = [0x55u32; 24];
+            let mut loader: FtGlyphLoader = unsafe { core::mem::zeroed() };
+            loader.base.outline.n_points = point_count;
+            loader.base.outline.n_contours = contour_count;
+            loader.base.outline.points = unsafe { points.as_mut_ptr().add(2) };
+            loader.base.outline.tags = unsafe { tags.as_mut_ptr().add(2) };
+            loader.base.outline.contours = unsafe { contours.as_mut_ptr().add(2) };
+            loader.base.extra_points = unsafe { extra.as_mut_ptr().add(2) };
+            loader.base.num_subglyphs = subglyph_count;
+            loader.base.subglyphs = subglyphs.as_mut_ptr().cast();
+            loader.use_extra = use_extra;
+            loader.max_points = 99;
+            loader.current = loader.base;
+            loader.current.outline.n_points = 12;
+            loader.current.outline.n_contours = 13;
+            loader.current.num_subglyphs = 14;
+            loader.current.outline.flags = 0x1234;
+            let old_extra = loader.current.extra_points;
+
+            unsafe { ft_glyph_loader_prepare(&mut loader) };
+
+            assert_eq!(loader.current.outline.n_points, 0);
+            assert_eq!(loader.current.outline.n_contours, 0);
+            assert_eq!(loader.current.num_subglyphs, 0);
+            assert_eq!(loader.current.outline.points, unsafe {
+                points.as_mut_ptr().add((2 + point_count) as usize)
+            });
+            assert_eq!(loader.current.outline.tags, unsafe {
+                tags.as_mut_ptr().add((2 + point_count) as usize)
+            });
+            assert_eq!(loader.current.outline.contours, unsafe {
+                contours.as_mut_ptr().add((2 + contour_count) as usize)
+            });
+            assert_eq!(loader.current.extra_points, if use_extra != 0 {
+                unsafe { extra.as_mut_ptr().add((2 + point_count) as usize) }
+            } else { old_extra });
+            assert_eq!(loader.current.subglyphs, unsafe {
+                subglyphs.as_mut_ptr().add(subglyph_count as usize * 8).cast()
+            });
+            assert_eq!(loader.base.outline.n_points, point_count);
+            assert_eq!(loader.base.outline.n_contours, contour_count);
+            assert_eq!(loader.base.num_subglyphs, subglyph_count);
+            assert_eq!(loader.current.outline.flags, 0x1234);
+            assert_eq!(loader.max_points, 99);
+            assert_eq!(points, [FtVector { x: 3, y: -4 }; 8]);
+            assert_eq!(tags, [0xa5; 8]);
+            assert_eq!(contours, [7; 8]);
+            assert_eq!(subglyphs, [0x55; 24]);
+        }
+    }
+
+    #[test]
+    fn prepare_subglyph_shift_wraps_at_target_word_width() {
+        let mut loader: FtGlyphLoader = unsafe { core::mem::zeroed() };
+        loader.base.num_subglyphs = 0x0800_0000;
+        unsafe { ft_glyph_loader_prepare(&mut loader) };
+        assert!(loader.current.subglyphs.is_null());
+        assert_eq!(loader.base.num_subglyphs, 0x0800_0000);
+        assert_eq!(loader.current.num_subglyphs, 0);
     }
 }

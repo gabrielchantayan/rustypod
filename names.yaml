@@ -249334,3 +249334,39 @@ functions:
       error 6, flags/pathname fields and r2/r3 forwarding; extra stores
       initialize inactive fields, and BLX uses literal 0x0804d6b8 instead
       of direct BL. No physical-device verification.
+  - address: 0x0804c94c
+    ghidra: FUN_0804c94c
+    name: ft_glyph_loader_prepare
+    size: 48
+    sig: "void ft_glyph_loader_prepare(FtGlyphLoader *loader)"
+    module: ft/cff_builder
+    status: ported
+    renames:
+      param_1/r0/r4: loader
+      "[loader,#0x34]": current.outline.n_contours
+      "[loader,#0x36]": current.outline.n_points
+      "[loader,#0x4c]": current.num_subglyphs
+      "[loader,#0x50]": current.subglyphs
+      FUN_080dc854: ft_glyph_loader_adjust_points
+      FUN_080e2d58: ft_glyph_loader_adjust_subglyphs
+    notes: >-
+      FreeType FT_GlyphLoader_Prepare. Raw words establish the true extent
+      [0x0804c94c,0x0804c97c), 48 bytes, followed by push {r4,r5,r6,lr}.
+      Whole-image aligned BL decoding finds two incoming plain BLs at
+      0x08092b8c and 0x080a19d8, zero predicated incoming BLs; one outgoing
+      plain BL at 0x0804c96c to existing ft_glyph_loader_adjust_points,
+      zero predicated outgoing BLs, and a tail B to 0x080e2d58. Clear current
+      point/contour/subglyph counts, adjust outline and optional extra-point
+      cursors, then adjust subglyphs after the base's 32-byte records.
+      The six raw instructions at [0x080e2d58,0x080e2d70) assign
+      current.subglyphs = base.subglyphs + (base.num_subglyphs << 5).
+      Deliberate deviation: inline that assignment with wrapping u32 shift
+      and byte-pointer arithmetic, rather than introduce a firmware seam.
+      Reuses existing repr(C) fields, allowing native host pointers to widen.
+      Host tests cover zero, positive and signed negative outline counts,
+      extra enabled/disabled, preserved base/flags/storage and shift overflow.
+      Full host suite and ARM release build pass. Actual-source smoke verifies
+      reset current counts and adjusted point, contour and subglyph cursors.
+      match.py exits 1: 13 Rust versus 12 original instructions; LLVM adds
+      a frame, combines the halfword clears into one word store, retains the
+      point helper BL and inlines the tail helper's shift/add/store.
