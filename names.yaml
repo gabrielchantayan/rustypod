@@ -248824,3 +248824,35 @@ functions:
       with a register offset, and retains halfword load, one lookup BL,
       status comparison, and zero-on-error selection. R_ARM_CALL at
       symbol offset 0x28 resolves to retail_word_index. No device execution.
+
+  - address: 0x080515f4
+    ghidra: FUN_080515f4
+    name: controller_context_notification_byte
+    size: 12
+    sig: "uint32_t controller_context_notification_byte(const uint32_t *controller)"
+    module: app/controller_context_notification_byte
+    status: ported
+    renames:
+      param_1/r0: controller
+      return/r0: notification_byte
+    notes: >-
+      Raw A32 words e5900f00, e5d00b78, e12fff1e establish the true
+      extent [0x080515f4,0x08051600), 12 bytes; the next function begins
+      with e92d4fff. Whole-image aligned immediate BL decoding finds two
+      plain inbound calls at 0x08173504 and 0x08173518, zero predicated
+      inbound calls, and zero outgoing calls. Load the four-byte context
+      pointer at controller+0xf00, then zero-extend its byte at +0xb78.
+      FUN_08172c6c compares and caches the byte at consumer+0x8c and
+      invokes notification vtable slot +0x58 on change. Finer byte
+      semantics are unknown. No deliberate semantic deviations, null
+      guards, or callee seams. Host pointers stored in firmware objects
+      remain u32. Tests cover every byte including 0x80 and 0xff,
+      neighboring-byte exclusion, current-context replacement, and
+      unchanged controller and context storage. Standalone host smoke
+      exercised the real getter and returned 0, 128, and 255 while
+      replacing the context pointer. No device execution.
+      Host suite passed 15657 tests; ARM release build succeeded.
+      match.py exited 1: three stock instructions versus five Rust
+      instructions. LLVM adds push/mov frame setup and returns with
+      pop instead of bx lr; the same ldr +0xf00 and ldrb +0xb78 remain.
+      The exported symbol is present with no added calls or semantic changes.
