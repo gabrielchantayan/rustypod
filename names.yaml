@@ -57673,6 +57673,47 @@ functions:
       constructor defaults to its Rust port through a host-replaceable
       volatile slot; its ABI consumes only the first three arguments.
 
+  - address: 0x08042f68
+    ghidra: FUN_08042f68
+    name: ft_buffered_stream_init_data_output
+    size: 108
+    sig: "i32 ft_buffered_stream_init_data_output(u32 data, FtBufferedStream *stream, u32 buffer_size, u32 tag)"
+    module: ft/buffer
+    status: ported
+    vars:
+      param_1/r5: data
+      param_2/r6: stream
+      param_3/r7: buffer_size
+      param_4/r3: tag
+      local_1c: io_context
+      iVar1/r4: status
+      FUN_0805b764: data_stream_context_create
+      FUN_080f06f4: ft_buffered_stream_initialize
+      FUN_08042cfc: ft_buffered_stream_finalize
+    notes: >-
+      Raw osos.dec words establish the 108-byte extent from 0x08042f68
+      through the data literal at 0x08042fd0; the next real function
+      begins with push at 0x08042fd4. Two inbound plain BLs at 0x0806e634
+      and 0x080becc8, no predicated inbound BLs. Outbound plain BLs at
+      0x08042f94 and 0x08042fb8 call the context constructor and initializer;
+      BLNE at 0x08042fc4 calls finalization. Rejects foreign tags with -50,
+      constructs a mode-3 context, initializes output mode 0, and finalizes
+      on initializer failure without replacing its error. Ghidra's extra
+      constructor arguments are not consumed by the verified three-argument
+      callee. Reuses existing Rust ports and the volatile constructor seam.
+      Host tests cover tag rejection, unchanged records on constructor error,
+      successful output cursor bounds, and full cleanup on allocation failure.
+      ARM match.py exits 1 with a structural diff: 26 stock instructions
+      versus 39 Rust listing entries. LLVM uses an indirect BLX for the
+      existing constructor seam, branches instead of BLNE, a frame pointer,
+      and an explicit local initialization. Tag, modes, argument order and
+      preserved error paths agree. The exported symbol remains distinct.
+      Full x86_64 host suite and ARM release build pass. Throwaway API smoke
+      observes foreign-tag rejection -50, successful output initialization,
+      context 0x76543210 and writable range 0x12360..0x12370 inclusive.
+      No device execution. Standalone host-library smoke is unavailable due
+      to existing non-test host cfg errors; smoke runs in the host test harness.
+
   - address: 0x080f06f4
     ghidra: FUN_080f06f4
     name: ft_buffered_stream_initialize
