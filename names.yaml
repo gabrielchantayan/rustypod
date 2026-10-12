@@ -16,6 +16,30 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08051b70
+    ghidra: FUN_08051b70
+    name: ft_service_metadata_word_at_af0
+    size: 12
+    sig: "uint32_t ft_service_metadata_word_at_af0(const uint8_t *service_context)"
+    module: ft/service/metadata
+    status: ported
+    renames:
+      param_1/r0: service_context
+      intermediate/r0: metadata
+      return/r0: metadata_word
+    notes: >-
+      Raw words e5900f00 e5900af0 e12fff1e establish the true extent
+      [0x08051b70,0x08051b7c); the next real function loads byte +0xb1b.
+      Whole-image aligned decoding finds two plain inbound BLs at
+      0x08172d54 and 0x08172d6c, zero predicated inbound BLs, and zero
+      outgoing BLs of either kind. Follow the aligned pointer at context
+      +0xf00 and return the full aligned word at metadata+0xaf0. Caller
+      FUN_08172c6c compares/caches it at +0x3c and notifies virtually on
+      change; higher-level meaning remains unknown. Native-width host
+      pointers preserve offsets; ARM pointers remain four bytes. No new
+      seams or NULL/bounds checks. Host suite and ARM release build pass;
+      standalone smoke returns 00000000,80000001,ffffffff. match.py exits
+      1: both loads match; LLVM adds a frame and returns via pop instead of bx.
   - address: 0x08051c1c
     ghidra: FUN_08051c1c
     name: media_player_query_code
