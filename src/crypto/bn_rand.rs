@@ -76,7 +76,8 @@ mod tests {
 
     #[test]
     fn constrained_magnitudes_zero_and_failure() {
-        // Only this test touches this module's private-to-consumers slot.
+        // Both wrappers share this slot; exercise them in one test to avoid
+        // concurrent mutation. This models constraints, not RNG quality.
         let old = unsafe { BN_RANDOM };
         unsafe { BN_RANDOM = random_model; }
         let mut limb = 0xdead_beefu32;
@@ -98,6 +99,24 @@ mod tests {
         assert_eq!(unsafe { bn_rand(&mut number, 8, 0, 1) }, 0);
         assert_eq!(limb, before);
         assert_eq!(number.top, 0);
+        let pseudo = super::super::bn_pseudo_rand::bn_pseudo_rand;
+        number.dmax = 1;
+        for (bits, top, bottom, expected) in [
+            (1, -1, 0, 1), (7, 0, 0, 0x61), (8, -1, 0, 0x21),
+            (8, 1, 0, 0xe1), (9, 1, 0, 0x1a1),
+            (32, -1, 0, 0x8765_4321), (32, 1, 1, 0xc765_4321),
+        ] {
+            assert_eq!(unsafe { pseudo(&mut number, bits, top, bottom) }, 1);
+            assert_eq!(limb, expected);
+            assert_eq!((number.top, number.neg), (1, 0));
+        }
+        assert_eq!(unsafe { pseudo(&mut number, 0, -1, 1) }, 1);
+        assert_eq!((number.top, number.neg), (0, 0));
+        number.dmax = 0;
+        let before = limb;
+        assert_eq!(unsafe { pseudo(&mut number, 8, 0, 1) }, 0);
+        assert_eq!(limb, before);
+        assert_eq!((number.top, number.neg), (0, 0));
         unsafe { BN_RANDOM = old; }
     }
 }

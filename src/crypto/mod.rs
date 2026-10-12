@@ -41,6 +41,7 @@
 //! file.
 pub mod evp_cipher_ctx_cleanup;
 pub mod bn_rand;
+pub mod bn_pseudo_rand;
 pub mod bn_pseudo_rand_range;
 pub mod evp_cipher_update;
 pub mod add_lock;
