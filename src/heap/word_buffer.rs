@@ -519,9 +519,8 @@ mod tests {
     use super::*;
     use crate::drivers::ata_cmd::{TracedFreeHooks, TRACED_FREE_HOOKS};
     use crate::testing::{hints, note_missing_u32_fixture, try_map_u32_slab};
-    use std::sync::{Mutex, MutexGuard};
-
-    static TEST_LOCK: Mutex<()> = Mutex::new(());
+    use std::sync::MutexGuard;
+    use crate::testing::TRACED_ALLOC_TEST_LOCK as TEST_LOCK;
     static mut GROW_RESULT: *mut u32 = core::ptr::null_mut();
     static mut GROW_ARGS: (*mut WordBuffer, u32) = (core::ptr::null_mut(), 0);
     static mut FREED: *mut u8 = core::ptr::null_mut();
