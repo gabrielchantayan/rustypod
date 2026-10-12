@@ -16,6 +16,30 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08051b60
+    ghidra: FUN_08051b60
+    name: ft_service_metadata_halfword_at_b10
+    size: 16
+    sig: "uint32_t ft_service_metadata_halfword_at_b10(const uint8_t *service_context)"
+    module: ft/service/metadata
+    status: ported
+    renames:
+      param_1/r0: service_context
+      intermediate/r0: metadata
+      return/r0: metadata_halfword
+    notes: >-
+      Raw words e5900f00 e2800c0b e1d001b0 e12fff1e establish the true
+      extent [0x08051b60,0x08051b70), ending at the independent af0
+      accessor. Whole-image aligned A32 decoding finds two plain inbound
+      BLs at 0x08172fe0 and 0x08172ff4, zero predicated inbound BLs,
+      and zero outgoing BLs of either kind. Follow the aligned pointer
+      at context+0xf00 and zero-extend the aligned halfword at metadata
+      +0xb10. FUN_08172c6c compares/caches it at caller+0x4e and notifies
+      virtually on change; higher-level field meaning remains unknown.
+      Native-width host pointers, four-byte ARM pointers; no new seams
+      or NULL/bounds checks. Host suite and ARM release build pass.
+      Standalone smoke returns 00000000,00008000,0000ffff. match.py exits
+      1: LLVM uses a register halfword offset and adds a frame.
   - address: 0x08051b70
     ghidra: FUN_08051b70
     name: ft_service_metadata_word_at_af0
