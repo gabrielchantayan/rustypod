@@ -46670,10 +46670,9 @@ functions:
       decoded ARM B/BL word in osos.dec finds eight direct unconditional bl
       callers, at 0x0805825c, 0x08058288, 0x080582c8, 0x08058790, 0x0805aa74,
       0x08068a2c, 0x080cb238, and 0x080cb284; no predicated BL or B targets
-      it. FUN_08046b44 is an unported 28-byte veneer that forwards to the
-      already shared 0x08046c74 retailOS helper. The port deliberately uses
-      that existing helper boundary directly rather than restubbing or
-      separately porting the veneer.
+      it. FUN_08046b44 is the ported 28-byte
+      utf8_span_to_utf16_counted_thunk; the Rust caller now invokes that
+      wrapper, which retains the shared 0x08046c74 retailOS helper boundary.
   - address: 0x08045fb0
     ghidra: FUN_08045fb0
     name: counted_u16_copy
@@ -172306,10 +172305,9 @@ functions:
       are plain BL at 0x0805225c, 0x08054dd4, 0x08054ef4, and 0x08055f84;
       there are no predicated inbound BL forms. It clears destination's count,
       interprets source[0] as a byte-span length, and passes source + 1 to
-      the verified 0x08046b44 veneer with a 255-codepoint bound before storing
-      the returned decoded count as u16. The Rust port deliberately calls the
-      veneer target 0x08046c74 through its existing host/target seam rather
-      than creating a port for the four-byte veneer.
+      the verified 28-byte 0x08046b44 wrapper with a 255-codepoint bound before
+      storing the returned decoded count as u16. The Rust caller now invokes
+      utf8_span_to_utf16_counted_thunk with the existing helper boundary.
 
   # --- Bignum non-negative remainder candidate ---
   - address: 0x08040438
@@ -204382,10 +204380,9 @@ functions:
       are plain BL at 0x0805225c, 0x08054dd4, 0x08054ef4, and 0x08055f84;
       there are no predicated inbound BL forms. It clears destination's count,
       interprets source[0] as a byte-span length, and passes source + 1 to
-      the verified 0x08046b44 veneer with a 255-codepoint bound before storing
-      the returned decoded count as u16. The Rust port deliberately calls the
-      veneer target 0x08046c74 through its existing host/target seam rather
-      than creating a port for the four-byte veneer.
+      the verified 28-byte 0x08046b44 wrapper with a 255-codepoint bound before
+      storing the returned decoded count as u16. The Rust caller now invokes
+      utf8_span_to_utf16_counted_thunk with the existing helper boundary.
 
   # --- Bignum non-negative remainder candidate ---
   - address: 0x08040438
@@ -250267,3 +250264,30 @@ functions:
       push/mov, literal load, frame pop and tail BX through 0x08057958,
       followed by the literal word. The veneer retains its own symbol;
       no intentional fold. No target behavioral deviations.
+  - address: 0x08046b44
+    ghidra: FUN_08046b44
+    name: utf8_span_to_utf16_counted_thunk
+    size: 28
+    sig: "i32 utf8_span_to_utf16_counted_thunk(const u8 *source, u32 source_len, u16 *destination, u32 max_codepoints, u32 *out_count)"
+    module: cxx/string_encoding
+    status: ported
+    renames:
+      r0: source
+      r1: source_len
+      r2: destination
+      r3: max_codepoints
+      stack_arg_0: out_count
+    notes: >-
+      Raw words establish 0x08046b44..0x08046b60, exactly 28 bytes.
+      Two plain incoming BLs at 0x08045fa0 and 0x08046ab8; no predicated
+      incoming BLs. One plain outgoing BL at 0x08046b58 to the verified
+      utf8_span_to_utf16_counted helper at 0x08046c74; no predicated BLs.
+      Forward all five arguments and preserve status, including the fifth
+      stack argument. Reuse the existing shared retailOS/host boundary.
+      Both Rust callers now use this wrapper. Host tests execute the existing
+      Rust converter for empty spans, zero and unsigned maximum limits,
+      multibyte truncation, optional counts, and untouched output sentinels.
+      Full host suite passes (15734 tests); ARM release builds.
+      match.py exits 1: LLVM emits an eight-instruction/literal listing,
+      a frame and indirect tail BX to 0x08046c74 instead of the direct BL.
+      No algorithmic deviation or intentional symbol fold.
