@@ -201,6 +201,7 @@ pub mod plst_payload_is_blocked;
 pub mod plst_task_is_active;
 pub mod plst_resource_activate;
 pub mod plst_resource_dispatch_pldm;
+pub mod plst_resource_dispatch_and_reset;
 pub mod plst_task_message;
 pub mod plst_counted_string;
 pub mod plst_music_path;
