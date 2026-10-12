@@ -353,6 +353,36 @@ pub unsafe extern "C" fn utf8_span_to_utf16_counted(
     0
 }
 
+/// utf8_span_to_utf16_counted_thunk — original: FUN_08046b44 @ 0x08046b44.
+/// True extent: 28 bytes, 0x08046b44..0x08046b60; the next entry begins
+/// with `cmp r0,#0`. Raw words verify two plain inbound BLs (0x08045fa0,
+/// 0x08046ab8), one plain outbound BL to 0x08046c74, and no predicated BLs.
+///
+/// Forward the UTF-8 byte span, UTF-16 destination, unsigned codepoint
+/// limit, and optional decoded-count pointer; return the helper's status.
+/// No algorithmic deviations. Rust's C ABI replaces the original explicit
+/// fifth-argument stack shuffle. Reuse the existing 0x08046c74 boundary:
+/// target calls retailOS, while host tests can install its existing Rust
+/// port without introducing another seam.
+///
+/// # Safety
+///
+/// The source span must be readable and destination must fit the decoded
+/// units up to the limit. A non-NULL out_count must be writable.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn utf8_span_to_utf16_counted_thunk(
+    source: *const u8,
+    source_len: u32,
+    destination: *mut u16,
+    max_codepoints: u32,
+    out_count: *mut u32,
+) -> i32 {
+    utf8_to_utf16_counted_buffer_helper(
+        source, source_len, destination, max_codepoints, out_count,
+    )
+}
+
 /// utf16_to_utf8_capped — original: FUN_08046d94 @ 0x08046d94 (188 bytes,
 /// 0x08046d94..0x08046e50). Raw ARM has ten plain `bl` instructions and one
 /// predicated `blne`; four inbound direct calls are all plain `bl`.
@@ -572,9 +602,8 @@ pub unsafe extern "C" fn utf8_to_utf16_counted_buffer(
 /// truncated to u16, at the leading word. The third ABI argument is ignored;
 /// callers treat this routine as void.
 ///
-/// Deliberate deviation: stock calls the four-byte `FUN_08046b44` veneer,
-/// whose verified target is 0x08046c74. This port invokes the existing shared
-/// target seam directly rather than adding a second port for that veneer.
+/// No algorithmic deviation: call the ported 28-byte
+/// `utf8_span_to_utf16_counted_thunk`, retaining its shared helper boundary.
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn pascal_utf8_to_counted_u16(
@@ -593,7 +622,7 @@ pub unsafe extern "C" fn pascal_utf8_to_counted_u16(
     }
 
     let mut decoded_count = initial_count;
-    utf8_to_utf16_counted_buffer_helper(
+    utf8_span_to_utf16_counted_thunk(
         source.add(1),
         source.read() as u32,
         destination.add(1),
@@ -614,10 +643,8 @@ pub unsafe extern "C" fn pascal_utf8_to_counted_u16(
 /// the leading u16. The fourth ABI argument initializes that count; the third
 /// is ignored by the stock body.
 ///
-/// Deliberately calls the target of stock's one-instruction
-/// `FUN_08046b44` veneer (0x08046c74) through the existing shared boundary,
-/// rather than porting that veneer as a second function. This preserves the
-/// helper's behavior while keeping this port to its one assigned function.
+/// No algorithmic deviation: call the ported 28-byte
+/// `utf8_span_to_utf16_counted_thunk`, retaining its shared helper boundary.
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn cstr_to_counted_u16(
@@ -644,7 +671,7 @@ pub unsafe extern "C" fn cstr_to_counted_u16(
     source_len = source_len.min(0xff);
 
     let mut decoded_count = initial_count;
-    let status = utf8_to_utf16_counted_buffer_helper(
+    let status = utf8_span_to_utf16_counted_thunk(
         source,
         source_len,
         destination.add(1),
@@ -1285,6 +1312,45 @@ mod tests {
             destination, [0xa5a5; 2],
             "a zero decoded count leaves the bound at zero, which touches no pointer"
         );
+    }
+
+    #[test]
+    fn span_thunk_preserves_empty_bounded_multibyte_and_optional_count_behavior() {
+        let _heap = crate::heap::veneers::tests::mock_heap();
+        let _lock = SPAN_HELPER_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        let _span = unsafe { SpanHelperGuard::install() };
+        let _helper_lock = COUNTED_BUFFER_HELPER_LOCK.lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let _helper = unsafe {
+            CountedBufferHelperGuard::install(utf8_span_to_utf16_counted)
+        };
+        for (source, len, bound, expected) in [
+            (&b""[..], 0, 255, &[][..]),
+            (&b"A\xc2\xa2Z"[..], 4, 0, &[][..]),
+            (&b"A\xc2\xa2Z"[..], 4, 2, &[0x41, 0xa2][..]),
+            (&b"A\xc2\xa2Z"[..], 4, u32::MAX, &[0x41, 0xa2, 0x5a][..]),
+        ] {
+            for report_count in [false, true] {
+                let mut output = [0xa5a5u16; 5];
+                let mut count = 0xdeadbeefu32;
+                let count_pointer = if report_count { &mut count } else {
+                    core::ptr::null_mut()
+                };
+                let status = unsafe {
+                    utf8_span_to_utf16_counted_thunk(
+                        source.as_ptr(), len, output.as_mut_ptr().add(1),
+                        bound, count_pointer,
+                    )
+                };
+                assert_eq!(status, 0);
+                assert_eq!(&output[1..1 + expected.len()], expected);
+                assert_eq!(output[0], 0xa5a5);
+                assert!(output[1 + expected.len()..].iter().all(|&unit| unit == 0xa5a5));
+                assert_eq!(count, if report_count { expected.len() as u32 } else {
+                    0xdeadbeef
+                });
+            }
+        }
     }
 
     #[test]
