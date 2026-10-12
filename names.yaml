@@ -16,6 +16,36 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08050c14
+    ghidra: FUN_08050c14
+    name: ui_context_first_flagged_tdat
+    size: 52
+    sig: "uint32_t ui_context_first_flagged_tdat(const uint8_t *context)"
+    module: ui/context_first_flagged_tdat
+    status: ported
+    renames:
+      param_1/r0: context
+      iVar1/r0: element
+      r1: flags
+      return/r0: first_flagged_element
+    notes: >-
+      Raw ARM establishes [0x08050c14,0x08050c48), 52 bytes; the next
+      real function begins with push {r4,r5,r6,lr}. Whole-image aligned
+      A32 decoding finds two plain incoming BLs at 0x08050acc and
+      0x0805865c, zero predicated; two plain outgoing BLs, zero predicated.
+      NULL returns zero. Stock 0x080522ec loads the context head at
+      +0xb98; inspect element byte +0x20 bit 0 before advancing through
+      stock 0x08053d3c, which returns element word +0 only for class
+      'tdat' via the already-ported ui_element_is_tdat_class predicate.
+      A flagged wrong-class element succeeds; an unflagged one terminates.
+      Caller 0x08050ac8 reads result+0x3c; 0x08058590 stores it at +0xf60.
+      Higher-level flag meaning is unknown. Neither direct callee has a
+      ledger entry: ARM retains both stock boundaries; host bodies reproduce
+      their verified loads/class gate with u32 pointer fields. Full host
+      suite, exhaustive flag/class/position edge tests and ARM release build
+      pass. Actual-source smoke confirms flag precedence and termination.
+      match.py exits 1: LLVM frame/register choices and literal-loaded BLX
+      calls differ, while the byte test, NULL checks and scan loop agree.
   - address: 0x0805128c
     ghidra: FUN_0805128c
     name: ft_service_metadata_halfword_at_b26
