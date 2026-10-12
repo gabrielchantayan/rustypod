@@ -19,15 +19,15 @@
 //!
 //! # Deviations
 //!
-//! The two firmware routines behind it (`0x0802f654`, a `vfprintf`-style
-//! logger taking the context at 0x08b1c9dc, and `0x08050f80`, its record
-//! terminator) are not ported yet, so this module reproduces the
-//! *contract* rather than the printf path: [`ft_error_trace`] hands the
-//! format string and the register-passed arguments to an installable
+//! The firmware formatter (`0x0802f654`, a `vfprintf`-style logger taking
+//! the context at 0x08b1c9dc) is not ported yet. Its record terminator
+//! [`retail_log_record_finish`] is an empty leaf, verified from raw bytes.
+//! This module reproduces the *contract* rather than the printf path:
+//! [`ft_error_trace`] hands the format and register-passed arguments to an installable
 //! [`FtTraceSink`], and does nothing at all when none is installed —
 //! which is also the observable behavior on retail hardware, where the
-//! log has no destination. Wiring the real logger is a matter of
-//! installing a sink once those two addresses are ported.
+//! log has no destination. Wiring the real formatter is a matter of
+//! installing a sink once that address is ported.
 //!
 //! The original builds a genuine `va_list`, so a format string with more
 //! than three conversions keeps reading the caller's stack. The port
@@ -36,6 +36,26 @@
 //! FreeType strings is `" invalid i/o; pos = 0x%lx, size = 0x%lx\n"`,
 //! two arguments); a hypothetical four-argument call would lose its
 //! fourth argument instead of reading stack memory.
+
+/// Empty retail logger record finalizer — `FUN_08050f80` @ 0x08050f80.
+///
+/// True extent: 4 bytes, [0x08050f80, 0x08050f84); raw word e12fff1e
+/// (`bx lr`), followed by an independent PUSH prologue. Whole-image raw
+/// A32 decoding verifies 2 plain BL callers, 0 predicated BL callers,
+/// and 0 outgoing calls. Both callers reload their logger context in r0.
+/// No memory access, flushing, allocation, or dispatch occurs.
+///
+/// Deliberate ABI clarification: return the untouched context to preserve
+/// r0, although both known callers discard it and Ghidra declares void.
+/// Host pointers widen; there are no target behavioral deviations.
+/// LLVM intentionally folds this identical body into `context_scope_drop`
+/// in the release archive. The exported alias remains a real call target;
+/// its three ARM instructions only set up and restore the frame.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub extern "C" fn retail_log_record_finish(context: *mut u8) -> *mut u8 {
+    context
+}
 
 /// A `FT_ERROR`/`FT_TRACE` consumer: the format string plus the three
 /// variadic slots AAPCS passes in registers.
@@ -170,6 +190,18 @@ pub(crate) mod capture {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn record_finish_preserves_context_bits_without_accessing_memory() {
+        for address in [0usize, 1, 0x08b1c9dc, 0x08b1e9dc, u32::MAX as usize, usize::MAX] {
+            let context = address as *mut u8;
+            assert_eq!(retail_log_record_finish(context), context);
+        }
+        let mut record = [0xa5u8, 0x00, 0xff, 0x5a];
+        let context = record.as_mut_ptr();
+        assert_eq!(retail_log_record_finish(context), context);
+        assert_eq!(record, [0xa5, 0x00, 0xff, 0x5a]);
+    }
 
     #[test]
     fn no_sink_installed_discards_the_message() {
