@@ -5,12 +5,12 @@
 //! incoming BLs, two outgoing plain BLs, and zero predicated outgoing BLs.
 //! Store in the owner's pool at +0xc0, replacing the item's id at +0x28;
 //! refresh item flag bit 3 at +0x15 unconditionally, then return store status.
-//! Deviations: use the existing Rust counted-string wrapper; the unported
-//! flag refresh at 0x080444d4 uses a volatile seam with its real target address.
+//! Deviations: use the existing Rust counted-string wrapper and flag refresh.
 //! repr(C) widens the owner pointer on hosts; ARM retains all retail offsets.
 
 use core::ptr;
 use crate::util::string_pool::{string_pool_store_counted, StringPool};
+use super::item_refresh_string_flag::item_refresh_string_flag;
 
 /// Retail item prefix, through the string-pool entry id.
 #[repr(C)]
@@ -20,23 +20,6 @@ pub struct CountedStringItem {
     pub string_id: i32,
 }
 
-type RefreshStringFlag = unsafe extern "C" fn(*mut CountedStringItem);
-
-#[cfg(target_os = "none")]
-unsafe extern "C" fn retail_refresh_string_flag(item: *mut CountedStringItem) {
-    let refresh: RefreshStringFlag = core::mem::transmute(0x0804_44d4usize);
-    refresh(item)
-}
-
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn retail_refresh_string_flag(_: *mut CountedStringItem) {
-    panic!("item flag refresh requires retail 0x080444d4")
-}
-
-/// Refresh reads the stored string and replaces flag bit 3 at item +0x15.
-/// Raw code calls 0x080d6e50, halves its byte length, then scans with 0x1d
-/// via 0x08059c68. No stronger identity for that scan is assumed.
-pub static mut ITEM_REFRESH_STRING_FLAG: RefreshStringFlag = retail_refresh_string_flag;
 
 /// Replace the counted string, refreshing derived state even on store failure.
 ///
@@ -52,8 +35,7 @@ pub unsafe extern "C" fn item_store_counted_string(item: *mut CountedStringItem,
         counted,
         ptr::addr_of_mut!((*item).string_id),
     );
-    let refresh = ptr::read_volatile(ptr::addr_of!(ITEM_REFRESH_STRING_FLAG));
-    refresh(item);
+    item_refresh_string_flag(item);
     status
 }
 
@@ -63,7 +45,6 @@ mod tests {
     use crate::util::string_pool::{STRING_POOL_SEAM_LOCK, STRING_POOL_STORE};
 
     static mut STATUS: i32 = 0;
-    static mut REFRESHES: u32 = 0;
 
     unsafe extern "C" fn replace(_: *mut StringPool, data: *const u8, len: u32, id: *mut i32) -> i32 {
         // Model a replacement/clear, including a failing store that leaves a
@@ -73,11 +54,6 @@ mod tests {
         STATUS
     }
 
-    unsafe extern "C" fn refresh(item: *mut CountedStringItem) {
-        (*item).state[0] = (*item).string_id as u32;
-        (*item).string_id = -99;
-        REFRESHES += 1;
-    }
 
     #[test]
     fn replacement_and_clear_refresh_post_store_state_and_preserve_status() {
@@ -87,23 +63,20 @@ mod tests {
         let counted = [2u16, 0x61, 0x62];
         unsafe {
             let old_store = STRING_POOL_STORE;
-            let old_refresh = ITEM_REFRESH_STRING_FLAG;
             STRING_POOL_STORE = replace;
-            ITEM_REFRESH_STRING_FLAG = refresh;
-            REFRESHES = 0;
             for status in [0, -50, i32::MIN, i32::MAX] {
                 STATUS = status;
+                item.state[4] = 0xffff_ffff;
                 assert_eq!(item_store_counted_string(&mut item, counted.as_ptr()), status);
-                assert_eq!(item.state[0], 27);
-                assert_eq!(item.string_id, -99);
+                assert_eq!(item.string_id, 27);
+                assert_eq!(item.state[4], 0xffff_f7ff);
+                item.state[4] = 0xffff_ffff;
                 assert_eq!(item_store_counted_string(&mut item, ptr::null()), status);
-                assert_eq!(item.state[0], 0);
-                assert_eq!(item.string_id, -99);
+                assert_eq!(item.string_id, 0);
+                assert_eq!(item.state[4], 0xffff_f7ff);
             }
-            let refreshes = REFRESHES;
-            assert_eq!(refreshes, 8);
+            assert_eq!(item.state[4] & 0x800, 0);
             STRING_POOL_STORE = old_store;
-            ITEM_REFRESH_STRING_FLAG = old_refresh;
         }
     }
 }
