@@ -249607,3 +249607,30 @@ functions:
       adds a frame, changes registers and conditional returns, and uses
       literal-loaded BLX for the destructor. Error gates, target field
       offsets, unlink/free order and active-size replacement agree.
+
+  - address: 0x08049c08
+    ghidra: FUN_08049c08
+    name: evp_cipher_ctx_cleanup
+    size: 104
+    sig: "int evp_cipher_ctx_cleanup(EvpCipherCtx *ctx)"
+    module: crypto/evp_cipher_ctx_cleanup
+    status: ported
+    vars:
+      param_1: ctx
+      pcVar2: cleanup
+      iVar1: cleanup_result
+    notes: >-
+      EVP_CIPHER_CTX_cleanup. Raw extent 0x08049c08..0x08049c70 ends
+      before the independent PUSH at 0x08049c70. Whole-image raw A32 decode
+      finds two inbound plain BLs at 0x08049da8 and 0x080ef1f0, no predicated
+      inbound BLs. Body has two plain BLs, one BLNE, and one indirect BLX.
+      Optional descriptor cleanup at +0x1c may reject with zero, preserving
+      context including callback mutations. Otherwise reload cipher_data
+      at +0x60 and descriptor, poison using descriptor ctx_size at +0x20,
+      reload data before traced_free, then clear all 140 bytes and return 1.
+      Absent descriptor skips poisoning, not freeing. No NULL context guard.
+      Existing heap_poison and traced_free ports replace verified stock calls;
+      memzero_aligned replaces the 0x08037db8 IRAM mirror veneer. Native
+      repr(C) pointers widen host fixtures only; volatile helper dispatch
+      prevents builtin substitution. Tests cover rejection, callback replacement,
+      poison-before-free, absent descriptors and absent state.
