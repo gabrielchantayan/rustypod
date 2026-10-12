@@ -16,6 +16,37 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0803c5e8
+    ghidra: FUN_0803c5e8
+    name: counted_wstr_append
+    size: 76
+    sig: "void counted_wstr_append(const u16 *source, u16 *destination, u32 max_len)"
+    module: util/counted_wstr_append
+    status: ported
+    vars:
+      param_1/r0: source
+      param_2/r1: destination
+      param_3/r2: max_len
+      uVar2/r3: new_len
+      puVar1/r0: destination_cursor
+    notes: >-
+      Raw extent [0x0803c5e8,0x0803c634) is 76 bytes with no literals;
+      the next function starts with ldr r0,[r0,#0xf00]. Whole-image ARM
+      word scan finds two plain inbound BL at 0x08058d2c and 0x08058d3c,
+      zero predicated inbound BL and zero outbound BL. The bls loop branch
+      is conditional B, not BL. Caller 0x08058cc4 joins an insertion and
+      saved suffix with cap 255. NULL operands are a no-op. Add u16 counts
+      in u32, cap, copy halfwords forward after the old destination end,
+      then truncate the resulting count to u16. A cap below the old count
+      shrinks only the header; no terminator is written. No callees or seams.
+      Volatile halfword accesses preserve forward overlap and avoid memcpy
+      substitution; valid Rust objects exclude target address wraparound.
+      Host tests cover caps, empty payloads, guards, NULL precedence,
+      self-append, propagating overlap and count overflow. Host suite and
+      ARM release build pass. Direct-source smoke joins AB, XY and CD with
+      an unchanged guard. match.py exits 1: 19 original versus 24 Rust
+      instructions; LLVM uses a frame pointer and an index-based loop,
+      preserving NULL gates, unsigned cap, halfword copies and final strh.
   - address: 0x0803db58
     ghidra: FUN_0803db58
     name: bn_blinding_convert
