@@ -47,6 +47,7 @@ pub mod qsort;
 pub mod parameter_descriptor_value;
 pub mod parameter_descriptor_new;
 pub mod parameter_value_destroy;
+pub mod parameter_value_assign;
 pub mod parameter_template_new;
 pub mod global_parameter_descriptor_value;
 pub mod fixed_parameter_descriptor_value;
