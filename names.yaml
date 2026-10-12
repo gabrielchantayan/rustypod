@@ -16,6 +16,37 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0803b5f0
+    ghidra: FUN_0803b5f0
+    name: parameter_value_destroy
+    size: 204
+    sig: "void parameter_value_destroy(u32 *slot, const ParameterValueDescriptor *descriptor)"
+    module: runtime/parameter_value_destroy
+    status: ported
+    vars:
+      param_1/r0/r4: slot
+      param_2/r1: descriptor
+      iVar1/r0: value_type
+      UNRECOVERED_JUMPTABLE/r2: destroy_callback
+    renames:
+      FUN_0803a168: flagged_pointer_group_destroy
+      FUN_0803a2ec: owned_buffer_destroy
+      FUN_08043994: traced_free
+    notes: >-
+      Raw extent [0x0803b5f0,0x0803b6bc) is exactly 204 bytes; the next
+      function starts with an independent PUSH. Four plain outbound BL at
+      0x0803b678,0x0803b69c,0x0803b6a4,0x0803b6ac; no predicated BL.
+      Whole-image word scan finds one plain inbound BL at 0x0803b69c
+      and one BLNE at 0x0803a57c. Descriptor callback at +0x10 then +0x0c
+      overrides all processing. Kind 5 forces owned-buffer destruction;
+      type 1 resets the descriptor default even for a zero slot. Without
+      a descriptor, follow the slot to a type/value header; zero inner values
+      return before scalar reset. Type -4 destroys the header value then frees
+      its container, type 5 detaches, type 6 destroys a flagged pointer group.
+      Deviations: native host descriptor pointers widen; duplicate zero store
+      omitted. Host suite and linked C smoke passed; ARM build passed.
+      match.py exits 1: 51 stock vs 60 Rust lines, LLVM uses a jump table
+      and preserves callback tail dispatch, recursive destruction and resets.
   - address: 0x0803bb60
     ghidra: FUN_0803bb60
     name: parameter_template_new
