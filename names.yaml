@@ -251471,3 +251471,45 @@ functions:
       or new firmware seams. Host coverage checks selector boundaries,
       positive and negative wraparound, zero delta, signed minimum delta,
       preservation of adjacent fields and timestamp sign bits.
+
+  - address: 0x0803bf08
+    ghidra: FUN_0803bf08
+    name: lookup_and_attach_descriptor
+    size: 64
+    sig: "u32 *lookup_and_attach_descriptor(u32 *owner, const u8 *key, void *context, u32 option)"
+    module: app/descriptor_lookup_attach
+    status: ported
+    renames:
+      param_1/r0: owner
+      param_2/r1: key
+      param_3/r2: context
+      param_4/r3: option
+      iVar1: descriptor
+      uVar2: link
+      FUN_0806a5cc: retail_descriptor_lookup
+      FUN_0803c034: attach_matching_descriptor
+    notes: >-
+      Raw osos.dec establishes [0x0803bf08,0x0803bf48), ending with POP
+      at 0x0803bf44 before the next independent PUSH. Whole-image aligned
+      ARM BL decoding finds two incoming plain calls at 0x0803becc and
+      0x0803bfac, no predicated calls. Two outgoing plain calls at
+      0x0803bf20 to 0x0806a5cc and 0x0803bf38 to 0x0803c034, no
+      predicated calls. Reads owner word +0x0c, passes it with key and
+      option to the lookup, returns NULL if lookup fails, otherwise
+      attaches the resulting descriptor with context and returns the link.
+      The lookup address has no existing registry entry or Rust port.
+      Its raw code preserves three input registers and passes the option
+      as the fifth argument to its internal search; its key and option
+      meanings remain opaque. Retains that verified retail lookup as a
+      volatile replaceable seam; host default panics rather than faking
+      lookup. Attachment reuses the existing Rust port. No extra guards.
+      Host edge tests cover lookup failure with only four owner words and
+      wrong descriptor type without mutations. Actual-source standalone
+      host smoke exercises the exported function, confirming missing lookup
+      leaves pending flags unchanged and a matching descriptor with failed
+      allocation returns NULL while accumulating flags to 0x80000020.
+      Required host test suite and ARM release build pass. match.py exits 1
+      with a structural diff: LLVM uses BLX through the lookup seam and
+      a tail B for attachment, preserving the null branch and argument
+      moves. Objdump relocation R_ARM_JUMP24 at Rust +0x3c confirms the
+      tail branch targets attach_matching_descriptor, not itself.
