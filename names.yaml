@@ -249032,3 +249032,42 @@ functions:
       Native host pointers widen; no target behavioral deviations. Exported
       with inline(never); host tests cover null, unaligned, high-bit and
       all-one pointer bits plus unchanged record storage.
+
+  - address: 0x08050f04
+    ghidra: FUN_08050f04
+    name: object_commit_mark_modified
+    module: util/object_commit_touch
+    size: 72
+    status: ported
+    signature: "unsafe extern C fn(object: *mut u8) -> i32"
+    args:
+      object: writable record with a target backend link word at +0x154
+    returns: signed low-16-bit commit error, validation result, or zero
+    vars:
+      param_1: object
+      r5: backend
+      FUN_08041104: retail_backend_record_commit (existing unported seam)
+      FUN_08050f4c: retail_record_magic_validate (existing unported seam)
+    notes: >-
+      Raw A32 words establish the true 72-byte extent 0x08050f04..0x08050f4c.
+      Ghidra reports 124 bytes by including the separately entered helper
+      at 0x08050f4c, whose push prologue is also reached from 0x08050f00.
+      The assigned body has one plain outgoing BL at 0x08050f18 to
+      0x08041104, zero predicated BL, and a conditional tail B at
+      0x08050f44 to 0x08050f4c. Whole-image aligned instruction decoding
+      finds one plain inbound BL at 0x080486c4 and one BLNE at 0x0804bd6c.
+      Dereference the +0x154 target word twice to obtain the backend;
+      commit it and sign-extend the low 16-bit status, returning errors
+      immediately. On success, backend byte +0x0c bit 7 gates ORing the
+      first object halfword with 0xff00 and returning tail validation.
+      No timestamp is changed. Existing neighboring port veneers and host
+      seams are reused; target pointers remain u32 words on the host.
+      Host tests cover negative and positive truncated errors, high status
+      bits with zero low bits, clear/set gates, exact write extent, and
+      full-width validation status. Host suite and ARM release build passed.
+      Standalone host smoke exercised set and clear gates. Required match.py
+      printed an expected structural diff using its stale 124-byte extent:
+      LLVM preserves both pointer loads, status truncation, bit-7 gate,
+      exact halfword merge, and tail branch through existing veneers;
+      differences are frame setup, split shifts, and ldrsb/cmn gate testing.
+      No target behavioral deviations.
