@@ -16,6 +16,32 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08053170
+    ghidra: FUN_08053170
+    name: ui_plst_linked_item_counted_string
+    size: 120
+    sig: "i32 ui_plst_linked_item_counted_string(const u8 *owner, i32 index, u16 *counted)"
+    module: ui/plst_counted_string
+    status: ported
+    renames:
+      param_1/r4: owner
+      param_2/r1: index
+      param_3/r5: counted
+      FUN_08054214: ui_plst_linked_item_count
+      FUN_08052728: ui_plst_slot_item_at
+      FUN_080bd8bc: string_pool_read_counted
+    notes: >-
+      Raw A32 proves extent [0x08053170,0x080531e8), including the error
+      literal 0xffff0000 at 0x080531e4; next function starts with push.
+      Two plain body BLs, zero predicated; two inbound plain BLs at
+      0x081a3864 and 0x081a4290, zero predicated. Reject NULL output,
+      negative or out-of-range index with -50 before writing. Clear count,
+      fetch linked plst selector 1 with reverse flag zero; absent item
+      returns -65536. Follow item+0x20, read signed record+0x28 ID, and
+      tail-read counted string from *(owner+0xf60)+0xc0, preserving status.
+      Ghidra omits four literal bytes and absorbs the counted-reader tail.
+      Existing Rust callees are used directly; dead initial byte length
+      uses zero because the reader clears it before every return path.
   - address: 0x08053228
     ghidra: FUN_08053228
     name: owner_pair_vector_word_at
