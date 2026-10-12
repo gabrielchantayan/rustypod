@@ -16,6 +16,45 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08044e38
+    ghidra: FUN_08044e38
+    name: context_apply_and_reset
+    size: 128
+    sig: "u32 context_apply_and_reset(ContextResetOwner *owner)"
+    module: app/context_apply_and_reset
+    status: ported
+    renames:
+      param_1/r4: owner
+      r5: media_player
+      auStack_20: scope
+      FUN_0817ceb4: media_player_get
+      FUN_082840e8: context_scope_init
+      FUN_08283ff8: context_scope_apply_subject
+      FUN_08059a98: inner_clear_cached_results
+      FUN_08059ad4: inner_dispatch_selected_resource
+      FUN_08284188: context_scope_drop
+    notes: >-
+      Raw A32 extent [0x08044e38,0x08044eb8), 128 bytes, ending in
+      POP before an independent PUSH. Whole-image aligned word decoding
+      verifies two incoming plain BLs at 0x08065cf0 and 0x08115214,
+      zero predicated inbound BLs; six outgoing plain BLs, zero predicated
+      BLs, one register BLX and one BLXNE. Fetch the media player, construct
+      a 20-byte context scope for owner+0xf40 with flag zero, and apply it.
+      Query player vtable slot +0x1b8; any nonzero result invokes +0xec
+      through a freshly loaded vtable. Virtual identities remain unknown.
+      Clear cached results, dispatch the selected resource, reload the
+      owner+0xf00 context, set its byte +0xb92 to one, drop the scope,
+      and return zero regardless of helper results. All six direct callees
+      reuse canonical Rust ports. Native host pointer fields preserve ARM
+      layout on target; vtable slots use target word indices. Host tests
+      cover zero and high-bit query results, changed vtable and context,
+      ignored helper failures and adjacent-byte preservation. Full host
+      suite and ARM release build pass. Standalone public-entry smoke
+      confirms conditional player invocation, cache clearing and flag store.
+      match.py prints an expected structural diff: 32 original versus 31
+      Rust instructions, a branch replacing predication, a larger frame,
+      and elimination of the empty destructor. Slot offsets, vtable/context
+      reloads, direct helper calls, byte store and zero return are retained.
   - address: 0x08046180
     ghidra: FUN_08046180
     name: plst_dispatch_matching_item
