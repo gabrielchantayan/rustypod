@@ -3476,6 +3476,8 @@ pub mod hints {
     pub const RECORD_STRING_POOL_READ_COUNTED_118_WORD11: usize = 0x3227_0000;
     // Dedicated to the +0xed4 vector / +0x850 pool counted-string fixture.
     pub const OBJECT_RESOURCE_VECTOR16_POOL850_COUNTED_STRING: usize = 0x3228_0000;
+    // Dedicated to the liti entry's inline string-pool fixture; never shared.
+    pub const LITI_ENTRY_READ_STRING: usize = 0x3229_0000;
     // 0x6ff0_0000: dedicated to ui/tdat_element_teardown's target-width
     // element and linked 'plst' node fixture; mappings never unmap.
     pub const TDAT_ELEMENT_TEARDOWN: usize = 0x6ff0_0000;

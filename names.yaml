@@ -248465,3 +248465,46 @@ functions:
       LLVM uses explicit class/bounds branches and a countdown loop instead
       of ADS predication and a count-up loop. The class-call relocation and
       +0x24/+0x28/+4 field accesses are verified. No device execution.
+
+  - address: 0x0805235c
+    ghidra: FUN_0805235c
+    name: liti_entry_read_string
+    size: 96
+    sig: "i32 liti_entry_read_string(const u8 *entry, u8 *dst, u32 capacity)"
+    module: app/liti_entry_read_string
+    status: ported
+    vars:
+      param_1/r0/r5: entry
+      param_2/r1/r4: dst
+      param_3/r2: capacity
+      local_14: copied_length
+      param_4/r3: saved_register_not_an_argument
+    renames:
+      FUN_08057bb4: liti_field_class_check
+      FUN_080b4318: string_pool_read
+    notes: >-
+      Raw A32 extent 0x0805235c..0x080523bc is exactly 96 bytes, ending
+      with pop {r2-r6,pc}; the next function starts with push {r2-r10,lr}.
+      Independent whole-image aligned BL decoding finds two plain incoming
+      calls at 0x08107074 and 0x0813e784, zero predicated incoming calls.
+      Two outgoing plain BLs at 0x08052368 and 0x080523a4 call the existing
+      class predicate and pool reader; no predicated outgoing BLs. Validate
+      class, destination and nonzero capacity before touching output. Clear
+      dst[0], read ID at entry+0x20 from the inline pool at *(entry+4)+0x34
+      with capacity-1, and append NUL at copied_length only on success.
+      Reader errors propagate with the initial NUL retained. The apparent
+      fourth Ghidra argument is not consumed: its stack slot is overwritten
+      with zero before the reader call. Both callers supply three arguments.
+      Deliberate deviations: direct existing Rust callees; aligned u32
+      pointer fields preserve target spacing, with canonical StringPool
+      native-pointer layout on hosts. Host suite passes 15642 tests, covering
+      truncation, capacity one, exact fit, zero ID, invalid IDs, invalid class,
+      NULL and zero-capacity rejection, and untouched output guards. ARM
+      build-std release succeeds. match.py exits 1 with 24 stock versus 32
+      Rust instructions: explicit validation branches and frame setup replace
+      ADS predication; both calls, offsets and success-only NUL remain.
+      Standalone executable using the test-configured host library returns
+      status 0 and bytes [114,101,116,97,0,165,165,165] for retail/capacity 5.
+      Non-test host builds expose existing unresolved metadata, payload-kind
+      and calendar notification functions; they were not changed. No device
+      execution.
