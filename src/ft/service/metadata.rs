@@ -40,6 +40,58 @@ pub const METADATA_SIGNED_BYTE_B43_OFFSET: usize = 0xb43;
 /// Byte offset of this unsigned word in the metadata block.
 pub const METADATA_WORD_AF8_OFFSET: usize = 0xaf8;
 
+/// ft_service_metadata_word_at_af0 — original: `FUN_08051b70` @
+/// `0x08051b70` (12 bytes; two plain inbound BLs at 0x08172d54 and
+/// 0x08172d6c, zero predicated inbound BLs, zero outgoing BLs of either kind).
+///
+/// Raw words `e5900f00 e5900af0 e12fff1e` establish the true extent
+/// [0x08051b70, 0x08051b7c); the next function independently loads byte +0xb1b.
+/// Follow the aligned metadata pointer at service_context+0xf00 and return
+/// the complete word at metadata+0xaf0. FUN_08172c6c compares/caches it at
+/// caller+0x3c and dispatches a virtual notification when it changes.
+/// The field's higher-level meaning is unrecovered.
+/// Deliberate deviations: native-width host pointers, four-byte ARM pointers;
+/// no additional NULL or bounds checks.
+///
+/// # Safety
+/// `service_context` must contain an aligned readable metadata pointer at
+/// +0xf00, whose pointee has an aligned readable word at +0xaf0.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn ft_service_metadata_word_at_af0(
+    service_context: *const u8,
+) -> u32 {
+    let metadata = (service_context.add(SERVICE_CONTEXT_METADATA_OFFSET) as *const *const u8).read();
+    (metadata.add(0xaf0) as *const u32).read()
+}
+
+#[cfg(test)]
+mod word_af0_tests {
+    use super::*;
+
+    #[test]
+    fn full_width_values_live_updates_and_pointer_replacement() {
+        let mut owner = [0usize; 0xf00 / core::mem::size_of::<usize>() + 1];
+        let mut metadata = [0xa5a5a5a5u32; 0xaf0 / 4 + 2];
+        let mut replacement = [0x5a5a5a5au32; 0xaf0 / 4 + 2];
+        let context = owner.as_mut_ptr().cast::<u8>();
+        unsafe {
+            context.add(0xf00).cast::<*const u8>().write(metadata.as_ptr().cast());
+            for value in [0, 1, 0xff, 0x100, 0x7fffffff, 0x80000000, 0x89abcdef, u32::MAX] {
+                metadata[0xaf0 / 4] = value;
+                assert_eq!(ft_service_metadata_word_at_af0(context), value);
+            }
+            replacement[0xaf0 / 4] = 0x12345678;
+            context.add(0xf00).cast::<*const u8>().write(replacement.as_ptr().cast());
+            assert_eq!(ft_service_metadata_word_at_af0(context), 0x12345678);
+            context.add(0xf00).cast::<*const u8>().write(metadata.as_ptr().cast());
+            assert_eq!(ft_service_metadata_word_at_af0(context), u32::MAX);
+        }
+        assert!(metadata.iter().enumerate().all(|(i, word)| i == 0xaf0 / 4 || *word == 0xa5a5a5a5));
+        assert!(replacement.iter().enumerate().all(|(i, word)| i == 0xaf0 / 4 || *word == 0x5a5a5a5a));
+    }
+}
+
 /// ft_service_metadata_byte_at_b4c — original: `FUN_08052328` @
 /// `0x08052328` (12 bytes; two plain inbound BLs at 0x08172f38 and
 /// 0x08172f4c, zero predicated inbound BLs, zero outgoing BLs).
