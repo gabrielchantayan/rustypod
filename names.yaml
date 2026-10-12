@@ -251443,3 +251443,31 @@ functions:
       retaining stdout, diagnostic and unconditional zero return. No filename
       or mode loads occur. Isolated actual-source smoke prints the diagnostic
       and returns NULL for invalid pointers with a failing printf boundary.
+
+  - address: 0x0803c0f0
+    ghidra: FUN_0803c0f0
+    name: object_counter_adjust_touch
+    size: 60
+    sig: "void object_counter_adjust_touch(u8 *object, i32 selector, i32 delta)"
+    module: util/object_counter_adjust_touch
+    status: ported
+    renames:
+      param_1: object
+      param_2: selector
+      param_3: delta
+      FUN_08054fc4: current_mac_epoch_seconds_with_utc_offset
+    notes: >-
+      Raw osos.dec words establish the 60-byte extent [0x0803c0f0,0x0803c12c):
+      pop {r4,pc} at 0x0803c128 precedes the next independent push
+      {r4-r6,lr} at 0x0803c12c. Whole-image aligned ARM BL decoding finds
+      two plain inbound calls at 0x08047444 and 0x08048494, zero predicated
+      inbound BLs. The body has one plain BL at 0x0803c120 to the already
+      ported timestamp wrapper 0x08054fc4, zero predicated BLs. Callers pass
+      +1 and -1 after successful mutation, then invoke object_commit_touch.
+      Selectors 1 and 0x100 choose the word at +0x130; all others choose
+      +0x12c. Add delta modulo 2^32, OR the first halfword with 0xff00,
+      then store current UTC-corrected Macintosh-epoch seconds at +0x08.
+      Opaque counter identities are not inferred. No deliberate deviations
+      or new firmware seams. Host coverage checks selector boundaries,
+      positive and negative wraparound, zero delta, signed minimum delta,
+      preservation of adjacent fields and timestamp sign bits.
