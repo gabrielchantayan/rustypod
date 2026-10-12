@@ -94,6 +94,7 @@ pub mod bn_num_bytes;
 pub mod bn_bn2bin;
 pub mod bn_add;
 pub mod bn_sub_word;
+pub mod bn_lshift1;
 pub mod bn_mod_mul_montgomery;
 pub mod bn_mod_mul;
 pub mod bn_ucmp;

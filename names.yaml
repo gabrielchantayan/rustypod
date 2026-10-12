@@ -16,6 +16,42 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0803f4b8
+    ghidra: FUN_0803f4b8
+    name: bn_lshift1
+    size: 216
+    sig: "int bn_lshift1(BigNum *result, const BigNum *a)"
+    module: crypto/bn_lshift1
+    status: ported
+    vars:
+      param_1: result
+      param_2: a
+      piVar1: expanded_result
+      puVar2: destination_limbs
+      puVar3: source_limbs
+      iVar4: limb_index
+      uVar5: carry
+      uVar6: limb
+    renames:
+      FUN_082b8174: bn_expand_words
+    notes: >-
+      Raw A32 extent [0x0803f4b8,0x0803f590) is 216 bytes; next
+      function has an independent PUSH prologue. Binary-wide decoding finds
+      two inbound plain BLs at 0x0803fcb0 and 0x0803fdf4, zero predicated
+      inbound BLs, and two outgoing plain BLs to 0x082b8174. Neither address
+      had a canonical entry. Raw capacity-worker and allocator instructions
+      verify signed dmax comparison, allocation and limb copying, NULL on
+      failure, old-buffer release, and d/dmax publication on success.
+      Shift magnitude left one bit with carry; support identical objects.
+      Copy sign before reservation for distinct objects, preserve top/limbs
+      on failure, and append a high one only on carry. No normalization.
+      Deviations: native-pointer repr(C) BigNum on hosts and volatile worker
+      slot replacing direct BL with BLX. Host tests cover zero, limb-boundary
+      carries, in-place operation, relocation, failure, sign and write bounds.
+      Host suite and ARM release build pass; actual-source smoke doubles
+      -(2^64-1) with carry and guard preservation. match.py exits 1:
+      54 stock instructions versus 61 Rust lines; LLVM uses indexed limbs,
+      larger frame and BLX while preserving capacity gates and carry loop.
   - address: 0x08040538
     ghidra: FUN_08040538
     name: bn_pseudo_rand_range
