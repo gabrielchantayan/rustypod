@@ -68318,6 +68318,28 @@ functions:
       existing identified thunk at 0x081bb29c. No guessed controller
       identity, partial Rust body, zeroing fallback, or new callee
       seam is introduced.
+  - address: 0x0803c264
+    ghidra: FUN_0803c264
+    name: default_playback_node_start
+    size: 196
+    sig: "void default_playback_node_start(void)"
+    module: app/default_playback_node_start
+    status: ported
+    notes: >-
+      Raw A32 extent [0x0803c264,0x0803c328): 180 instruction bytes and
+      16 literal bytes. Eight plain outbound BLs, no predicated outbound
+      BLs; two inbound BLEQ sites at 0x0811a97c and 0x0811aba4, no plain
+      inbound BLs. Tail branch at 0x0803c314 targets playback_node_start.
+      Guard at state 0x089ca5e0 +0x10 gates linked_node_construct on
+      0x08a125ec and cxa_atexit registration with handler 0x081ea268 and
+      dso 0x089ca09c. State byte +1 gates indexed record 1 defaults,
+      limit +0x1c = 0x7fff, chain status 1 and chain byte +0x3c clears.
+      Every call overwrites node byte +0x3e with 1, obtains the no-content
+      layout name and starts playback with zero callback and context.
+      Ghidra incorrectly incorporates the tail target into the body.
+      Existing semantic ports are reused; no guessed callee identity.
+      Host tests cover linear/circular chains, one-time initialization,
+      nonzero even guards and flag overwrite. No device execution.
 
   - address: 0x081bb29c
     ghidra: thunk_FUN_0806e488
