@@ -23,6 +23,7 @@ pub mod global_mailbox_post;
 pub mod global_observer_get;
 pub mod media_player_apply_context_flag;
 pub mod context_apply_and_reset;
+pub mod context_sized_buffer_clear;
 pub mod counted_dispatch_table_address;
 pub mod counted_dispatch_table_address_96bc48;
 pub mod counted_dispatch_table_address_946ea4;

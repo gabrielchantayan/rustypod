@@ -16,6 +16,37 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08044e28
+    ghidra: FUN_08044e28
+    name: context_sized_buffer_clear
+    size: 16
+    sig: "void *context_sized_buffer_clear(const BufferClearContext *context, void *buffer)"
+    module: app/context_sized_buffer_clear
+    status: ported
+    vars: {param_1: context, param_2: buffer, r2: context, r1: byte_count}
+    notes: >-
+      Raw A32 extent [0x08044e28,0x08044e38), four words followed by an
+      independent PUSH. Words e1a02000 e1a00001 e1d211bc eafffffa shuffle
+      the arguments, load the unsigned halfword at context+0x1c, and tail
+      branch to memzero_branch_veneer @ 0x08044e24. Its raw branch reaches
+      the ldr-pc veneer @ 0x08037dc8 with literal 0x220002d4, the IRAM
+      mirror of osos memzero @ 0x080002d4, not mask ROM. Whole-image
+      aligned BL decoding verifies two plain inbound calls at 0x08044f74
+      and 0x08048ca4, zero predicated inbound BLs, and no outgoing BLs.
+      Clears exactly byte_count bytes and preserves memzero's original
+      destination-pointer result, omitted by Ghidra's void signature.
+      Reuses the canonical Rust branch veneer without a new seam.
+      Deliberate deviation: typed Rust call may compile as call/return
+      instead of the original tail branch. Host tests cover unsigned
+      high-bit and maximum lengths, zero, buffer alignment, surrounding
+      bytes, unchanged context, and buffer/context overlap.
+      Host suite passed (15739 tests), ARM release build passed, and an
+      unaligned runtime smoke preserved both guards and the return pointer.
+      match.py reports four original versus seven Rust instructions: the
+      unsigned halfword load and argument shuffle remain, with an added
+      frame-pointer prologue/epilogue. Objdump verifies R_ARM_JUMP24 to
+      memzero_branch_veneer: the final branch remains a tail transfer.
+
   - address: 0x08044e38
     ghidra: FUN_08044e38
     name: context_apply_and_reset
