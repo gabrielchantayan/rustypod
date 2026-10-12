@@ -11,6 +11,115 @@ use core::ptr;
 use crate::util::string_pool::{string_pool_read_counted, string_pool_store_counted, StringPool, PARAM_ERR};
 
 use super::plst_class_check::ui_element_is_plst_class;
+use super::plst_linked_item_count::ui_plst_linked_item_count;
+use super::plst_slot_item::ui_plst_slot_item_at;
+
+/// ui_plst_linked_item_counted_string — retailOS `FUN_08053170` @
+/// `0x08053170`; 120 bytes through the error literal at `0x080531e4`,
+/// followed by the next real function's push at `0x080531e8`.
+/// Raw word decoding verifies two plain body BLs, zero predicated BLs,
+/// and two inbound plain BLs (0x081a3864, 0x081a4290), zero predicated.
+///
+/// Reject NULL output, negative index, or index >= linked item count with
+/// -50 without touching output. Otherwise clear the count, fetch selector
+/// 1's non-reversed item, and return -65536 if absent. Follow item +0x20
+/// to its record, read the signed string ID at +0x28, and read from the
+/// owner's pool at *(owner +0xf60) +0xc0. Preserve reader status.
+///
+/// Deliberate deviations: call existing Rust callees directly. Ghidra
+/// incorrectly absorbs the conditional tail branch to 0x080bd8bc.
+/// Its dead fourth argument is not reliably preserved by the slot fetch;
+/// use zero because string_pool_read clears the length before every path.
+///
+/// # Safety
+/// For nonnegative indices and non-NULL output, owner must satisfy
+/// ui_plst_linked_item_count. A valid index requires a complete linked plst
+/// element, readable item/record links, and a valid StringPool. Output must
+/// hold one count and 255 UTF-16 units. Target pointer fields remain u32.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn ui_plst_linked_item_counted_string(
+    owner: *const u8, index: i32, counted: *mut u16,
+) -> i32 {
+    if counted.is_null() || index < 0 || index as u32 >= ui_plst_linked_item_count(owner) {
+        return PARAM_ERR;
+    }
+    counted.write(0);
+    let element = owner.add(0xf50).cast::<u32>().read() as usize as *mut u8;
+    let item = ui_plst_slot_item_at(element, 1, 0, index as u32) as usize as *const u8;
+    if item.is_null() {
+        return -65536;
+    }
+    let record = item.add(0x20).cast::<u32>().read() as usize as *const u8;
+    let entry_id = record.add(0x28).cast::<i32>().read();
+    let pool_base = owner.add(0xf60).cast::<u32>().read() as usize as *mut u8;
+    string_pool_read_counted(pool_base.add(0xc0).cast::<StringPool>(), entry_id, counted, 0)
+}
+
+#[cfg(test)]
+mod linked_item_tests {
+    use super::*;
+    use crate::testing::{hints, try_map_u32_slab, note_missing_u32_fixture};
+    use crate::util::string_pool::PoolEntry;
+
+    #[test]
+    fn validates_before_writing_and_preserves_reader_results() {
+        unsafe {
+            let mut output = [0xa55au16; 257];
+            assert_eq!(ui_plst_linked_item_counted_string(ptr::null(), 0, ptr::null_mut()), -50);
+            assert_eq!(ui_plst_linked_item_counted_string(ptr::null(), -1, output.as_mut_ptr()), -50);
+            assert_eq!(output, [0xa55a; 257]);
+            let Some(owner) = try_map_u32_slab(hints::PLST_LINKED_ITEM_COUNTED_STRING, 0x6000) else {
+                assert!(note_missing_u32_fixture("ui/plst_linked_item_counted_string"));
+                return;
+            };
+            ptr::write_bytes(owner, 0, 0x6000);
+            assert_eq!(ui_plst_linked_item_counted_string(owner, 0, output.as_mut_ptr()), -50);
+            assert_eq!(output[0], 0xa55a);
+            let element = owner.add(0x1000);
+            let header = owner.add(0x2000);
+            let slot = owner.add(0x3000);
+            let item = owner.add(0x4000);
+            let record = owner.add(0x4100);
+            let pool_base = owner.add(0x5000);
+            owner.add(0xf50).cast::<u32>().write(element as usize as u32);
+            owner.add(0xf60).cast::<u32>().write(pool_base as usize as u32);
+            element.add(0x40).cast::<u32>().write(header as usize as u32);
+            header.add(0x2e).cast::<u16>().write(2);
+            element.add(4).cast::<u32>().write(0x706c7374);
+            element.add(0x3b0).cast::<u32>().write(slot as usize as u32);
+            slot.add(0x10).cast::<u32>().write(0);
+            slot.add(0x14).cast::<u32>().write(item as usize as u32);
+            item.add(0x20).cast::<u32>().write(record as usize as u32);
+            record.add(0x28).cast::<i32>().write(1);
+            assert_eq!(ui_plst_linked_item_counted_string(owner, 2, output.as_mut_ptr()), -50);
+            assert_eq!(output[0], 0xa55a);
+            assert_eq!(ui_plst_linked_item_counted_string(owner, 0, output.as_mut_ptr()), -65536);
+            assert_eq!(output[0], 0);
+            assert_eq!(output[1], 0xa55a);
+            let pool = pool_base.add(0xc0).cast::<StringPool>();
+            pool.write(core::mem::MaybeUninit::zeroed().assume_init());
+            assert_eq!(ui_plst_linked_item_counted_string(owner, 1, output.as_mut_ptr()), -50);
+            assert_eq!(output[0], 0);
+            (*pool).tag = 0x73747263;
+            (*pool).entry_count = 1;
+            let mut entry = PoolEntry { blob_offset: 0, length: 5 };
+            let mut entries = &mut entry as *mut PoolEntry;
+            let mut payload_bytes = [0x41u8, 0, 0x42, 0, 0x7f];
+            let mut payload = payload_bytes.as_mut_ptr();
+            (*pool).entries = &mut entries;
+            (*pool).payload = &mut payload;
+            assert_eq!(ui_plst_linked_item_counted_string(owner, 1, output.as_mut_ptr()), 0);
+            assert_eq!(output[0], 2);
+            assert_eq!(&output[1..3], &[0x41, 0x42]);
+            assert_eq!(output[3], 0xa57f);
+            assert_eq!(output[256], 0xa55a);
+            record.add(0x28).cast::<i32>().write(0);
+            assert_eq!(ui_plst_linked_item_counted_string(owner, 1, output.as_mut_ptr()), 0);
+            assert_eq!(output[0], 0);
+        }
+    }
+}
 
 /// Word index of the inline `"crts"` string-pool object passed to
 /// `string_pool_store_counted` (`add r0, r4, #0xcc`).
