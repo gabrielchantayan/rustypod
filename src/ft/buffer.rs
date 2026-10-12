@@ -286,6 +286,45 @@ pub unsafe extern "C" fn ft_buffered_stream_init_data(
     result
 }
 
+/// ft_buffered_stream_init_data_output — `FUN_08042f68` @ `0x08042f68`.
+/// True size: 108 bytes including the data literal at 0x08042fd0; the next
+/// function starts at 0x08042fd4. Verified calls: two inbound plain BLs,
+/// two outbound plain BLs and one outbound BLNE.
+///
+/// Rejects a foreign data tag with -50. Creates a mode-3 backing context,
+/// initializes an output buffered stream, and finalizes the partially
+/// initialized record on failure while preserving the initializer error.
+///
+/// Deliberate deviations: callees use existing Rust ports; the constructor
+/// retains the existing volatile host seam. The constructor consumes only
+/// three arguments, despite Ghidra's spurious fourth and fifth arguments.
+///
+/// # Safety
+/// `stream` must be aligned and writable for a complete buffered record.
+/// `data` must satisfy the backing constructor and data-kind accessor contracts.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn ft_buffered_stream_init_data_output(
+    data: u32,
+    stream: *mut FtBufferedStream,
+    buffer_size: u32,
+    tag: u32,
+) -> i32 {
+    if tag != u32::from_le_bytes(*b"atad") {
+        return -50;
+    }
+    let mut io_context = 0;
+    let result = buffered_stream_data_context_create()(&mut io_context, data, 3);
+    if result != 0 {
+        return result;
+    }
+    let result = ft_buffered_stream_initialize(stream, data, 0, buffer_size, io_context);
+    if result != 0 {
+        ft_buffered_stream_finalize(stream);
+    }
+    result
+}
+
 #[cfg(test)]
 pub(crate) static BUFFERED_STREAM_INIT_DATA_TEST_LOCK: parking_lot::Mutex<()> =
     parking_lot::Mutex::new(());
@@ -1096,6 +1135,7 @@ mod initialize_tests {
     static mut REQUESTS: Vec<usize> = Vec::new();
     static mut FAILURES: usize = 0;
     static mut FINALIZED_CONTEXT: u32 = 0;
+    static mut CREATE_RESULT: i32 = 0;
 
     unsafe extern "C" fn allocate(
         _heap: *mut HeapDescriptorDescriptor, size: usize, tag: usize,
@@ -1115,8 +1155,10 @@ mod initialize_tests {
     unsafe extern "C" fn create(
         out: *mut u32, _data: u32, _input: u32,
     ) -> i32 {
-        out.write(0x76543210);
-        0
+        if CREATE_RESULT == 0 {
+            out.write(0x76543210);
+        }
+        CREATE_RESULT
     }
     unsafe extern "C" fn finalize(context: u32) { FINALIZED_CONTEXT = context; }
 
@@ -1142,6 +1184,7 @@ mod initialize_tests {
         (*core::ptr::addr_of_mut!(REQUESTS)).clear();
         FAILURES = failures;
         FINALIZED_CONTEXT = 0;
+        CREATE_RESULT = 0;
         saved
     }
     fn dirty_stream() -> FtBufferedStream {
@@ -1217,4 +1260,62 @@ mod initialize_tests {
         assert_eq!(unsafe { ft_buffered_stream_init_data(1, &mut stream, 1, 0) }, -50);
         assert_eq!((stream.magic, stream.io_context, stream.cached_position), (u32::MAX, u32::MAX, u64::MAX));
     }
+
+    #[test]
+    fn output_constructor_rejects_tag_without_touching_null_arguments() {
+        assert_eq!(unsafe {
+            ft_buffered_stream_init_data_output(0, core::ptr::null_mut(), 0, 0)
+        }, -50);
+    }
+
+    #[test]
+    fn output_constructor_failure_preserves_existing_record() {
+        let _create = BUFFERED_STREAM_INIT_DATA_TEST_LOCK.lock();
+        let _heap = crate::heap::veneers::tests::mock_heap();
+        let _seams = unsafe { install(0) };
+        unsafe { CREATE_RESULT = -43; }
+        let mut stream = dirty_stream();
+        assert_eq!(unsafe {
+            ft_buffered_stream_init_data_output(1, &mut stream, 1, 0x64617461)
+        }, -43);
+        assert_eq!(unsafe { core::mem::transmute::<FtBufferedStream, [u64; 6]>(stream) },
+            [u64::MAX; 6]);
+        unsafe {
+            assert!((*core::ptr::addr_of!(REQUESTS)).is_empty());
+            assert_eq!(FINALIZED_CONTEXT, 0);
+        }
+    }
+
+    #[test]
+    fn output_constructor_success_has_writable_empty_range() {
+        let _create = BUFFERED_STREAM_INIT_DATA_TEST_LOCK.lock();
+        let _heap = crate::heap::veneers::tests::mock_heap();
+        let _seams = unsafe { install(0) };
+        let mut stream = dirty_stream();
+        assert_eq!(unsafe {
+            ft_buffered_stream_init_data_output(1, &mut stream, 17, 0x64617461)
+        }, 0);
+        assert_eq!((stream.magic, stream.is_input, stream.state_reserved),
+            (0x62756666, 0, [0, 0]));
+        assert_eq!((stream.io_context, stream.io_reserved), (0x76543210, [0x8001, 17]));
+        assert_eq!((stream.cursor, stream.buffer_start, stream.buffer_end),
+            (0x12360, 0x12360, 0x12370));
+        unsafe { assert_eq!(FINALIZED_CONTEXT, 0); }
+    }
+
+    #[test]
+    fn output_constructor_exhaustion_finalizes_and_clears_entire_record() {
+        let _finalize = BUFFERED_STREAM_FINALIZE_TEST_LOCK.lock();
+        let _create = BUFFERED_STREAM_INIT_DATA_TEST_LOCK.lock();
+        let _heap = crate::heap::veneers::tests::mock_heap();
+        let _seams = unsafe { install(usize::MAX) };
+        let mut stream = dirty_stream();
+        assert_eq!(unsafe {
+            ft_buffered_stream_init_data_output(1, &mut stream, 1, 0x64617461)
+        }, -108);
+        assert_eq!(unsafe { core::mem::transmute::<FtBufferedStream, [u64; 6]>(stream) },
+            [0; 6]);
+        unsafe { assert_eq!(FINALIZED_CONTEXT, 0x76543210); }
+    }
+
 }
