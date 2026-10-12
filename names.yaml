@@ -16,6 +16,31 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08044d90
+    ghidra: FUN_08044d90
+    name: media_slot_release
+    size: 80
+    sig: "void media_slot_release(MediaSlotOwner *owner, u32 slot)"
+    module: app/media_slot_release
+    status: ported
+    renames:
+      param_1/r0: owner
+      param_2/r1: slot
+      FUN_0806bf78: indexed_resource_release
+      FUN_080490b8: media_allocation_release
+    notes: >-
+      Raw A32 extent [0x08044d90,0x08044de0), twenty words ending with
+      POP; the independent PUSH at 0x08044de0 begins the next function.
+      Raw decoding verifies one plain inbound BL at 0x08068fb0, one
+      predicated BLNE at 0x08058748, and two outbound plain BLs, to
+      0x0806bf78 and 0x080490b8. Slots 0, 1, and 3 release the nonzero
+      owner+slot*4+0xf8c resource over [0, u32::MAX], then clear it;
+      they then release and clear owner+slot*4+0xf7c. Slot 2 and slots
+      above 3 return without access. The first direct callee's range-release
+      semantics and the second's allocation-release semantics are observed,
+      but their full identities remain unrecovered. Target builds retain
+      the exact retail addresses as typed seams; host tests replace them
+      and cover supported, skipped, and independently nonzero fields.
   - address: 0x08044e28
     ghidra: FUN_08044e28
     name: context_sized_buffer_clear
