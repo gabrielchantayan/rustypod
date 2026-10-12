@@ -71,3 +71,4 @@ pub mod state_wait;
 pub mod trim_ctype_whitespace;
 pub mod temporary_buffer;
 pub mod tracker_trace;
+pub mod record_interface_initialize;
