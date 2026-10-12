@@ -81,8 +81,8 @@
 //!   called directly, as in the original.
 //! - `OPENSSL_free` is the ported [`traced_free`] @ 0x08043994, called
 //!   directly like the original's `bl`.
-
-use crate::drivers::ata_cmd::traced_free;
+use crate::drivers::ata_cmd::{traced_alloc, traced_free};
+use crate::kernel::diag_ring_record::diag_ring_record;
 use crate::crypto::add_lock::crypto_add_lock;
 
 /// `CRYPTO_LOCK_EVP_PKEY` — the lock class the reference decrement runs
@@ -116,6 +116,39 @@ pub struct EvpPkey {
     /// stores NULL).
     pub attributes: *mut u8,
 }
+/// OpenSSL `EVP_PKEY_new` — original: `FUN_0804aeb4` @ **0x0804aeb4**.
+///
+/// True extent: 92 bytes, `0x0804aeb4..0x0804af10`; the next real function
+/// starts at `EVP_PKEY_size` @ `0x0804af10`. Raw ARM words verify two plain
+/// outbound `bl` instructions (`traced_alloc` and `diag_ring_record`) and no
+/// predicated `bl`. Allocates the 24-byte wrapper with zero tags, reports
+/// `(ERR_LIB_EVP=6, EVP_F_EVP_PKEY_NEW=106, ERR_R_MALLOC_FAILURE=65, 0, 0)`
+/// on failure, then writes `{type=0, references=1, pkey=NULL,
+/// save_parameters=1, attributes=NULL}` in the retail store order.
+///
+/// Deliberate deviation: `EvpPkey` pointer fields widen on host; the `repr(C)`
+/// fields retain the original target offsets on ARM.
+///
+/// # Safety
+///
+/// A non-NULL result is an owned allocation that must later be passed to
+/// [`evp_pkey_free`].
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn evp_pkey_new() -> *mut EvpPkey {
+    let pkey = traced_alloc(0x18, 0, 0).cast::<EvpPkey>();
+    if pkey.is_null() {
+        diag_ring_record(6, 0x6a, 0x41, 0, 0);
+        return core::ptr::null_mut();
+    }
+    core::ptr::addr_of_mut!((*pkey).pkey_type).write_volatile(0);
+    core::ptr::addr_of_mut!((*pkey).references).write_volatile(1);
+    core::ptr::addr_of_mut!((*pkey).pkey).write_volatile(core::ptr::null_mut());
+    core::ptr::addr_of_mut!((*pkey).attributes).write_volatile(core::ptr::null_mut());
+    core::ptr::addr_of_mut!((*pkey).save_parameters).write_volatile(1);
+    pkey
+}
+
 
 /// OpenSSL `EVP_PKEY_size` — `FUN_0804af10` at load address **0x0804af10**.
 ///
@@ -280,8 +313,13 @@ mod tests {
     extern crate std;
 
     use super::*;
-    use crate::drivers::ata_cmd::{TRACED_FREE_HOOKS, TRACED_FREE_TEST_LOCK, TracedFreeHooks};
+    use crate::drivers::ata_cmd::{
+        TracedAllocHooks, TracedFreeHooks, TRACED_ALLOC_HOOKS, TRACED_FREE_HOOKS,
+        TRACED_FREE_TEST_LOCK,
+    };
+    use crate::kernel::diag_ring_record::{DiagEventRing, DIAG_RING_BLOCK_GETTER};
     use crate::kernel::resource_op::RESOURCE_OP_HOOKS_TEST_LOCK;
+    use crate::testing::{DIAG_RING_TEST_LOCK, TRACED_ALLOC_TEST_LOCK};
     use parking_lot::{Mutex, MutexGuard};
     use std::vec::Vec;
 
@@ -289,6 +327,62 @@ mod tests {
     /// the shared resource-operation table `crypto_add_lock` reads.
     static OPS_LOCK: Mutex<()> = Mutex::new(());
 
+
+    static NEW_TEST_LOCK: Mutex<()> = Mutex::new(());
+    static mut NEW_ALLOCATION: EvpPkey = EvpPkey {
+        pkey_type: -1, save_type: -1, references: -1, pkey: core::ptr::null_mut(),
+        save_parameters: -1, attributes: core::ptr::null_mut(),
+    };
+    static mut NEW_DIAGNOSTICS: DiagEventRing = DiagEventRing {
+        owner: 0, tags: [0; 16], pointers: [0; 16], flags: [0; 16],
+        data0: [0; 16], data1: [0; 16], head: 0, tail: 0,
+    };
+
+    unsafe extern "C" fn allocate_new_pkey(_size: i32, _tag1: u32, _tag2: u32) -> *mut u8 {
+        core::ptr::addr_of_mut!(NEW_ALLOCATION).cast()
+    }
+
+    unsafe extern "C" fn fail_new_pkey(_size: i32, _tag1: u32, _tag2: u32) -> *mut u8 {
+        core::ptr::null_mut()
+    }
+
+    unsafe extern "C" fn new_diagnostic_ring() -> *mut DiagEventRing {
+        core::ptr::addr_of_mut!(NEW_DIAGNOSTICS)
+    }
+
+    struct NewHooksGuard {
+        alloc: TracedAllocHooks,
+        diagnostic_getter: Option<unsafe extern "C" fn() -> *mut DiagEventRing>,
+    }
+
+    impl NewHooksGuard {
+        unsafe fn install(alloc: unsafe extern "C" fn(i32, u32, u32) -> *mut u8) -> Self {
+            let guard = Self {
+                alloc: core::ptr::read_volatile(core::ptr::addr_of!(TRACED_ALLOC_HOOKS)),
+                diagnostic_getter: core::ptr::read_volatile(core::ptr::addr_of!(DIAG_RING_BLOCK_GETTER)),
+            };
+            TRACED_ALLOC_HOOKS = TracedAllocHooks { alloc, trace: None };
+            DIAG_RING_BLOCK_GETTER = None;
+            NEW_ALLOCATION = EvpPkey {
+                pkey_type: -1, save_type: -1, references: -1, pkey: 1usize as *mut u8,
+                save_parameters: -1, attributes: 1usize as *mut u8,
+            };
+            NEW_DIAGNOSTICS = DiagEventRing {
+                owner: 0, tags: [0; 16], pointers: [0; 16], flags: [0; 16],
+                data0: [0; 16], data1: [0; 16], head: 0, tail: 0,
+            };
+            guard
+        }
+    }
+
+    impl Drop for NewHooksGuard {
+        fn drop(&mut self) {
+            unsafe {
+                TRACED_ALLOC_HOOKS = self.alloc;
+                DIAG_RING_BLOCK_GETTER = self.diagnostic_getter;
+            }
+        }
+    }
     /// One recorded teardown callee invocation, in call order.
     #[derive(Debug, Clone, PartialEq, Eq)]
     enum Event {
@@ -433,6 +527,41 @@ mod tests {
                 "a nonpositive decremented count takes the teardown path"
             );
         }
+    }
+
+    #[test]
+    fn new_initializes_every_retail_field() {
+        let _test = NEW_TEST_LOCK.lock();
+        let _alloc = TRACED_ALLOC_TEST_LOCK.lock().unwrap();
+        let _diag = DIAG_RING_TEST_LOCK.lock().unwrap();
+        let _hooks = unsafe { NewHooksGuard::install(allocate_new_pkey) };
+
+        let pkey = unsafe { evp_pkey_new() };
+
+        assert_eq!(pkey, core::ptr::addr_of_mut!(NEW_ALLOCATION));
+        let pkey = unsafe { &*pkey };
+        assert_eq!(pkey.pkey_type, 0);
+        assert_eq!(pkey.save_type, -1, "constructor does not store save_type");
+        assert_eq!(pkey.references, 1);
+        assert!(pkey.pkey.is_null());
+        assert_eq!(pkey.save_parameters, 1);
+        assert!(pkey.attributes.is_null());
+    }
+
+    #[test]
+    fn new_reports_the_evp_allocation_failure() {
+        let _test = NEW_TEST_LOCK.lock();
+        let _alloc = TRACED_ALLOC_TEST_LOCK.lock().unwrap();
+        let _diag = DIAG_RING_TEST_LOCK.lock().unwrap();
+        let _hooks = unsafe { NewHooksGuard::install(fail_new_pkey) };
+        unsafe { DIAG_RING_BLOCK_GETTER = Some(new_diagnostic_ring) };
+
+        assert!(unsafe { evp_pkey_new() }.is_null());
+
+        let ring = unsafe { &*core::ptr::addr_of!(NEW_DIAGNOSTICS) };
+        assert_eq!(ring.head, 1);
+        assert_eq!(ring.tags[1], 0x06_06a_041);
+        assert_eq!((ring.data0[1], ring.data1[1]), (0, 0));
     }
 
 }
