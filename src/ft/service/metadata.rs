@@ -40,6 +40,68 @@ pub const METADATA_SIGNED_BYTE_B43_OFFSET: usize = 0xb43;
 /// Byte offset of this unsigned word in the metadata block.
 pub const METADATA_WORD_AF8_OFFSET: usize = 0xaf8;
 
+/// ft_service_metadata_halfword_at_b18 — original: `FUN_08051b50` @
+/// `0x08051b50` (16 bytes; two plain inbound BLs at 0x08173018 and
+/// 0x0817302c, zero predicated inbound BLs, zero outgoing BLs of either kind).
+///
+/// Raw words `e5900f00 e2800c0b e1d001b8 e12fff1e` establish the true
+/// extent [0x08051b50, 0x08051b60), ending at the independent b10 accessor.
+/// Follow the aligned metadata pointer at service_context+0xf00 and
+/// zero-extend the aligned halfword at metadata+0xb18. FUN_08172c6c
+/// compares/caches it at caller+0x50 and notifies virtually on change.
+/// The field's higher-level meaning remains unrecovered.
+/// Deliberate deviations: native-width host pointers, four-byte ARM pointers;
+/// no additional NULL or bounds checks.
+///
+/// # Safety
+/// `service_context` contains an aligned readable metadata pointer at +0xf00,
+/// whose pointee has an aligned readable halfword at +0xb18.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn ft_service_metadata_halfword_at_b18(
+    service_context: *const u8,
+) -> u32 {
+    let metadata = (service_context.add(SERVICE_CONTEXT_METADATA_OFFSET) as *const *const u8).read();
+    (metadata.add(0xb18) as *const u16).read() as u32
+}
+
+#[cfg(test)]
+mod halfword_b18_tests {
+    use super::*;
+
+    #[test]
+    fn zero_extension_exact_field_and_live_pointer_replacement() {
+        #[repr(C)]
+        struct Owner {
+            padding: [u8; SERVICE_CONTEXT_METADATA_OFFSET],
+            metadata: *const u16,
+        }
+        let mut metadata = [0xa5a5u16; 0xb18 / 2 + 2];
+        let mut replacement = [0x5a5au16; 0xb18 / 2 + 2];
+        let mut owner = Owner {
+            padding: [0xcc; SERVICE_CONTEXT_METADATA_OFFSET],
+            metadata: metadata.as_ptr(),
+        };
+        for value in [0u16, 1, 0xff, 0x100, 0x7fff, 0x8000, 0xabcd, u16::MAX] {
+            metadata[0xb18 / 2] = value;
+            replacement[0xb18 / 2] = !value;
+            let before = metadata;
+            let before_replacement = replacement;
+            owner.metadata = metadata.as_ptr();
+            assert_eq!(unsafe { ft_service_metadata_halfword_at_b18(
+                (&owner as *const Owner).cast()) }, u32::from_le_bytes([
+                    value as u8, (value >> 8) as u8, 0, 0]));
+            owner.metadata = replacement.as_ptr();
+            assert_eq!(unsafe { ft_service_metadata_halfword_at_b18(
+                (&owner as *const Owner).cast()) }, u32::from(!value));
+            assert_eq!(metadata, before);
+            assert_eq!(replacement, before_replacement);
+            assert_eq!(owner.metadata, replacement.as_ptr());
+            assert!(owner.padding.iter().all(|byte| *byte == 0xcc));
+        }
+    }
+}
+
 /// ft_service_metadata_halfword_at_b10 — original: `FUN_08051b60` @
 /// `0x08051b60` (16 bytes; two plain inbound BLs at 0x08172fe0 and
 /// 0x08172ff4, zero predicated inbound BLs, zero outgoing BLs).
