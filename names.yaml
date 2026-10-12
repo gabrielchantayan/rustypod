@@ -16,6 +16,53 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08046180
+    ghidra: FUN_08046180
+    name: plst_dispatch_matching_item
+    size: 184
+    sig: "void plst_dispatch_matching_item(const u8 *object, u8 *playlist, u32 selector, u32 reverse_flag, u32 ordinal, u32 dispatcher)"
+    module: ui/plst_dispatch_matching_item
+    status: ported
+    renames:
+      param_1/r0: object
+      param_2/r1/r9: playlist
+      param_3/r2: selector
+      param_4/r3/r10: reverse_flag
+      param_5/r5: ordinal
+      param_6/r11: dispatcher
+      r7: backend
+      r8: item_count
+      r4: index
+      r6: item
+      FUN_08051dc4: object_backend_for_kind
+      FUN_0805c220: tdat_element_addref_counters
+      FUN_08052728: ui_plst_slot_item_at
+      FUN_080e28c4: refresh_item_match
+      FUN_08046ac8: dispatch_if_optional_link_valid
+      FUN_0806c0b8: tdat_element_release_counters
+    notes: >-
+      Raw ARM establishes [0x08046180,0x08046238), 184 bytes; the next
+      real function starts with e92d4fff. Whole-image aligned word decoding
+      finds two incoming plain BLs (0x0817b444,0x08283fdc), zero predicated,
+      and six outgoing plain BLs, zero predicated. Resolve the backend and
+      retain its +0xf60 element. Snapshot the playlist header +0x2e u16
+      count via its +0x40 target pointer (NULL playlist means zero).
+      Scan indexed selector slots in the supplied direction, refreshing
+      each item's matching state through stock 0x080e28c4 with r2=0.
+      Only r0 is consumed; Ghidra's incidental r1 return is ignored.
+      Count down the ordinal only on matches, dispatch the selected item
+      with (item,dispatcher,NULL,0), then release the backend's reloaded
+      +0xf60 element. Exhaustion also releases; a zero slot returns without
+      release, deliberately preserving the original asymmetry. Negative
+      ordinals are unsigned countdowns. Known callees reuse Rust ports;
+      the refresh predicate is the only new firmware/host seam. The ARM
+      dispatch port is an assembly symbol, called via an extern declaration.
+      Host tests cover match ordinals, rejected items, early termination,
+      empty/exhausted scans, null-slot retention, and negative ordinals.
+      match.py reports 61 versus 46 instructions: LLVM frame and spills,
+      indirect BLX to the refresh predicate and a release tail branch.
+      Count load, scan bounds, countdown, early unreleased return and
+      post-dispatch reload/release preserve the original control flow.
   - address: 0x080470bc
     ghidra: FUN_080470bc
     name: array_record_initialize
