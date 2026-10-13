@@ -2687,7 +2687,7 @@ pub static ROM_THUNKS: [RomThunk; 158] = [
     RomThunk { thunk_addr: 0x08037fd8, rom_target: 0x22006e88, name: Some("iram_stream_buffer_initializer_veneer") },
     RomThunk { thunk_addr: 0x08037fe0, rom_target: 0x220072c0, name: None },
     RomThunk { thunk_addr: 0x08037fe8, rom_target: 0x22004450, name: None },
-    RomThunk { thunk_addr: 0x08037ff0, rom_target: 0x220085fc, name: None },
+    RomThunk { thunk_addr: 0x08037ff0, rom_target: 0x220085fc, name: Some("i2s_transfer_channel_teardown_veneer") },
     RomThunk { thunk_addr: 0x08037ff8, rom_target: 0x220083c4, name: Some("i2s_transfer_setup_iram") },
     RomThunk { thunk_addr: 0x08038000, rom_target: 0x220086c4, name: None },
     RomThunk { thunk_addr: 0x08038008, rom_target: 0x22008118, name: None },
