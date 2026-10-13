@@ -16,6 +16,33 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08027620
+    ghidra: FUN_08027620
+    name: obfuscated_byte_arithmetic_identity
+    size: 8
+    sig: "u32 obfuscated_byte_arithmetic_identity(u32 ignored_word, u32 arithmetic_word)"
+    module: app/obfuscated_second_word
+    status: ported
+    vars:
+      param_1/r0: ignored_word
+      param_2/r1: arithmetic_word
+      return/r0: arithmetic_word
+    notes: >-
+      Raw e1a00001 e12fff1e is MOV r0,r1; BX LR. True extent
+      [0x08027620,0x08027628) is eight bytes; the next real entry has
+      independent BLs at 0x082f91f4 and 0x08332acc. Whole-image aligned
+      A32 decoding verifies two plain inbound BLs at 0x083437b0 and
+      0x083486ac, zero predicated inbound BLs, and zero outgoing calls.
+      Callers FUN_0834358c and FUN_08348038 mask r1 to a byte, then
+      multiply and mask the result. Preserve all 32 bits of r1, ignore
+      r0, access no memory. Concrete argument types remain opaque; no
+      callee seams or behavioral deviations. Existing module registered.
+      Dedicated text section and inline-never retain a distinct patch
+      symbol. Host edge tests and full host suite pass; ARM release
+      build passes. Actual-source optimized executable smoke verifies
+      65536 full-width calls. match.py exits 1: stock MOV r0,r1; BX LR
+      versus PUSH {fp,lr}, MOV fp,sp, MOV r0,r1, POP {fp,pc}; return
+      semantics and balanced stack are preserved.
   - address: 0x08027628
     ghidra: FUN_08027628
     name: obfuscated_four_word_zero
