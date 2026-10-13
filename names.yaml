@@ -255115,3 +255115,36 @@ functions:
       the undecrypted region is invented. Deliberate deviation: no Rust
       port. Raw scans and ARM/Thumb objdump probes executed; no host
       behavior tests, ARM build, match.py or device verification claimed.
+  - address: 0x085065d8
+    ghidra: FUN_085065d8
+    name: zero_filled_unverified_entry_085065d8
+    size: 68
+    sig: "unknown; executable entry and ABI unverified"
+    status: identified
+    notes: >-
+      Deferred: raw osos.dec at file offset 0x005065d8 contains only
+      zero bytes throughout the assigned 68-byte range. Size 68 is
+      Ghidra's reported extent, not a verified function size. The maximal
+      containing zero-byte run is [0x08506218,0x08506894); the reported
+      end 0x0850661c is also zero-filled and is not a real function
+      boundary. A32 objdump with zero suppression disabled decodes
+      every assigned word as ANDEQ r0,r0,r0, with no return, veneer,
+      outgoing plain BL or predicated BL. Zero halfwords contain no
+      ARMv5 Thumb BL pair either.
+      Independent whole-image aligned raw A32 branch decoding finds
+      one plain incoming BL, word ebec06fe at 0x08a049d8, and zero
+      predicated incoming BLs; halfword-aligned ARMv5 Thumb BL decoding
+      finds zero incoming candidates. Ghidra's reported caller
+      FUN_08a049b8 contains bad-instruction warnings, coprocessor
+      operations and unknown live-in registers, not a verified callable
+      ABI. Raw caller bytes start 1f7c290210479978538f87e913abb37d6;
+      the BL encoding alone does not establish executable intent.
+      Full names.yaml contained no assigned-address or caller entry.
+      No true extent, next real function boundary, algorithm, argument
+      contract or callee identity can be established from these sources.
+      Faithful porting requires verified executable bytes and mapping;
+      no dependency on the undecrypted 0x083ee1c1-0x083f25ec region
+      is asserted. Deliberate deviation: no Rust implementation or seam.
+      Raw-byte probe, ARM objdump and independent branch scans executed;
+      no host behavior tests, ARM build, match.py or device verification
+      claimed.
