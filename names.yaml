@@ -253078,3 +253078,29 @@ functions:
       Requested match.py finds the exported symbol and exits 1 with stock
       BX LR versus balanced PUSH {fp,lr}; MOV fp,sp; POP {fp,pc}. No device
       execution claimed.
+
+  - address: 0x080276c0
+    ghidra: FUN_080276c0
+    name: saved_context_release_noop
+    size: 4
+    sig: "void *saved_context_release_noop(void *context)"
+    module: cxx/saved_context_release_noop
+    status: ported
+    renames:
+      param_1/r0: context
+      return/r0: context
+    notes: >-
+      Raw extent [0x080276c0,0x080276c4) contains only e12fff1e (BX LR).
+      Next entry has independent BL callers at 0x083438a8 and 0x08348188.
+      Complete aligned A32 decoding finds two plain inbound BLs at
+      0x082faa9c and 0x08312d7c, zero predicated BLs, zero outgoing calls,
+      and no aligned DATA address references. Callers load saved contexts
+      from sp+0x14c and sp+0x148 and discard r0. Concrete context type and
+      destructor identity remain unrecovered. No callees or seams.
+      Preserve r0 without accessing memory; accept NULL, unaligned, and
+      dangling addresses. Deliberate deviation: expose preserved r0 rather
+      than Ghidra void. Naked target assembly retains register transparency.
+      Host suite and ARM release build pass. Actual-source executable smoke
+      preserves 68 pointer identities and all 64 live storage bytes.
+      match.py reports an exact single-instruction match. No device execution
+      claimed.
