@@ -254408,3 +254408,37 @@ functions:
       mapping, instruction state, caller ABI, and real boundaries.
       No Rust implementation, host behavior tests, ARM build, match.py
       result, emulator execution, or device execution claimed.
+
+  - address: 0x0880967c
+    ghidra: FUN_0880967c
+    name: tlmt_record_prefix_data
+    size: 1
+    sig: "not an established callable function"
+    module: null
+    status: identified
+    notes: >-
+      Honest deferral: size 1 is Ghidra's reported extent, not a verified
+      executable extent. Raw osos.dec at file offset 0x80967c contains
+      words 00000000, 00000001, 000000ac, 544d4c54, 03000000,
+      ffff0001; 544d4c54 spells TLMT in little-endian bytes at
+      0x08809688. Surrounding words repeat ffffffff and ffff0080.
+      These bytes support a data-record interpretation, not an empty
+      destructor, veneer, or independently callable routine. No next
+      real function boundary or callable ABI is established.
+      Whole-image aligned ARMv5 A32 BL decoding independently finds
+      zero plain incoming candidates and one predicated candidate:
+      0x08587274 contains 0b0a0900 (BLEQ 0x0880967c). Its surrounding
+      words are 00000000, 08040807, 00000007, 04040c0b, 0b0b0c04,
+      0900090a, and 04040e0d; this table-like region does not establish
+      an executable caller. Whole-image halfword-aligned Thumb BL
+      decoding finds zero incoming candidates. Ghidra's assembly
+      instead decodes the assigned address as Thumb mov r0,r0 and
+      subsequent ffff halfwords as calls; decompiled C uses incoming
+      r5 and LR without establishing an ABI and runs across neighboring
+      records. No outgoing calls or algorithm can be verified from
+      a one-byte reported extent. Full names.yaml had no existing
+      entry at this address. No callee seam or Rust implementation
+      created. Faithful porting requires an established executable
+      mapping, instruction state, caller ABI, and real code boundaries.
+      No behavioral tests, ARM build, match.py comparison, or device
+      execution claimed for this data-only identification.
