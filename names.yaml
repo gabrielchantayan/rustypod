@@ -252928,3 +252928,27 @@ functions:
       cannot find the folded label; comparison with verified no_op_u32
       alias exits 1, showing PUSH/MOV/POP versus stock BX LR, no calls or
       r0 changes. No device execution claimed.
+
+  - address: 0x08028530
+    ghidra: FUN_08028530
+    name: empty_destructor_08028530
+    size: 4
+    sig: "void *empty_destructor_08028530(void *object)"
+    module: cxx/empty_destructor_08028530
+    status: ported
+    vars:
+      param_1/r0: object
+    notes: >-
+      Raw word e12fff1e is BX LR, with true extent [0x08028530,0x08028534).
+      The next entry is separately called at 0x082ea294 and 0x082ea47c.
+      Full-image aligned ARM decoding verifies two incoming plain BLs at
+      0x082ea28c and 0x082ea474, zero predicated BLs, zero direct tail
+      branches, zero outgoing calls, and no aligned address literals.
+      Both callers pass saved cleanup objects; concrete owner type remains
+      unrecovered. No veneer or virtual-dispatch evidence. Access no memory
+      and preserve incoming r0, including NULL and unaligned addresses.
+      No semantic deviations or new seams; dedicated section prevents
+      identical-body folding. LLVM adds balanced FP/LR stack traffic:
+      match.py exits 1, one stock BX LR versus PUSH/MOV/POP in Rust.
+      Host suite passes 15858 tests; ARM release build passes. Actual-source
+      executable smoke verifies pointer identity and unchanged live storage.
