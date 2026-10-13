@@ -253052,3 +253052,29 @@ functions:
       preserves 100000 generated output words. Requested match.py comparison
       finds the exported symbol and reports an exact one-instruction match
       against the reachable original BX LR. No device execution claimed.
+
+  - address: 0x080276c4
+    ghidra: FUN_080276c4
+    name: opaque_context_cleanup_noop
+    size: 4
+    sig: "void *opaque_context_cleanup_noop(void *context)"
+    module: cxx/opaque_context_cleanup_noop
+    status: ported
+    renames:
+      param_1/r0: context
+    notes: >-
+      Raw extent 0x080276c4..0x080276c8 is exactly e12fff1e (BX LR).
+      Next entry starts CMP r0,#0 and has independent callers. Complete
+      aligned ARM decoding verifies two plain BL callers at 0x083438a8
+      and 0x08348188, zero predicated BL callers, and no aligned address
+      literals. Both callers pass saved context values and discard r0.
+      Concrete context type and destructor identity remain unrecovered;
+      this is not a veneer. No callees or new seams. Preserve incoming r0
+      and access no memory, including for NULL, unaligned, or dangling
+      addresses. Deliberate deviation is exposing preserved r0 instead of
+      Ghidra void. A dedicated text section prevents identical-body folding.
+      Host suite and ARM release build pass. Actual-source executable smoke
+      preserves 67 pointer identities and all 64 live storage bytes.
+      Requested match.py finds the exported symbol and exits 1 with stock
+      BX LR versus balanced PUSH {fp,lr}; MOV fp,sp; POP {fp,pc}. No device
+      execution claimed.
