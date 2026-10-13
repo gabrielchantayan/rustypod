@@ -255906,3 +255906,37 @@ functions:
       deletion, and final publication remain; LLVM uses the proven
       identity destructor return to delete the saved old base, replaces
       predication with branching, and adds frame setup. No device run.
+  - address: 0x083e71d8
+    ghidra: FUN_083e71d8
+    name: owned_observable_array_slot_replace_38
+    size: 56
+    sig: "void owned_observable_array_slot_replace_38(void **slot, void *replacement)"
+    module: app/owned_observable_array_slot_replace_38
+    vars: {param_1: slot, param_2: replacement, iVar1: old_array, FUN_08271d2c: observable_array_destruct, FUN_082aad24: operator_delete}
+    status: ported
+    notes: >-
+      Raw A32 extent [0x083e71d8,0x083e7210) is fourteen words ending
+      with pop at 0x083e720c before the next independent push. Whole-image
+      aligned BL decoding finds one incoming plain BL at 0x081fa77c,
+      zero predicated incoming BLs, two outgoing plain BLs at 0x083e71fc
+      and 0x083e7204, and zero predicated outgoing BLs. The caller passes
+      its member at +0x38 and a newly constructed 20-byte allocation.
+      Identity leaves the slot untouched. Otherwise destroy non-NULL old+4,
+      tag-2 delete the destructor return minus four, then publish the saved
+      replacement. Ghidra's noreturn annotation on delete is incorrect.
+      Reuses the identical slot helper and canonical ported callees;
+      existing helper tests cover clearing, redirected destructor returns,
+      teardown ordering and callback mutation. Added public-entry edge
+      test covers NULL identity, adoption and identity with invalid payload.
+      Host pointers widen; array fields retain target-word layout. Host
+      test suite and ARM release build pass. Standalone entry smoke passes
+      NULL identity, adoption and live identity with forbidden teardown
+      seams; it does not exercise actual host teardown. ARM objdump confirms
+      this export shares section, offset and 60-byte size with
+      owned_observable_array_slot_replace: intentional identical-body
+      folding. Requested match.py cannot find the alias heading; matching
+      the shared canonical symbol exits 1 with fifteen Rust versus fourteen
+      stock instructions. Equality and NULL guards, two calls and final
+      publication remain; LLVM uses the proven identity destructor return
+      to delete the saved old base, uses branches instead of predication,
+      and adds frame setup. Archive BL relocations are unresolved. No device run.
