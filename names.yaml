@@ -252131,3 +252131,41 @@ functions:
       boundary smoke covering six mode boundaries and adjacent guards).
       ARM build-std release succeeds. Default match.py reports the omitted
       literal and relocated operand comment, not a changed dispatch.
+
+  - address: 0x08038110
+    ghidra: thunk_EXT_FUN_2200508c
+    name: ui_manager_dispatch_payload_veneer
+    size: 8
+    sig: "void ui_manager_dispatch_payload_veneer(u8 *manager, u32 key, u32 count, const u32 *payload)"
+    module: kernel/thunks
+    status: ported
+    renames:
+      DAT_08038114: ui_manager_payload_dispatch_target
+      r0: manager
+      r1: key
+      r2: count
+      r3: payload
+    notes: >-
+      Raw words 0xe51ff004 and 0x2200508c encode ldr pc,[pc,#-4]
+      and its target literal. Next real veneer starts at 0x08038118,
+      proving eight bytes rather than Ghidra four. Whole-image aligned
+      ARM decoding independently finds two plain BL callers at 0x081b0acc
+      and 0x081b1008, zero predicated BL callers, and no outgoing BL.
+      The target is IRAM-mirrored osos, not mask ROM: 0x0800508c adds
+      eight to r0 and tail-branches at 0x08005090 to 0x08003700,
+      whose veneer literal is 0x0815c830. The next mirror function starts
+      at 0x08005094. Callers pass manager, key, count and stack payload.
+      Neither assigned address nor either proposed downstream address had
+      an existing mapping. Only the assigned veneer is ported; no callee
+      identity or downstream implementation is invented. ARM preserves
+      all registers and LR with the exact original eight-byte dispatch.
+      Host requires an explicit handler. Existing byte-halfword caller
+      now uses this veneer instead of a duplicated numeric target seam.
+      Host boundary edge coverage is transient because forwarding has no
+      independent algorithm warranting permanent tests.
+      Full host suite passes 15824 tests including transient synchronous
+      smoke with zero-count/null payload and one-word payload, maximum key,
+      adjacent guards and observable handler mutation. ARM build-std release
+      succeeds. Default match.py exits one only for relocated operand
+      comments and inclusion of the literal omitted by Ghidra size four.
+      No device execution was performed.

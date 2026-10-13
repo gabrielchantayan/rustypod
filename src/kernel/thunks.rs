@@ -1979,6 +1979,62 @@ pub type UiManagerResetSequenceFn = unsafe extern "C" fn(*mut u8, u32) -> u32;
 #[cfg(not(target_arch = "arm"))]
 pub static mut UI_MANAGER_RESET_SEQUENCE_DISPATCH: Option<UiManagerResetSequenceFn> = None;
 
+/// ABI used by callers of the UI manager payload-dispatch veneer.
+pub type UiManagerDispatchPayloadFn =
+    unsafe extern "C" fn(*mut u8, u32, u32, *const u32);
+
+/// Host replacement for the unported payload dispatcher; unset is an error.
+#[cfg(not(target_arch = "arm"))]
+pub static mut UI_MANAGER_DISPATCH_PAYLOAD: Option<UiManagerDispatchPayloadFn> = None;
+
+/// ui_manager_dispatch_payload_veneer — original: `thunk_EXT_FUN_2200508c`
+/// @ 0x08038110, 8 bytes including literal; next real veneer @ 0x08038118.
+///
+/// Raw words 0xe51ff004 and 0x2200508c load PC from the following literal,
+/// preserving r0-r3 and LR. Whole-image aligned A32 decoding verifies two
+/// incoming plain BLs (0x081b0acc, 0x081b1008), zero predicated BLs,
+/// and no outgoing BL. The IRAM target mirrors osos @ 0x0800508c:
+/// add eight to the manager pointer, then tail-branch to 0x08003700,
+/// whose literal dispatches to 0x0815c830. Callers pass manager, key,
+/// count and synchronous payload pointer; no target identity is invented.
+///
+/// Deliberate deviations: none on ARM, including all register preservation.
+/// Only this veneer is ported; hosts require an explicit handler, not a
+/// simulation of the unported dispatcher.
+#[cfg(target_arch = "arm")]
+extern "C" {
+    pub fn ui_manager_dispatch_payload_veneer(
+        manager: *mut u8, key: u32, count: u32, payload: *const u32,
+    );
+}
+
+#[cfg(not(target_arch = "arm"))]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn ui_manager_dispatch_payload_veneer(
+    manager: *mut u8, key: u32, count: u32, payload: *const u32,
+) {
+    let dispatch = core::ptr::read_volatile(
+        core::ptr::addr_of!(UI_MANAGER_DISPATCH_PAYLOAD),
+    ).expect("UI payload dispatch requires a host handler");
+    dispatch(manager, key, count, payload)
+}
+
+#[cfg(target_arch = "arm")]
+core::arch::global_asm!(
+    r#"
+    .syntax unified
+    .text
+    .p2align 2
+    .globl ui_manager_dispatch_payload_veneer
+    .type ui_manager_dispatch_payload_veneer, %function
+ui_manager_dispatch_payload_veneer:
+    ldr     pc, [pc, #-4]
+    .word   0x2200508c
+    .size ui_manager_dispatch_payload_veneer, . - ui_manager_dispatch_payload_veneer
+"#
+);
+
 /// ui_manager_reset_sequence_veneer — original: `thunk_EXT_FUN_220055f8`
 /// @ 0x08038120, 8 bytes including its literal; next veneer @ 0x08038128.
 ///
@@ -2523,7 +2579,7 @@ pub static ROM_THUNKS: [RomThunk; 158] = [
     RomThunk { thunk_addr: 0x080380f8, rom_target: 0x22006f40, name: None },
     RomThunk { thunk_addr: 0x08038100, rom_target: 0x22007c6c, name: None },
     RomThunk { thunk_addr: 0x08038108, rom_target: 0x22007c74, name: None },
-    RomThunk { thunk_addr: 0x08038110, rom_target: 0x2200508c, name: None },
+    RomThunk { thunk_addr: 0x08038110, rom_target: 0x2200508c, name: Some("ui_manager_dispatch_payload_veneer") },
     RomThunk { thunk_addr: 0x08038118, rom_target: 0x22007530, name: None },
     RomThunk { thunk_addr: 0x08038120, rom_target: 0x220055f8, name: Some("ui_manager_reset_sequence_veneer") },
     RomThunk { thunk_addr: 0x08038128, rom_target: 0x220052ec, name: None },
