@@ -16,6 +16,31 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080044ac
+    ghidra: FUN_080044ac
+    name: stream_buffer_refill_floor_request
+    size: 28
+    sig: "u32 stream_buffer_refill_floor_request(void)"
+    module: app/buffer_transition_controller
+    status: ported
+    vars:
+      DAT_080044c4: stream_buffer_request_controller
+      r2: controller
+      r0: requested_level
+      FUN_080029ac: stream_buffer_transition_controller
+    notes: >-
+      Raw extent [0x080044ac,0x080044c8) is 28 bytes: six ARM instructions
+      and the 0x2200aebc literal at 0x080044c4. The next independent
+      push {r4,r5,r6,lr} starts at 0x080044c8. Whole-image raw A32
+      decoding finds two plain inbound BLs at 0x08006d08 and 0x08006e7c,
+      no predicated inbound BLs, and no outgoing BLs. Reads controller
+      flags, writes 1 & !(flags >> 7) to requested level at +0x10, and
+      tail-enters 0x080029ac; returns the controller result. Reuses the
+      existing Rust controller and its host six-word mirror, not a new
+      callee seam. Host tests cover both bit-7 states, unrelated flags,
+      stale-level replacement, pending-request clamp, and inhibited writes.
+      ARM match shows the same load/BIC/store/tail-transfer core, with
+      LLVM adding a frame push/pop and a relocatable Rust-controller branch.
   - address: 0x0800cbe8
     ghidra: FUN_0800cbe8
     name: reverse_affine_table_words

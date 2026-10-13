@@ -396,6 +396,28 @@ pub unsafe extern "C" fn stream_buffer_transition_inhibit_raise(requested_inhibi
     stream_buffer_transition_controller()
 }
 
+/// stream_buffer_refill_floor_request — original: `FUN_080044ac` @
+/// `0x080044ac`. True extent: 28 bytes up to `0x080044c8`, comprising
+/// 24 instruction bytes and the `0x2200aebc` literal at `0x080044c4`.
+///
+/// Raw A32 decoding verifies two plain inbound BLs (`0x08006d08`,
+/// `0x08006e7c`), zero predicated inbound BLs, and zero outgoing BLs.
+/// Read the controller flags and store `1 & !(flags >> 7)` to its requested
+/// level word (+0x10), then enter the shared transition controller. Bit 7
+/// selects zero rather than one; other flags do not affect this write.
+///
+/// Deliberate deviations: call the existing Rust controller instead of the
+/// stock tail branch to `0x080029ac`; LLVM chooses the transfer encoding.
+/// Host builds reuse the existing six-word controller mirror and callee seams.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn stream_buffer_refill_floor_request() -> u32 {
+    let controller = request_controller_ptr();
+    let flags = core::ptr::read_volatile(controller);
+    core::ptr::write_volatile(controller.add(4) as *mut u32, 1 & !(flags >> 7));
+    stream_buffer_transition_controller()
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -708,5 +730,49 @@ mod tests {
             u32::MAX
         );
         assert_eq!(log(), ["wait_zero"]);
+    }
+
+    #[test]
+    fn refill_floor_request_replaces_stale_level_and_applies_bit_seven_floor() {
+        for flags in [0u32, REQUEST_LEVEL_PENDING, LEVEL_FLOOR_DISABLE,
+            REQUEST_LEVEL_PENDING | LEVEL_FLOOR_DISABLE]
+        {
+            let (_guard, _reset) = arrange(flags, 9);
+            unsafe {
+                STREAM_BUFFER_REQUEST_CONTROLLER.requested_level = u32::MAX;
+                STREAM_BUFFER_REQUEST_CONTROLLER._reserved_04_08 = [0x1234, 0xabcd];
+                WAIT_EQUAL_RESULT = 0xdead_beef;
+            }
+            assert_eq!(unsafe { stream_buffer_refill_floor_request() }, 0xdead_beef);
+            let requested = if flags & LEVEL_FLOOR_DISABLE == 0 { 1 } else { 0 };
+            unsafe {
+                assert_eq!(STREAM_BUFFER_REQUEST_CONTROLLER.requested_level, requested);
+                assert_eq!(STREAM_BUFFER_REQUEST_CONTROLLER.flags, flags);
+                assert_eq!(STREAM_BUFFER_REQUEST_CONTROLLER._reserved_04_08, [0x1234, 0xabcd]);
+                assert_eq!(STREAM_BUFFER_REQUEST_CONTROLLER.base_level, 9);
+                assert_eq!(WAIT_EQUAL_LEVEL,
+                    if flags & REQUEST_LEVEL_PENDING != 0 { requested } else { 9 });
+            }
+            assert_eq!(log(), ["gate", "dispatch", "history", "wait_equal"]);
+        }
+    }
+
+    #[test]
+    fn refill_floor_request_writes_even_when_transition_is_inhibited() {
+        for flags in [0x7fu32, 0x80, 0x8000_0000, u32::MAX] {
+            let (_guard, _reset) = arrange(flags, 9);
+            unsafe {
+                STREAM_BUFFER_REQUEST_CONTROLLER.inhibit = u32::MAX;
+                STREAM_BUFFER_REQUEST_CONTROLLER.requested_level = 99;
+                WAIT_ZERO_RESULT = 0xcafe;
+            }
+            assert_eq!(unsafe { stream_buffer_refill_floor_request() }, 0xcafe);
+            let requested = if flags & 0x80 == 0 { 1 } else { 0 };
+            unsafe {
+                assert_eq!(STREAM_BUFFER_REQUEST_CONTROLLER.requested_level, requested);
+                assert_eq!(STREAM_BUFFER_REQUEST_CONTROLLER.inhibit, u32::MAX);
+            }
+            assert_eq!(log(), ["wait_zero"]);
+        }
     }
 }
