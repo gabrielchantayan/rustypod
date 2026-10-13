@@ -253794,3 +253794,48 @@ functions:
       native example linking was unavailable (staticlib-only configuration;
       host rlib compilation also encounters existing unresolved symbols).
       No device execution claimed.
+  - address: 0x08003c98
+    ghidra: FUN_08003c98
+    name: gateway_service22_range_request
+    size: 104
+    sig: "u32 gateway_service22_range_request(u32 object, u32 mode, u32 address, u32 length, u32 argument)"
+    status: identified
+    vars:
+      param_1: object
+      param_2: mode
+      param_3: address
+      param_4: length
+      param_5: argument
+      local_24: service_selector
+      local_20: status
+      local_14: aligned_start
+      local_10: aligned_length
+      FUN_08003660: message_dispatch_veneer
+    notes: >-
+      Raw ARM extent is [0x08003c98,0x08003d00), 104 bytes; the next
+      push-lr prologue starts at 0x08003d00. Independent raw-word decoding
+      finds two outbound plain BLs at 0x08003ce8 and 0x08003cf0, targeting
+      0x08003668 and 0x08003660 respectively, and no predicated BLs.
+      Whole-image aligned decoding finds two inbound plain BLs at
+      0x08003aa4 and 0x08003ad8, with no predicated BL callers.
+      Builds the seven-word request {22, 0, object, mode, aligned_start,
+      aligned_length, argument}; aligned_start is (address+7)&~7 and
+      aligned_length is ((address+length)&~7)-aligned_start, all wrapping
+      at 32 bits. Calls the first veneer with the original address and
+      length, dispatches the request through the established
+      message_dispatch_veneer, then returns rewritten request word one.
+      Blocked on the first foreign entry contract: raw words at
+      0x08003668/0x0800366c are e51ff004/08386e64, but 0x08386e64 is
+      caffffee (BGT 0x08386e24), followed at 0x08386e68 by e8bd87f0
+      (POP {r4-r10,pc}). This is the loop tail of the routine starting
+      at 0x08386e08, not an ordinary two-argument function entry.
+      The assigned caller saves only LR and reserves 36 bytes; it neither
+      establishes that routine's register state nor defines condition
+      flags with its non-S arithmetic before calling the veneer.
+      A normal Rust callback would not preserve this undocumented flag
+      and stack contract. No existing names.yaml entry identifies the
+      assigned address, first veneer, or literal target. The Ghidra
+      zero-argument indirect-call model is insufficient evidence.
+      Need verified runtime veneer retargeting or the actual foreign
+      entry ABI before a faithful port; no callee identity is invented.
+      No Rust implementation, host tests, ARM build, or match claimed.
