@@ -254885,6 +254885,32 @@ functions:
       Deliberate deviation: no Rust port. Raw branch scans and A32/Thumb
       objdump probes executed; no host behavior tests, ARM build, match.py
       or device behavior verification claimed.
+  - address: 0x087f5424
+    ghidra: FUN_087f5424
+    name: structured_data_record_00cf_sentinel
+    size: 4
+    sig: "data word; executable ABI unverified"
+    status: identified
+    notes: >-
+      Deferred: raw osos.dec word is ffffffff, undefined in A32 and
+      not an ARMv5 Thumb BL pair (the first halfword must be f000..f7ff).
+      Ghidra's one-byte function and BL #0xffe listing are unsupported.
+      Record [0x087f5410,0x087f542c) contains 00000014, 00000000,
+      000000cf, 0dad016d, 0dad0174, ffffffff, 0200ffff. The assigned
+      word is its sentinel. Records at 0x087f542c, 0x087f5448 and
+      0x087f5464 have identifiers d0, d1 and d2 and repeat this pattern.
+      Size 4 describes a data word, not a verified executable extent.
+      Whole-image aligned raw A32 BL decoding finds zero plain incoming
+      candidates and one predicated candidate: 0b030b03 at 0x08732810
+      decodes as BLEQ 0x087f5424. Surrounding repeated 03/0b, 05/0b and
+      06/0b byte pairs are table-like data, not a verified executable
+      caller. Whole-image halfword-aligned ARMv5 Thumb BL decoding finds
+      zero incoming candidates. The assigned word has zero plain or
+      predicated A32 BL instructions and zero ARMv5 Thumb BL pairs.
+      No true function extent, next real executable boundary, caller ABI
+      or callee identity is established; faithful porting requires those.
+      Deliberate deviation: no Rust port or invented seam. Raw scans and
+      A32/Thumb objdump probes executed; no ARM build or match.py claimed.
   - address: 0x087f5428
     ghidra: FUN_087f5428
     name: structured_data_record_00cf_trailer
