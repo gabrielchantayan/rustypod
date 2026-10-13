@@ -254311,3 +254311,33 @@ functions:
       faithful Rust port; an ordinary C seam would invent that contract.
       No Rust implementation, host tests, ARM build, match result,
       emulator execution, or device execution claimed.
+
+  - address: 0x0897f388
+    ghidra: FUN_0897f388
+    name: unresolved_instruction_stream_0897f388
+    status: identified
+    notes: >-
+      Deferred: supplied raw bytes do not establish a callable function,
+      algorithm, ABI, or true extent. Ghidra reports 13 bytes and lists
+      0x0897f396 as the next function; neither is a verified real boundary.
+      Raw words at 0x0897f388 are 001c8010, 8008c900, a04a1800,
+      08038077. A32 decoding begins ANDSEQ r8,ip,r0,LSL r0;
+      ANDHI ip,r8,r0,LSL #18; SUBGE r1,r10,r0,LSL #16;
+      STMDAEQ r3,{r0,r1,r2,r4,r5,r6,pc}. Thumb decoding begins
+      STRH r0,[r2]; MOVS r4,r3; LDMIA r1!,{} at 0x0897f38c;
+      STRH r0,[r1]; ADDS r0,r0,r0; ADR r0,0x0897f4bc;
+      STRH r7,[r6,#2]. Neither stream supplies a verified return.
+      Whole-image aligned A32 immediate BL decoding independently finds
+      zero plain and one predicated incoming candidate: cb000003,
+      BLGT at 0x0897f374. Nearby word f0004008 at 0x0897f37c
+      is undefined in A32; this candidate is not proof of executable
+      caller code. No outgoing A32 BL occurs in the reported extent.
+      Ghidra's Thumb listing has no direct BL to this address; its C
+      contains bad-instruction warnings, uninitialized register inputs,
+      indirect calls, and halt_baddata, not a reliable function model.
+      Full names.yaml contains no prior entry for the assigned address.
+      Need verified executable mapping, instruction state, caller ABI,
+      and real function boundaries before faithful implementation.
+      No callee identity, signature, size, or replacement behavior
+      invented. No Rust implementation, host tests, ARM build,
+      match.py result, emulator execution, or device execution claimed.
