@@ -255870,3 +255870,39 @@ functions:
       Equality and NULL guards, virtual slot +0x04, and the post-callback
       store are preserved; explicit branches replace predication and frame
       allocation differs. No device execution claimed.
+
+  - address: 0x083e724c
+    ghidra: FUN_083e724c
+    name: owned_observable_array_slot_replace_2c
+    size: 56
+    sig: "void owned_observable_array_slot_replace_2c(void **slot, void *replacement)"
+    module: app/owned_observable_array_slot_replace_2c
+    vars: {param_1: slot, param_2: replacement, iVar1: old_array, FUN_08271d2c: observable_array_destruct, FUN_082aad24: operator_delete}
+    status: ported
+    notes: >-
+      Raw A32 verifies fourteen words at [0x083e724c,0x083e7284),
+      ending in pop before the next independent push at 0x083e7284.
+      Whole-image aligned BL decoding finds one incoming plain BL at
+      0x081fa858 and no predicated BLs. Two outgoing plain BLs at
+      0x083e7270 and 0x083e7278 call the canonical ported
+      observable_array_destruct and operator_delete; no predicated BLs.
+      Caller 0x081fa810 passes its pointer member at +0x2c and a newly
+      allocated 20-byte object. Identity skips all teardown and writes.
+      Otherwise destroy the non-NULL old object's array at +4, tag-2
+      delete the destructor return minus four, then publish replacement.
+      Ghidra incorrectly marks delete noreturn. Reuses the identical
+      0x083e7544 algorithm, including volatile slot access and existing
+      edge coverage for clearing, redirected destructor returns, and
+      callback mutation before publication. Native slot pointers widen
+      on hosts; the array retains target-word layout. Host tests and ARM
+      release build pass. Standalone public-entry smoke with host test
+      seams passes empty identity, adoption, and live identity; ordinary
+      non-test host library builds hit four unrelated missing functions.
+      ARM objdump verifies both slot-replacement exports share section,
+      offset, and 60-byte size: intentional LLVM identical-body folding.
+      match.py cannot find the alias heading; comparison through
+      owned_observable_array_slot_replace exits 1 with fifteen versus
+      fourteen instructions. Identity and NULL guards, array +4 teardown,
+      deletion, and final publication remain; LLVM uses the proven
+      identity destructor return to delete the saved old base, replaces
+      predication with branching, and adds frame setup. No device run.

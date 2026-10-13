@@ -15,7 +15,7 @@ use crate::cxx::observable_array::{observable_array_destruct, ObservableArray};
 use crate::heap::veneers::operator_delete;
 
 #[inline(always)]
-unsafe fn replace_with(
+pub(super) unsafe fn replace_with(
     slot: *mut *mut u8, replacement: *mut u8,
     destroy: impl FnOnce(*mut ObservableArray) -> *mut ObservableArray,
     delete: impl FnOnce(*mut u8),
