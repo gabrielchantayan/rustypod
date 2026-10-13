@@ -65,6 +65,17 @@ tail_call_retail_080cc22c:
 "#
 );
 
+#[cfg(target_arch = "arm")]
+unsafe extern "C" {
+    pub fn tail_call_retail_080cc22c(object: *mut u8) -> u32;
+}
+
+#[cfg(test)]
+extern crate std;
+#[cfg(test)]
+pub(crate) static RETAIL_080CC22C_TEST_LOCK: std::sync::Mutex<()> =
+    std::sync::Mutex::new(());
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -72,9 +83,7 @@ mod tests {
         TAIL_CALL_RETAIL_080CC22C_TARGET, tail_call_retail_080cc22c,
     };
     extern crate std;
-    use std::sync::Mutex;
-
-    static TEST_LOCK: Mutex<()> = Mutex::new(());
+    use super::RETAIL_080CC22C_TEST_LOCK as TEST_LOCK;
     static mut CALLS: u32 = 0;
     static mut OBSERVED_OBJECT: *mut u8 = core::ptr::null_mut();
 
