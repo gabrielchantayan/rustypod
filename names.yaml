@@ -251855,3 +251855,33 @@ functions:
       Full host suite passes 15813 tests; ARM release build passes.
       match.py exits 1: stock LDR/B versus LDR/LDR-PC plus two literals,
       verifying the descriptor and placement-independent absolute destination.
+
+  - address: 0x08039a64
+    ghidra: FUN_08039a64
+    name: release_opaque_allocation_08906180
+    size: 12
+    sig: "void release_opaque_allocation_08906180(void *allocation)"
+    module: cxx/opaque_allocation_release_08906180
+    status: ported
+    renames:
+      param_1/r0: allocation
+      DAT_08039a6c/r1: opaque_allocation_descriptor_08906180
+      FUN_0803b3a4: typed_allocation_release_helper
+    notes: >-
+      Raw osos.dec words e59f1000 ea00064d 08906180 establish the true
+      twelve-byte extent [0x08039a64,0x08039a70), including the descriptor
+      literal omitted by Ghidra's eight-byte size. The next independent
+      function starts with mov r2,r1,asr #31 at 0x08039a70. Whole-image ARM
+      BL decoding finds two plain calls at 0x080ce378 and 0x080ce4b4, zero
+      predicated calls, and no outbound BL. Load opaque descriptor 0x08906180
+      into r1 and tail-transfer unchanged r0 to the existing ported helper
+      0x0803b3a4. Callers release temporary query results after reading their
+      payloads. No concrete descriptor type or NULL guard is invented.
+      Reuse the existing type-erased release engine seam with mode zero.
+      Deliberate deviations: ARM uses a placement-independent LDR PC tail
+      transfer instead of B (16 emitted bytes); hosts use the existing Rust
+      helper. Host regression and standalone actual-source execution verify
+      owned payload destruction exactly once and NULL delegation with the
+      exact descriptor and zero mode. Full host suite and ARM release build
+      pass. match.py exits 1 with the expected LDR/B versus LDR/LDR-PC and
+      two literal words, verifying descriptor and absolute tail destination.
