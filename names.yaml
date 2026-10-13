@@ -255940,3 +255940,32 @@ functions:
       publication remain; LLVM uses the proven identity destructor return
       to delete the saved old base, uses branches instead of predication,
       and adds frame setup. Archive BL relocations are unresolved. No device run.
+  - address: 0x083e6cd0
+    ghidra: FUN_083e6cd0
+    name: vector_halfword_clear
+    size: 84
+    sig: "void vector_halfword_clear(VectorBounds *vector)"
+    module: cxx/vector_halfword_clear
+    vars: {param_1: vector, puVar3: begin, puVar4: end, puVar1: source_cursor, puVar2: destination_cursor}
+    status: ported
+    notes: >-
+      Raw A32 extent [0x083e6cd0,0x083e6d24) ends with pop at
+      0x083e6d20 before the next independent push. Whole-image aligned
+      word decoding verifies one incoming plain BL at 0x0816f3a8,
+      zero predicated incoming BLs and zero outgoing plain or predicated
+      BLs. Caller 0x0816f388 clears its vector member at +0x68 before
+      reserving halfword storage through 0x083e6d24. Clears a vector of
+      two-byte elements while retaining allocation, capacity and bytes.
+      The copy loop has equal initial bounds and never executes; the
+      halfword cursor walk is inert. For valid ordered halfword bounds,
+      the final masked span subtraction reduces to end = begin.
+      Rust omits those loops and requires valid bounds rather than
+      emulate malformed bounds that can loop forever. Reuses VectorBounds,
+      whose native host pointers retain adjacent target words on ARM.
+      Host suite passes 15962 tests, including null empty bounds, lengths
+      zero through five, unchanged element bytes and capacity, and repeated
+      clearing. Standalone public-entry smoke passes populated-to-empty
+      and repeated clearing with unchanged storage. ARM release build
+      passes. match.py exits 1 with six Rust versus twenty-one original
+      instructions; equality guard and conditional end store remain,
+      while dead loops and span arithmetic disappear. No device execution.
