@@ -252696,3 +252696,38 @@ functions:
       match.py exits 1: 25 stock versus 27 Rust instructions; the distinct
       exported symbol retains all twelve byte loads and twelve byte stores,
       with LLVM register scheduling and a frame-pointer prologue/epilogue.
+
+  - address: 0x0802e154
+    ghidra: FUN_0802e154
+    name: block_inv_sub_bytes
+    size: 60
+    sig: "void block_inv_sub_bytes(u8 *state)"
+    module: crypto/block_inv_sub_bytes
+    status: ported
+    vars:
+      param_1/r0: state
+      r1: byte_index
+      r2: word_index
+      r3: word_pointer
+      r12: substituted_byte
+      lr: substitution_table
+    notes: >-
+      Raw A32 extent [0x0802e154, 0x0802e190) is 15 instructions, ending
+      in POP {pc} before the next function's LDRB. Full-image aligned
+      word decoding verifies two incoming plain BLs at 0x0802e6dc and
+      0x0802e714, zero incoming predicated BLs, and zero outgoing calls.
+      The inverse-round caller at 0x0802e674 supplies a transposed 16-byte
+      state. Replace every byte in four groups of four through the table
+      selected by the literal at 0x0802e948, pointing to 0x0891ef4c.
+      All 256 embedded table bytes match osos.dec; this is not the standard
+      AES inverse S-box and is not assumed to be a permutation. Moved the
+      misplaced printf implementation and table to crypto without an alias.
+      No ABI or byte-mapping deviations; the table is relocated to Rust
+      read-only data and independent ordinary RAM accesses may be reordered.
+      Host tests cover unaligned state, adjacent sentinels, boundary indices,
+      duplicate outputs, and repeated substitution. Firmware-driven smoke
+      exercises 1024 states, every index at every position and four alignments.
+      Host suite passes 15845 tests; release ARM build passes. match.py exits
+      1 with 15 stock versus 53 Rust instructions including the table literal:
+      LLVM unrolls the loops into sixteen byte lookups, adds a frame, and
+      retains no outgoing calls. The exported symbol remains a real target.
