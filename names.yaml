@@ -16,6 +16,38 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08027618
+    ghidra: FUN_08027618
+    name: obfuscated_six_word_zero
+    size: 8
+    sig: "u32 obfuscated_six_word_zero(u32 first, u32 second, u32 third, u32 fourth, u32 fifth, u32 sixth)"
+    module: app/obfuscated_zero_word
+    status: ported
+    vars:
+      param_1/r0: ignored_first_word
+      param_2/r1: ignored_second_word
+      param_3/r2: ignored_third_word
+      param_4/r3: ignored_fourth_word
+      param_5/stack_0: ignored_fifth_word
+      param_6/stack_4: ignored_sixth_word
+      return/r0: zero_word
+    notes: >-
+      Raw e3a00000 e12fff1e is MOV r0,#0; BX LR. True extent
+      [0x08027618,0x08027620) is eight bytes; the next real entry
+      is the independently called obfuscated_byte_arithmetic_identity.
+      Whole-image aligned A32 decoding verifies two plain inbound BLs
+      at 0x08343770 and 0x08348664, zero predicated inbound BLs,
+      and zero outgoing calls. Callers FUN_0834358c and FUN_08348038
+      supply six opaque register/stack words and store the returned zero.
+      Ignore all inputs, return zero, access no memory. Concrete types
+      remain unknown; no callee seams or behavioral deviations.
+      Existing module is registered. Dedicated text section and
+      inline-never retain an independently patchable target.
+      Host edge tests and full host suite pass; ARM release build passes.
+      Optimized actual-source executable smoke verifies 65536 calls.
+      match.py exits 1: stock MOV r0,#0; BX LR versus PUSH {fp,lr},
+      MOV fp,sp, MOV r0,#0, POP {fp,pc}. Zero return semantics and
+      balanced stack are preserved; the patch symbol remains distinct.
   - address: 0x08027620
     ghidra: FUN_08027620
     name: obfuscated_byte_arithmetic_identity
