@@ -255998,3 +255998,43 @@ functions:
       passes. match.py exits 1 with six Rust versus twenty-one original
       instructions; equality guard and conditional end store remain,
       while dead loops and span arithmetic disappear. No device execution.
+
+  - address: 0x083e5140
+    ghidra: FUN_083e5140
+    name: vector4_erase_range
+    size: 84
+    sig: "u32 *vector4_erase_range(u32 *vector, u32 *first, const u32 *last)"
+    module: cxx/vector4_erase_range
+    renames:
+      param_1/r0: vector
+      param_2/r1: first
+      param_3/r2: last
+      puVar1/r3: source
+      puVar3/ip: destination
+      puVar2/r4: end
+    status: ported
+    notes: >-
+      Raw extent [0x083e5140,0x083e5194): 21 ARM words ending with
+      pop {r4,pc}, immediately followed by a three-word constructor.
+      Independently decoded zero outgoing plain or predicated BLs;
+      whole-image aligned-word scan finds zero incoming plain BLs and
+      one predicated BLHI at 0x08104a04. Raw caller 0x081049a0 loads
+      vector end into r2 before that call, correcting Ghidra's omitted
+      third argument. Erases [first,last) in a trivial word vector by
+      copying [last,end) forward to first, reloading end, and subtracting
+      (last-first)&~3 with target-width wrapping. Empty vectors preserve
+      end and do not access cursors; returns first and retains begin,
+      capacity and unused tail bytes. Uses aligned target-width head
+      words and volatile element transfers to prevent libc substitution.
+      Deliberate deviation: removes the memory-free trivial-destructor
+      cursor loop; valid ordered aligned ranges are required.
+      Host tests exhaust all ranges for lengths zero through eight,
+      including overlapping shifts, empty erasures, whole-vector and
+      suffix erasures, unchanged tail/capacity, and null empty vectors.
+      Host suite passed 15966 tests. Standalone public-entry smoke passed
+      middle and caller-style suffix erasures. ARM release build passed.
+      match.py exits 1 with 21 instructions in each implementation:
+      LLVM adds a frame, uses branch-controlled rather than predicated
+      word transfers and omits the inert cursor loop; equality guard,
+      forward copy, end reload, masked subtraction and return remain.
+      No new runtime seams and no device execution.

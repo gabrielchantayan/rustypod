@@ -960,6 +960,7 @@ pub mod vtable_089a8414_destruct;
 pub mod three_vtable_objects_destruct;
 pub mod vector_default_slot;
 pub mod vector8_erase;
+pub mod vector4_erase_range;
 pub mod task_base_construct;
 pub mod task_base_start;
 pub mod framework_string_pair_construct;
