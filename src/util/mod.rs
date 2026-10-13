@@ -1,4 +1,6 @@
 //! retailOS-native utility functions (CRC, itoa, byte swaps, ...).
+pub mod preserve_word;
+pub use preserve_word::*;
 pub mod arena_backed_object_destroy;
 pub mod stream_read_format_record;
 pub mod buffered_record_decode;

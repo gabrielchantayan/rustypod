@@ -252901,3 +252901,30 @@ functions:
       comparison, signed version selection and status 4 remain intact;
       LLVM shares dispatch and tail-branches via BX to literal 0x08029630
       or that address plus 0x11c, rather than two separate BL instructions.
+  - address: 0x08028534
+    ghidra: FUN_08028534
+    name: preserve_word
+    size: 20
+    sig: "u32 preserve_word(u32 word)"
+    module: util/preserve_word
+    status: ported
+    vars:
+      r0: word
+    notes: >-
+      Raw e12fff1e is BX LR: executed body is four bytes, preserving r0
+      without memory access. Extent to next known real entry 0x08028548
+      is 20 bytes; four following BX LR words are unreachable from this
+      entry, with no claim that they belong to its executed body. Whole-image
+      aligned raw decoding counts two plain incoming BLs at 0x082ea294
+      and 0x082ea47c, zero predicated incoming BLs, zero outgoing calls,
+      and no literal words equal to the entry address. Both callers load
+      stack +0x144 into r0 then discard the result. No destructor or class
+      identity is inferred. Deviations: expose preserved r0 as u32 rather
+      than Ghidra void; omit unreachable words and accept LLVM frame setup.
+      Host boundary and single-bit tests plus standalone executable smoke
+      preserve zero, high-bit and all-ones inputs. Host suite and ARM release
+      build pass. Archive symbol table verifies preserve_word is a 12-byte
+      export folded into .text.no_op_u32. Requested match.py invocation
+      cannot find the folded label; comparison with verified no_op_u32
+      alias exits 1, showing PUSH/MOV/POP versus stock BX LR, no calls or
+      r0 changes. No device execution claimed.
