@@ -49731,6 +49731,38 @@ functions:
       prove dispatch clobbers cannot change the restored task return word, and
       prove exactly one dispatch per invocation.
 
+  - address: 0x08037ed8
+    ghidra: thunk_EXT_FUN_22001e70
+    name: irq_fiq_disable
+    size: 8
+    sig: "u32 irq_fiq_disable(void)"
+    module: kernel/task_lock
+    status: ported
+    vars: {r0: saved_if_mask}
+    renames:
+      thunk_EXT_FUN_22001e70: irq_fiq_disable
+      DAT_08037edc: irq_fiq_disable_iram_target
+    notes: >-
+      Raw words e51ff004 at 0x08037ed8 and 22001e70 at 0x08037edc
+      establish an 8-byte literal tail-dispatch veneer; Ghidra's 4-byte
+      extent excludes the literal. The next veneer starts at 0x08037ee0.
+      The target is the IRAM mirror of the already-ported 20-byte helper
+      cpsr_disable_irq_fiq at 0x08001e70, not mask ROM: MRS snapshots CPSR,
+      AND returns only the prior I/F bits (0xc0), ORR sets both bits,
+      MSR cpsr_c writes control, and BX LR returns. Independent decoding
+      of all aligned ARM BL words in osos.dec finds exactly two plain
+      callers at 0x08067fac and 0x0809a7ac, no predicated callers, and
+      no internal BL. The Rust veneer calls the existing CPSR port,
+      deliberately replacing the IRAM jump and removing the unimplemented
+      kernel hook. Host tests cover all four prior I/F masks, processor
+      modes, unrelated CPSR-bit preservation, and nested disable/restore.
+      ARM release code keeps irq_fiq_disable as a distinct 16-byte symbol:
+      frame setup/teardown followed by an R_ARM_JUMP24 tail branch to
+      cpsr_disable_irq_fiq. match.py reports the expected structural
+      difference from the original literal transfer (its default extent
+      still counts only the 4-byte instruction). A standalone source-backed
+      host smoke verified all four masks, nested disable, and restore.
+
   - address: 0x08037ec8
     ghidra: thunk_EXT_FUN_22003e44
     name: task_priority_get

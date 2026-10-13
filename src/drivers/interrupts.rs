@@ -171,6 +171,35 @@ mod tests {
     }
 
     #[test]
+    fn iram_veneer_preserves_control_bits_and_supports_nested_guards() {
+        let _lock = TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+
+        for mode in [0x10, 0x11, 0x12, 0x13, 0x17, 0x1b, 0x1f] {
+            for mask in [0, 0x40, 0x80, 0xc0] {
+                let cpsr = 0xa000_0020 | mode | mask;
+                unsafe {
+                    core::ptr::write_volatile(addr_of_mut!(host_cpsr::CPSR), cpsr);
+                    let saved = crate::kernel::task_lock::irq_fiq_disable();
+                    assert_eq!(saved, mask);
+                    assert_eq!(
+                        core::ptr::read_volatile(addr_of!(host_cpsr::CPSR)),
+                        cpsr | CPSR_IF_MASK,
+                    );
+                    let nested = crate::kernel::task_lock::irq_fiq_disable();
+                    assert_eq!(nested, CPSR_IF_MASK);
+                    cpsr_restore_irq_fiq(nested);
+                    assert_eq!(
+                        core::ptr::read_volatile(addr_of!(host_cpsr::CPSR)),
+                        cpsr | CPSR_IF_MASK,
+                    );
+                    cpsr_restore_irq_fiq(saved);
+                    assert_eq!(core::ptr::read_volatile(addr_of!(host_cpsr::CPSR)), cpsr);
+                }
+            }
+        }
+    }
+
+    #[test]
     fn reports_irq_enable_state_independently_of_fiq() {
         let _lock = TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
 
