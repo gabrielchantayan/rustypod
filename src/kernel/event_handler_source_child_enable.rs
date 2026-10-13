@@ -37,6 +37,40 @@ pub unsafe extern "C" fn event_handler_source_child_enable(child: *mut u8) {
         });
 }
 
+/// Disables a child and withdraws its value from the shared source.
+///
+/// Original `thunk_FUN_081175e8` @ 0x08003968: true size 8 bytes,
+/// ending at the next literal veneer 0x08003970. Raw words e51ff004 /
+/// 081175e8 have no outgoing BL; whole-image decoding finds two plain
+/// inbound BLs (0x08007954, 0x080079f4), zero predicated inbound BLs.
+/// Startup relocation maps the literal to file address 0x081224c0.
+/// That 40-byte body ends at 0x081224e8: clear child+0x68, acquire the
+/// source with one plain BL, then tail-publish 0x7fff through the
+/// established 0x22007a68 seam. No predicated BL in that body.
+/// Deviation: reuse the Rust source getter and call/return instead of
+/// preserving the literal veneer and final tail transfer.
+///
+/// # Safety
+/// `child` is aligned and writable through +0x69; firmware source services
+/// and the verified IRAM mirror must be initialized.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn event_handler_source_child_disable(child: *mut u8) {
+    disable(child, || crate::kernel::event_handler_source::event_handler_source(),
+        |source, child, value| {
+            let publish: unsafe extern "C" fn(*mut u8, *mut u8, u32) =
+                core::mem::transmute(0x2200_7a68usize);
+            publish(source, child, value);
+        });
+}
+
+unsafe fn disable(child: *mut u8, source: impl FnOnce() -> *mut u8,
+    publish: impl FnOnce(*mut u8, *mut u8, u32)) {
+    child.add(0x68).cast::<u16>().write(0);
+    let source = source();
+    publish(source, child, 0x7fff);
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -48,6 +82,23 @@ mod tests {
         try_map_u32_slab(hints::EVENT_HANDLER_SOURCE_CHILD_ENABLE, 4096).map(|p| p as usize)
     });
     static LOCK: Mutex<()> = Mutex::new(());
+
+    #[test]
+    fn disable_clears_any_state_before_acquisition_without_reading_bound_node() {
+        for state in [0u16, 1, 0x8000, u16::MAX] {
+            let mut child = [0xa5a5_a5a5u32; 0x94 / 4];
+            child[0x68 / 4] = 0xbeef_0000 | state as u32;
+            child[0x90 / 4] = u32::MAX; // Deliberately invalid: disable must not read it.
+            let mut expected = child;
+            expected[0x68 / 4] = 0xbeef_0000;
+            let ptr = child.as_mut_ptr().cast::<u8>();
+            unsafe { disable(ptr, || {
+                assert_eq!(ptr.add(0x68).cast::<u32>().read(), 0xbeef_0000);
+                core::ptr::null_mut()
+            }, |_, _, _| {}); }
+            assert_eq!(child, expected);
+        }
+    }
 
     #[test]
     fn enable_preserves_adjacent_halfword_and_defaults_without_node() {
