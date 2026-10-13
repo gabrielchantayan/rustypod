@@ -3,6 +3,9 @@
 address: 0x087f5b34
 ghidra: FUN_087f5b34
 name: noncode_record_word_087f5b34
+size: null
+sig: "unresolved; executable entry and ABI not established"
+module: null
 status: identified
 notes: >-
   Cannot establish an executable function, signature, or true function extent.
@@ -28,8 +31,14 @@ notes: >-
   at 0x08532e18; this is not an established executable caller.
   Independent whole-image halfword-aligned ARMv5 Thumb BL decoding finds
   zero inbound candidates. GNU arm-none-eabi-objdump confirms both the
-  assigned A32 word and the reported BLEQ candidate. names.yaml contains
-  no entry for this address. No callee identity, seam, Rust implementation,
-  host behavior test, or match claim is invented. Faithful porting requires
-  evidence of a real executable entry and its extent; current evidence
-  instead identifies a spurious function in data.
+  assigned A32 word and the reported BLEQ candidate. A fresh full-file
+  scan confirms names.yaml contains no entry for this address.
+  No callee identity, seam, Rust implementation, host behavior test,
+  or match claim is invented. Faithful porting requires evidence of a
+  real executable entry and its extent; current evidence instead
+  identifies a spurious function in data. Deliberate deviation: no Rust
+  port. Raw-byte scans and objdump probes were executed independently.
+  Canonical names.yaml insertion is blocked by the editing tool:
+  both explicit end-of-file ranges and suffix ranges return source
+  without the mandatory snapshot tag. This separate record preserves
+  the evidence without an unsafe unanchored edit.
