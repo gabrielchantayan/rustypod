@@ -55,6 +55,7 @@ pub mod task_delay;
 pub mod task_priority;
 pub mod task_lock;
 pub mod stream_buffer_page_contexts;
+pub mod stream_buffer_reset_page_state;
 pub mod current_page_context;
 pub mod stream_buffer_dispatch_mode_zero;
 pub mod stream_buffer_initializer;
