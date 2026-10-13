@@ -16,6 +16,40 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083e15ec
+    ghidra: FUN_083e15ec
+    name: cxx_string_pair_vector_owner_range_destroy
+    size: 40
+    module: cxx/string
+    status: ported
+    sig: "void cxx_string_pair_vector_owner_range_destroy(void *unused, CxxStringPairVectorOwner *first, CxxStringPairVectorOwner *last)"
+    renames:
+      param_1/r0: unused
+      param_2/r1/r4: first
+      param_3/r2/r5: last
+      FUN_081df500: cxx_string_pair_vector_owner_destroy
+    notes: >-
+      Raw extent 0x083e15ec..0x083e1614 is 40 bytes, ending in POP
+      before the next independent PUSH. Whole-image aligned A32 decoding
+      finds one inbound plain BL at 0x083e17e4, one outbound plain BL
+      at 0x083e1600 to the already-ported owner destructor at 0x081df500,
+      and zero predicated BLs in either direction. Destroy owners in
+      ascending order over [first,last), advancing 20 bytes only after
+      each destructor returns. Ignore the first ABI argument; empty
+      bounds read nothing. Caller 0x083e1614 destroys old owners before
+      freeing reallocated vector storage. Reuse the existing destructor;
+      no new firmware seam or behavioral deviation. repr(C) five-u32
+      owner fields preserve the target stride on hosts. Host tests cover
+      every subrange of four owners, preserved descriptor words and
+      excluded boundaries, forward release order, and null empty bounds.
+      Full host suite and ARM release build pass. A throwaway actual-source
+      smoke destroyed two null-storage owners, preserved the excluded
+      prefix and reserved fields, and accepted null empty bounds. Required
+      match.py exits 1 with a reviewed structural diff: 12 Rust instructions
+      versus 10 stock. LLVM adds an early empty return and frame pointer,
+      uses the destructor's returned owner as the cursor, and retains the
+      20-byte advance and equality loop. The BL relocation explicitly
+      targets cxx_string_pair_vector_owner_destroy; no identical-body fold.
   - address: 0x083e2dac
     ghidra: FUN_083e2dac
     name: vector_record24_assign
