@@ -252405,3 +252405,36 @@ functions:
       because Ghidra omits the literal and absolute disassembly annotations
       differ; the ARM instruction and target literal match the raw veneer.
       No device execution was performed.
+  - address: 0x08037f30
+    ghidra: thunk_EXT_FUN_22004154
+    name: mailbox_send_iram_veneer
+    size: 8
+    sig: "void mailbox_send_iram_veneer(u32 mailbox, u32 message, u32 priority, u32 semaphore)"
+    module: heap/mailbox_send_gateway
+    status: ported
+    renames:
+      r0: mailbox
+      r1: message
+      r2: priority
+      r3: semaphore
+      DAT_08037f34: mailbox_send_iram_target
+    notes: >-
+      Raw words e51ff004/22004154 encode ldr pc,[pc,#-4] and its target
+      literal. The next real veneer begins at 0x08037f38, establishing
+      eight bytes rather than Ghidra's four. Independent whole-image ARM
+      word decoding finds two plain BL callers at 0x08163464 and
+      0x083933f0, zero predicated BL callers; assembly also shows a tail
+      B at 0x08087590. There are no outgoing BLs. The target 0x22004154
+      is an IRAM mirror of osos 0x08004154 copied during boot, not mask
+      ROM. Reuses the already-ported mailbox_send_gateway, preserving
+      four register words and its service-4 sparse request and void ABI.
+      Deliberate deviation: Rust calls the existing mirror implementation
+      instead of the copied firmware body. ARM codegen has a balanced
+      frame-pointer prologue/epilogue then R_ARM_JUMP24 mailbox_send_gateway,
+      leaving arguments and SP unchanged at the tail branch. match.py
+      exits 1 for this expected structural difference and omits the
+      original literal because Ghidra reports only four bytes. Host boundary
+      tests cover zero and full-width service inputs; all 15831 tests pass.
+      ARM release build succeeds. Standalone host smoke executes the actual
+      Rust veneer and mirror with a writable service request. No device
+      execution was performed.

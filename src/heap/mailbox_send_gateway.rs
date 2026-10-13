@@ -2,7 +2,7 @@
 //!
 //! `FUN_08004154` is retailOS's mirror of RTXC service 4,
 //! [`KS_send(MBOX, RTXCMSG *, PRIORITY, SEMA)`](https://freemyipod.org/wiki/RetailOS).
-//! It submits every register-passed API argument in the mask-ROM dispatcher's
+//! It submits every register-passed API argument in the firmware dispatcher's
 //! sparse request-frame layout.
 
 use core::mem::MaybeUninit;
@@ -53,6 +53,31 @@ pub unsafe extern "C" fn mailbox_send_gateway(
     gateway_dispatch()(words);
 }
 
+/// IRAM mailbox-send veneer — original: `thunk_EXT_FUN_22004154` @
+/// `0x08037f30`, 8 bytes (`0x08037f30..0x08037f38`, including literal).
+/// Raw words are `e51ff004 22004154`; the next real veneer starts at
+/// `0x08037f38`. Verified inbound calls: two plain BLs (`0x08163464`,
+/// `0x083933f0`), zero predicated BLs; there is also a tail B at `0x08087590`.
+/// No outgoing BL: tail-jump to the IRAM mirror of `0x08004154`, forwarding
+/// all four words unchanged to the RTXC asynchronous mailbox-send wrapper.
+/// Deliberate deviation: call the existing Rust mirror implementation rather
+/// than the copied IRAM body. Rust expresses the tail branch as a final void
+/// call; no allocation, validation, or new foreign-service seam is introduced.
+///
+/// # Safety
+/// The message word and service identifiers must satisfy the same RTXC
+/// gateway contract as `mailbox_send_gateway`; no NULL guard is provided.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn mailbox_send_iram_veneer(
+    mailbox: u32,
+    message: u32,
+    priority: u32,
+    semaphore: u32,
+) {
+    mailbox_send_gateway(mailbox, message, priority, semaphore);
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -98,16 +123,21 @@ mod tests {
     }
 
     #[test]
-    fn builds_full_send_request_and_delegates_once() {
+    fn send_veneer_preserves_boundary_service_words() {
         let guard = install_recorder();
         unsafe {
-            mailbox_send_gateway(0x0000_0003, 0x080c_1234, 7, 0x0000_0013);
-            assert_eq!(addr_of!(CALLS).read(), 1, "delegates exactly once");
-            assert_eq!(
-                addr_of!(RECORDED_INITIALIZED_WORDS).read(),
-                [4, 0x0000_0013, 0x0000_0003, 7, 0x080c_1234, 0],
-                "preserves every initialized service-4 request word"
-            );
+            for args in [
+                [4, 0x080c_1234, 5, 0x3a],
+                [0, 0, 0, 0],
+                [u32::MAX, u32::MAX, u32::MAX, u32::MAX],
+            ] {
+                mailbox_send_iram_veneer(args[0], args[1], args[2], args[3]);
+                assert_eq!(
+                    addr_of!(RECORDED_INITIALIZED_WORDS).read(),
+                    [4, args[3], args[0], args[2], args[1], 0],
+                );
+            }
+            assert_eq!(addr_of!(CALLS).read(), 3);
         }
         restore(guard);
     }
