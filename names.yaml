@@ -252861,3 +252861,43 @@ functions:
       header stores; signed loop gating, read comparison, conditional size
       commit, and status values agree. Relocations confirm three real
       transform_word_for_mode calls and one fread call.
+
+  - address: 0x08029858
+    ghidra: FUN_08029858
+    name: read_and_decode_record
+    size: 136
+    sig: "u32 read_and_decode_record(AdsStream *stream, i32 length, i32 version, u32 mode, u8 *scratch, u32 *output)"
+    module: stdio/record_decode
+    status: ported
+    renames:
+      param_1/r0: stream
+      param_2/r1: length
+      param_3/r2: version
+      param_4/r3: mode
+      param_5: scratch
+      param_6: output
+      return/r0: decoder_status
+    notes: >-
+      Raw A32 extent [0x08029858, 0x080298e0) is 136 bytes, bounded by
+      the next distinct PUSH prologue. Full-image aligned decoding finds
+      two incoming plain BLs at 0x08029ad8 and 0x08029e24, zero predicated
+      incoming BLs; body has three plain BLs at 0x08029880 (fread),
+      0x080298ac (0x08029630), and 0x080298d0 (0x0802974c), zero
+      predicated outgoing BLs. Read length one-byte items before checking
+      version. Short reads return 4 and retain partial scratch writes.
+      Complete reads dispatch versions 1/2 to the legacy record decoder,
+      signed versions >=3 to the extended decoder, otherwise return 4.
+      Return decoder status unchanged. Callers allocate scratch length
+      and supply output separately; 0x08029d60 allocates output length+4.
+      Both decoder addresses lack registry entries; reuse the existing
+      buffered_record_decode host seams and exact firmware addresses.
+      Deliberate deviations: typed pointers, no additional validation or
+      rollback. Host suite and ARM release build pass. Two permanent edge
+      tests cover invalid signed versions, zero/exact reads, unaligned
+      scratch, short-read precedence, partial writes, and unchanged output.
+      Isolated temporary smoke verifies complete reads and dispatch for
+      versions 1, 2, 3, and i32::MAX with decoder statuses preserved.
+      match.py exits 1: 34 stock versus 31 Rust instructions. Read-result
+      comparison, signed version selection and status 4 remain intact;
+      LLVM shares dispatch and tail-branches via BX to literal 0x08029630
+      or that address plus 0x11c, rather than two separate BL instructions.
