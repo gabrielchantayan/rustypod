@@ -4,6 +4,7 @@
 //! the ARM ADS C runtime.
 pub mod return_zero;
 pub mod string_pair_range_fill;
+pub mod string_pair_vector_record_range_fill;
 pub use return_zero::*;
 pub mod saved_context_release_noop;
 pub mod empty_destructor_080284bc;
