@@ -16,6 +16,32 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080035c8
+    ghidra: thunk_FUN_080d9428
+    name: current_task_priority_boot_veneer
+    size: 8
+    sig: "u32 current_task_priority_boot_veneer(u32 priority)"
+    module: kernel/task_priority
+    status: ported
+    renames:
+      DAT_080035cc: relocated_current_task_priority_set
+      r0: priority
+    notes: >-
+      Raw words e51ff004 080d9428 prove an eight-byte literal veneer,
+      ending at the independent veneer at 0x080035d0. Whole-image
+      aligned A32 BL decoding finds two plain callers (0x08002fa8,
+      0x08004694), zero predicated callers, and zero outgoing BL.
+      Both callers supply priority 7. Startup at 0x080046e0 copies
+      the main image down by 0xaed8 (literal at 0x0800478c), so
+      runtime target 0x080d9428 resolves to raw 0x080e4300, already
+      named current_task_priority_set. Do not interpret the raw
+      0x080d9428 interior block as this veneer's callee. The resolved
+      twelve-byte body moves priority to r1, sets current-task
+      selector r0 to zero, and tail-branches to task_priority_set.
+      Reuses that canonical Rust body without a new foreign seam.
+      Deliberate deviation: Rust call/tail transfer replaces the
+      literal PC load; priorities remain unvalidated u32 bit patterns
+      and the return remains zero despite gateway request clobbering.
   - address: 0x08003610
     ghidra: FUN_08003610
     name: shared_context_boot_veneer

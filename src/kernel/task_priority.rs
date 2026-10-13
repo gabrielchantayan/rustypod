@@ -90,6 +90,26 @@ pub unsafe extern "C" fn current_task_priority_set(priority: u32) -> u32 {
     task_priority_set(0, priority)
 }
 
+/// current_task_priority_boot_veneer — original: `thunk_FUN_080d9428`
+/// @ `0x080035c8`, true size 8 bytes, ending at the next veneer `0x080035d0`.
+///
+/// Raw words `e51ff004 080d9428` load PC from the adjacent target literal.
+/// Startup at `0x080046e0` copies the main image down by `0xaed8`; the
+/// runtime target therefore resolves to raw `0x080e4300`, the canonical
+/// current-task priority setter above. Whole-image aligned A32 decoding
+/// verifies two inbound plain BL sites (`0x08002fa8`, `0x08004694`), zero
+/// predicated BL sites, and zero outbound BL. Both callers request priority 7.
+///
+/// Set the current task's RTXC priority and return selector zero, even if
+/// the gateway overwrites its request. Deliberate deviation: replace the
+/// stock literal PC transfer with a Rust call to the existing canonical body;
+/// no additional validation, priority conversion, or foreign seam is added.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn current_task_priority_boot_veneer(priority: u32) -> u32 {
+    current_task_priority_set(priority)
+}
+
 
 /// task_priority_get — original: `thunk_EXT_FUN_22003e44` @ `0x08037ec8`
 /// (Ghidra reports 4 bytes; verified extent 8 bytes: `ldr pc, [pc, #-4]`
@@ -223,6 +243,10 @@ mod tests {
             1 => assert_eq!(words, &[0x1b, u32::MAX, u32::MAX, u32::MAX]),
             2 => assert_eq!(words, &[0x1b, 0, 0, 0]),
             3 => assert_eq!(words, &[0x1b, u32::MAX, 0, u32::MAX]),
+            4 => assert_eq!(words, &[0x1b, 7, 0, 7]),
+            5 => assert_eq!(words, &[0x1b, 0, 0, 0]),
+            6 => assert_eq!(words, &[0x1b, 0x8000_0000, 0, 0x8000_0000]),
+            7 => assert_eq!(words, &[0x1b, u32::MAX, 0, u32::MAX]),
             _ => panic!("unexpected gateway dispatch"),
         }
         words.copy_from_slice(&[0xa5a5_a5a5; 4]);
@@ -253,6 +277,19 @@ mod tests {
             assert_eq!(current_task_priority_set(0), 0);
             assert_eq!(current_task_priority_set(u32::MAX), 0);
             assert_eq!(addr_of!(CALLS).read(), 4);
+        }
+        restore(guard);
+    }
+
+    #[test]
+    fn boot_priority_set_preserves_zero_result_after_gateway_clobber() {
+        let guard = install_recorder();
+        unsafe {
+            addr_of_mut!(CALLS).write(4);
+            for priority in [7, 0, 0x8000_0000, u32::MAX] {
+                assert_eq!(current_task_priority_boot_veneer(priority), 0);
+            }
+            assert_eq!(addr_of!(CALLS).read(), 8);
         }
         restore(guard);
     }
