@@ -16,6 +16,30 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080380d0
+    ghidra: thunk_EXT_FUN_22007aec
+    name: event_handler_child_acquire_iram
+    size: 8
+    sig: "void *event_handler_child_acquire_iram(void *source)"
+    module: kernel/event_handler_child_acquire_iram
+    status: ported
+    renames:
+      r0: source_then_selected_child
+      DAT_080380d4: iram_child_acquire_target
+    notes: >-
+      Raw words e51ff004 and 22007aec establish an eight-byte literal veneer
+      ending at the next real entry, 0x080380d8. Full-image ARM decoding finds
+      two plain BL callers at 0x08167834 and 0x081b0e60, zero predicated BL
+      callers, and zero outgoing BL instructions. The destination is the
+      IRAM mirror of 0x08007aec installed by 0x080046e0, not mask ROM.
+      That unported body selects, retires, and activates an event-handler
+      child and returns its pointer. The port retains the exact firmware
+      boundary and C ABI rather than inventing a replacement callee.
+      Hosts reject execution outside tests. Guard-page coverage checks that
+      the veneer does not inspect an opaque source or truncate host pointers.
+      All 15826 host tests pass and the ARM release build succeeds. match.py
+      shows the deliberate balanced push/mov/ldr/pop/bx sequence with the
+      exact 0x22007aec literal instead of the ADS ldr-pc literal jump.
   - address: 0x08038ef8
     ghidra: FUN_08038ef8
     name: arena_backed_object_destroy
