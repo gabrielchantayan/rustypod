@@ -16,6 +16,37 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08027648
+    ghidra: FUN_08027648
+    name: obfuscated_context_zero_word
+    size: 8
+    sig: "u32 obfuscated_context_zero_word(u32 first, u32 second, u32 third, u32 fourth, u32 fifth, u32 sixth)"
+    module: app/obfuscated_context_zero_word
+    status: ported
+    vars:
+      param_1/r0: ignored_first_word
+      param_2/r1: ignored_second_word
+      param_3/r2: ignored_third_word
+      param_4/r3: ignored_fourth_word
+      param_5/stack0: ignored_fifth_word
+      param_6/stack1: ignored_sixth_word
+      return/r0: zero_word
+    notes: >-
+      Raw e3a00000 e12fff1e is MOV r0,#0; BX LR. True extent
+      [0x08027648,0x08027650) is eight bytes; the next real entry has
+      independent BL callers at 0x082fa850 and 0x0831311c. Whole-image
+      aligned A32 decoding verifies two plain inbound BLs at 0x082fa98c
+      and 0x08312f78, zero predicated inbound BLs, zero outgoing calls,
+      and no aligned address-word references. Callers FUN_082fa514 and
+      FUN_08312b70 supply six opaque words and store the zero result at
+      sp+0x14c and sp+0x148 respectively. Ignore all inputs and access
+      no memory. Concrete types and higher-level context semantics remain
+      unknown; no callee seams or behavioral deviations. Dedicated text
+      section and inline-never retain a distinct target from 0x08027658.
+      Host edge tests and all 15880 host tests pass; ARM release build
+      passes. Actual-source executable smoke verifies 4096 six-word calls.
+      match.py exits 1: MOV r0,#0; BX LR becomes balanced PUSH {fp,lr},
+      MOV fp,sp, MOV r0,#0, POP {fp,pc}; return semantics are preserved.
   - address: 0x08027650
     ghidra: FUN_08027650
     name: obfuscated_status_word_identity
