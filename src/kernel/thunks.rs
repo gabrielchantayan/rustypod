@@ -596,6 +596,56 @@ retail_continuation_dispatch_veneer:
 );
 
 
+/// Task-start IRAM veneer — `thunk_EXT_FUN_22003e00` @ `0x08037f78`.
+///
+/// True size: 8 bytes (`e51ff004`, `22003e00`); the next real veneer starts
+/// at `0x08037f80`. Whole-image aligned ARM decoding finds one plain BL
+/// (`0x080b16d0`) and one predicated BL (`0x08394014`), plus tail branches
+/// at `0x080b4c48` and `0x08103e94`. No outgoing BL.
+///
+/// Loads PC from the adjacent literal without changing arguments, SP or LR.
+/// The boot copy at `0x080046e0` makes `0x22003e00` the IRAM mirror of
+/// `0x08003e00`, not mask ROM. That body submits service 0x15 with task id
+/// in r0, preserving raw r1/r3 inputs, and returns the gateway's r0/r1 pair.
+/// Deviation: none on ARM; host builds execute the existing Rust mirror.
+#[cfg(target_arch = "arm")]
+extern "C" {
+    pub fn task_start_gateway_veneer(
+        task_id: u32,
+        input_r1: u32,
+        input_r2: u32,
+        input_r3: u32,
+    ) -> u64;
+}
+
+/// Host execution of the task-start veneer through its already ported mirror.
+#[cfg(not(target_arch = "arm"))]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn task_start_gateway_veneer(
+    task_id: u32,
+    input_r1: u32,
+    input_r2: u32,
+    input_r3: u32,
+) -> u64 {
+    crate::heap::rom_task_start::rom_task_start(task_id, input_r1, input_r2, input_r3)
+}
+
+#[cfg(target_arch = "arm")]
+core::arch::global_asm!(
+    r#"
+    .syntax unified
+    .text
+    .p2align 2
+    .globl task_start_gateway_veneer
+    .type task_start_gateway_veneer, %function
+task_start_gateway_veneer:
+    ldr     pc, [pc, #-4]
+    .word   0x22003e00
+    .size task_start_gateway_veneer, . - task_start_gateway_veneer
+"#
+);
+
 /// Instruction word and literal in the task-delete gateway thunk at
 /// 0x08037f80.
 ///
@@ -2672,7 +2722,7 @@ pub static ROM_THUNKS: [RomThunk; 158] = [
     RomThunk { thunk_addr: 0x08037f60, rom_target: 0x2200200c, name: Some("clock_config_dispatch_veneer") },
     RomThunk { thunk_addr: 0x08037f68, rom_target: 0x2200053c, name: None },
     RomThunk { thunk_addr: 0x08037f70, rom_target: 0x220001f4, name: Some("memmove_backward") },
-    RomThunk { thunk_addr: 0x08037f78, rom_target: 0x22003e00, name: None },
+    RomThunk { thunk_addr: 0x08037f78, rom_target: 0x22003e00, name: Some("task_start_gateway_veneer") },
     RomThunk { thunk_addr: 0x08037f80, rom_target: 0x2200427c, name: Some("task_delete_gateway_veneer") },
     RomThunk { thunk_addr: 0x08037f88, rom_target: 0x22005018, name: Some("ui_manager_acquire") },
     RomThunk { thunk_addr: 0x08037f90, rom_target: 0x22004eec, name: None },

@@ -116,6 +116,24 @@ mod tests {
     }
 
     #[test]
+    fn task_start_veneer_preserves_full_width_gateway_results() {
+        let guard = install_recorder();
+        unsafe {
+            for task_id in [0, 1, u32::MAX] {
+                let result = crate::kernel::thunks::task_start_gateway_veneer(
+                    task_id, u32::MAX, 0xdead_beef, 0,
+                );
+                assert_eq!(
+                    addr_of!(RECORDED_REQUEST).read(),
+                    [0x15, u32::MAX, task_id, 0],
+                );
+                assert_eq!(result, 0x1234_5678_feed_cafe);
+            }
+        }
+        restore(guard);
+    }
+
+    #[test]
     fn builds_service_15_request_and_delegates_it_once() {
         let guard = install_recorder();
         unsafe {
