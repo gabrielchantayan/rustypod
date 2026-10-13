@@ -38537,6 +38537,35 @@ functions:
       call while retaining those exact writes. Host tests prove all 33 words
       receive the context and every byte outside those fields remains intact.
 
+  # --- RAM stream-buffer auxiliary page reset ---
+  - address: 0x08007294
+    ghidra: FUN_08007294
+    name: stream_buffer_reset_page_state
+    size: 44
+    sig: "u32 stream_buffer_reset_page_state(StreamBuffer *stream_buffer, u32 page_context)"
+    module: kernel/stream_buffer_reset_page_state
+    status: ported
+    renames:
+      param_1/r0: stream_buffer
+      r1: page_context
+      iVar2/r2: page_index
+      iVar1: page_word_offset
+      FUN_080071b0: stream_buffer_set_page_contexts
+    notes: >-
+      Raw ARM ends at 0x080072c0, the next independent three-instruction
+      setter. The 44-byte body has one plain BL to 0x080071b0 and no
+      predicated BLs; two incoming plain BLs are at 0x080054f8 and
+      0x08005590. Clears 32 auxiliary page words at +0xb8..+0x134,
+      then forwards the unchanged incoming r1 to the existing context setter
+      for +0x34..+0xb0 and fallback +0x13c. Returns zero. Ghidra's
+      one-argument signature omits this context; both caller paths supply
+      their second argument. Volatile stores avoid libc fill substitution,
+      and a volatile trip count retains the loop as in the existing setter.
+      ARM comparison shows LLVM inlines the existing context setter: both
+      fill loops, the fallback store, and zero return remain, with no BL.
+      Host tests cover zero, nonzero, and all-one contexts, all cleared
+      words, the return value, and preservation of every other word.
+
   # --- RAM stream-buffer current page context ---
   - address: 0x0800722c
     ghidra: FUN_0800722c
