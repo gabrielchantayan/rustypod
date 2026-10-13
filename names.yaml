@@ -16,6 +16,40 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08003858
+    ghidra: FUN_08003858
+    name: channel_slot_publish_veneer
+    size: 8
+    sig: "void channel_slot_publish_veneer(uint32_t *base, uint32_t channel, uint32_t unused_third, uint32_t replacement, uint32_t payload_0, uint32_t unused_sixth, uint32_t payload_1, uint32_t payload_2, uint32_t payload_3)"
+    module: app/channel_slot_publish
+    status: ported
+    vars:
+      r0: base
+      r1: channel
+      r2: unused_third
+      r3: replacement
+      stack_0: payload_0
+      stack_4: unused_sixth
+      stack_8: payload_1
+      stack_12: payload_2
+      stack_16: payload_3
+      DAT_0800385c: relocated_channel_slot_publish
+    notes: >-
+      Raw e51ff004 08201570 establishes [0x08003858,0x08003860), eight bytes
+      through the next veneer. Whole-image A32 decoding verifies two plain
+      inbound BLs at 0x080060bc and 0x08006558, zero predicated inbound BLs
+      and zero outgoing BLs. Startup relocation +0xaed8 resolves runtime
+      0x08201570 to already-ported channel_slot_publish at 0x0820c448.
+      Reuses its nine-argument ABI without a new callee seam. Publish four
+      payload words, optionally replace record +12, set state 3, increment
+      selector and reset when signed selector >= 2. Arguments three and six
+      are unused. Deliberate deviation: Rust forwards instead of loading PC.
+      Existing module is registered. Host edge test covers selector 2 reset,
+      zero replacement, full-width payloads and untouched neighboring bytes.
+      Host suite and ARM release build pass. Optimized actual-source smoke
+      verifies alternating slots, preserved replacements, payloads and state 3.
+      match.py exits 1: literal jump versus twelve instructions, balanced
+      frame, stack payload loads/stores and final tail branch to publisher.
   - address: 0x08003938
     ghidra: FUN_08003938
     name: recording_controller_get_veneer

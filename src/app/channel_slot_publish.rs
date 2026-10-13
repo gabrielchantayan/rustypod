@@ -43,6 +43,33 @@ pub unsafe extern "C" fn channel_slot_publish(
     }
 }
 
+/// Publish through the retailOS relocation veneer.
+///
+/// `FUN_08003858` @ 0x08003858, 8 bytes through the next veneer at
+/// 0x08003860: raw words e51ff004 08201570 load PC from the literal.
+/// Whole-image A32 decoding finds two plain inbound BLs (0x080060bc,
+/// 0x08006558), zero predicated inbound BLs and zero outgoing BLs.
+/// Startup's +0xaed8 relocation resolves runtime 0x08201570 to file
+/// address 0x0820c448, the existing channel_slot_publish implementation.
+/// Publish four payload words, optionally replace the record's +12 word,
+/// set state 3, and advance the selected slot. Arguments three and six
+/// are unused. Deliberate deviation: Rust forwards instead of loading PC;
+/// the nine-argument C ABI preserves the veneer’s stack payload.
+///
+/// # Safety
+/// The alignment, valid-slot and synchronization requirements of
+/// `channel_slot_publish` apply unchanged.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn channel_slot_publish_veneer(
+    base: *mut u32, channel: u32, unused_third: u32, replacement: u32,
+    payload_0: u32, unused_sixth: u32, payload_1: u32,
+    payload_2: u32, payload_3: u32,
+) {
+    channel_slot_publish(base, channel, unused_third, replacement,
+        payload_0, unused_sixth, payload_1, payload_2, payload_3);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -91,5 +118,26 @@ mod tests {
         assert_eq!([words[11], words[13], words[14], words[15]], [21, 22, 23, 24]);
         assert_eq!(words[2] as u8, 3);
         assert_eq!(words[9] as u8, 3);
+    }
+
+    #[test]
+    fn veneer_preserves_record_on_zero_replacement_and_wraps_signed_selector() {
+        // Selector 2 exercises the stock signed >= 2 reset, rather than
+        // assuming only the usual alternating selectors zero and one.
+        let mut words = [0xa5b6c7d8u32; 48];
+        words[1] = 2;
+        let record = 14 + 2 * 7;
+        let mut expected = words;
+        expected[record + 4] = 0x10203040;
+        expected[record + 6] = 0x50607080;
+        expected[record + 7] = 0x90abcdef;
+        expected[record + 8] = 0xfedcba98;
+        expected[record + 2] = (expected[record + 2] & !0xff) | 3;
+        expected[1] = 0;
+        unsafe {
+            channel_slot_publish_veneer(words.as_mut_ptr(), 1, 0xdeadbeef, 0,
+                0x10203040, 0xbadf00d, 0x50607080, 0x90abcdef, 0xfedcba98);
+        }
+        assert_eq!(words, expected);
     }
 }
