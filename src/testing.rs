@@ -45,6 +45,7 @@ pub mod hints {
     pub const RED_BLACK_TREE_RANGE_COUNT_083E7B78: usize = 0x86c0_0000;
     pub const RED_BLACK_TREE_RANGE_COUNT_083E7ADC: usize = 0x86d0_0000;
     pub const RED_BLACK_TREE_RANGE_COUNT_083E7A40: usize = 0x86e0_0000;
+    pub const RED_BLACK_TREE_RANGE_COUNT_083E79A4: usize = 0x86f0_0000;
     pub const KERNEL_POOL_NODE_TAKE: usize = 0x9df0_0000;
     pub const ARENA_BACKED_OBJECT_DESTROY: usize = 0x7224_0000;
     pub const STREAM_READ_FORMAT_RECORD: usize = 0x7223_0000;
