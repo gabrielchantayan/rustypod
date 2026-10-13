@@ -574,6 +574,30 @@ pub unsafe extern "C" fn usec_timer_elapsed_millis(start: u32, milliseconds: u32
     }
 }
 
+/// iram_usec_timer_elapsed_millis_veneer — original:
+/// `thunk_EXT_FUN_22001f04` @ 0x08038048 (**8 bytes**, through 0x08038050).
+/// Raw words are `0xe51ff004` (ldr pc, [pc, #-4]) and `0x22001f04`;
+/// the next independent veneer starts at 0x08038050. Verified inbound calls:
+/// two plain BL (0x080fcb10, 0x08205f84), zero predicated BL.
+///
+/// Transfers start and milliseconds to the IRAM mirror of
+/// [`usec_timer_elapsed_millis`] at 0x08001f04. Reads Timer E once, then
+/// returns u32::MAX for milliseconds > 0x0041_8937, otherwise 0 or 1
+/// according to the wrapping elapsed count >= milliseconds * 1000.
+/// Deviation: calls the existing Rust body rather than its copied IRAM
+/// address; preserves ABI arguments/result, not scratch registers or the
+/// literal-load tail transfer. Volatile callee load and a dedicated section
+/// retain a separately addressable hook target, as for adjacent veneers.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.iram_usec_timer_elapsed_millis_veneer")]
+#[inline(never)]
+pub unsafe extern "C" fn iram_usec_timer_elapsed_millis_veneer(start: u32, milliseconds: u32) -> u32 {
+    let body = core::ptr::read_volatile(
+        &(usec_timer_elapsed_millis as unsafe extern "C" fn(u32, u32) -> u32),
+    );
+    body(start, milliseconds)
+}
+
 /// iram_msec_delay_veneer — original: `thunk_EXT_FUN_22001f38` @
 /// 0x08037df0 (Ghidra reports 4 bytes; the real stub is **8** — the
 /// `ldr pc, [pc, #-4]` word 0xe51ff004 at 0x08037df0 plus the absolute
@@ -935,6 +959,35 @@ mod usec_timer_tests {
             unsafe { usec_timer_elapsed_millis(0, MAX_MILLISECONDS + 1) },
             u32::MAX
         );
+    }
+
+    #[test]
+    fn iram_millis_deadline_handles_wrap_zero_and_overflow_after_sampling() {
+        let _guard = configure_usec_timer(0, 1);
+        const MAX_MILLISECONDS: u32 = 0x0041_8937;
+
+        for (start, milliseconds, elapsed, expected) in [
+            (1_000, 2_000, 1_999_999, 0),
+            (1_000, 2_000, 2_000_000, 1),
+            (u32::MAX - 499, 1, 999, 0),
+            (u32::MAX - 499, 1, 1_000, 1),
+            (u32::MAX, 0, 0, 1),
+            (0, MAX_MILLISECONDS, MAX_MILLISECONDS * 1_000 - 1, 0),
+            (0, MAX_MILLISECONDS, MAX_MILLISECONDS * 1_000, 1),
+            (0, MAX_MILLISECONDS + 1, 0, u32::MAX),
+            (123, u32::MAX, u32::MAX, u32::MAX),
+        ] {
+            let counter = start.wrapping_add(elapsed);
+            HOST_USEC_TIMER_COUNT.store(counter, Ordering::Relaxed);
+            HOST_USEC_TIMER_READS.store(0, Ordering::Relaxed);
+            assert_eq!(
+                unsafe { iram_usec_timer_elapsed_millis_veneer(start, milliseconds) },
+                expected,
+                "start={start:#x}, milliseconds={milliseconds}, elapsed={elapsed}"
+            );
+            assert_eq!(HOST_USEC_TIMER_READS.load(Ordering::Relaxed), 1);
+            assert_eq!(HOST_USEC_TIMER_COUNT.load(Ordering::Relaxed), counter.wrapping_add(1));
+        }
     }
 
     #[test]
