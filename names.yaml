@@ -252817,3 +252817,47 @@ functions:
       byte loop, ordered cursor commits and version dispatch remain intact.
       LLVM shares decoder dispatch and tail-branches via BX to a literal
       0x08029630 or that address plus 0x11c (0x0802974c), rather than BL.
+
+  - address: 0x080298e0
+    ghidra: FUN_080298e0
+    name: assemble_record_from_stream
+    size: 156
+    sig: "i32 assemble_record_from_stream(AdsStream *stream, u32 sentinel, u32 record_kind, i32 payload_length, i32 prefix_length, const u8 *prefix, u32 mode, u32 *output, u32 *size_out)"
+    module: stdio/record_assemble
+    status: ported
+    renames:
+      param_1/r0: stream
+      param_2/r1: sentinel
+      param_3/r2: record_kind
+      param_4/r3: payload_length
+      param_5/stack_0: prefix_length
+      param_6/stack_4: prefix
+      param_7/stack_8: mode
+      param_8/stack_c: output
+      param_9/stack_10: size_out
+      return/r0: status
+    notes: >-
+      Raw bytes establish extent 0x080298e0..0x0802997c, bounded by the
+      next function's distinct push. Full aligned ARM BL scan finds two
+      plain callers at 0x08029bf8 and 0x08029f54, zero predicated callers;
+      the body has three calls to transform_word_for_mode at 0x0802b504
+      and one to fread at 0x0803677c, all plain BL. Both callers collect
+      record metadata and supply either caller-owned or allocated output.
+      Writes sentinel and mode-transformed kind/payload/prefix lengths,
+      copies positive signed prefix lengths forward, then reads payload
+      bytes. Nonpositive prefix lengths skip copying without changing their
+      header bit pattern. fread uses signed item counts, including its
+      nonpositive-count passthrough. Success writes the wrapping sum of both
+      lengths plus 16 and returns 0; short reads return 4 without updating
+      size_out or rolling back header, prefix, or partially read payload.
+      Deliberate deviations: typed pointers preserve four-byte target words;
+      volatile byte copying preserves forward overlap and avoids memcpy
+      substitution. Host suite: 15853 passing tests, including mode,
+      signed-length, partial-read, overlap, and wrapping-size edges.
+      Actual-source standalone buffered smoke produced status 0, size 21,
+      bytes 41 42 a1 b2 c3, and zero buffered bytes remaining. ARM release
+      build passes. match.py exits 1 with 39 stock versus 47 Rust
+      instructions: LLVM uses a countdown byte loop and reordered ordinary
+      header stores; signed loop gating, read comparison, conditional size
+      commit, and status values agree. Relocations confirm three real
+      transform_word_for_mode calls and one fread call.
