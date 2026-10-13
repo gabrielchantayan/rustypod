@@ -254658,3 +254658,35 @@ functions:
       state, caller ABI and function boundaries. Deliberate deviation:
       no Rust port. Raw scans and objdump executed; no host behavior
       tests, ARM build, match.py or device execution claimed.
+  - address: 0x087f5aa4
+    ghidra: FUN_087f5aa4
+    name: structured_data_record_0108_value
+    size: 4
+    sig: "data word; executable ABI unverified"
+    status: identified
+    notes: >-
+      Deferred: raw bytes establish a data word, not a verified function.
+      Size 4 describes that word; Ghidra's reported 27-byte executable
+      extent is unverified. Record [0x087f5a94,0x087f5aac) contains
+      00000014, 00000000, 00000108, 0dad01a4, 0dad01a5, ffffffff.
+      After 0200ffff at 0x087f5aac, the next record starts at
+      0x087f5ab0 with identifier 0x109 and values 0dad064d/0dad0659.
+      No next real function boundary, executable extent, ABI or
+      algorithm can be established. A32 decodes the assigned word as
+      STCEQ p1, c0, [sp, #660]!; Ghidra's Thumb decoding invents
+      indirect calls through incoming LR from neighboring ffff halfwords
+      and continues across records. Independent whole-image aligned
+      A32 BL decoding finds zero plain incoming candidates and one
+      predicated candidate: 0b0b0b0b at 0x08532e70 decodes as
+      BLEQ 0x087f5aa4. Surrounding repeated 0b bytes and sequential
+      74/75/76 and 77/78/79 bytes indicate table data, not a verified
+      executable caller. ARMv5 halfword-aligned Thumb BL decoding finds
+      zero incoming candidates. The assigned word contains zero plain
+      or predicated A32 BL instructions; true outgoing call count
+      remains unverified without executable boundaries. Full names.yaml
+      had no existing entry. No callee identity, Rust seam or dependency
+      on the undecrypted region is invented. Faithful porting requires
+      verified executable mapping, instruction state, caller ABI and
+      function boundaries. Deliberate deviation: no Rust port. Raw
+      scans and ARM/Thumb objdump probes executed; no host behavior
+      tests, ARM build, match.py or device execution claimed.
