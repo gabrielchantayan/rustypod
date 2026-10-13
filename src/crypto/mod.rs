@@ -39,6 +39,7 @@
 //! `flags` layout, RSA-1024 `== 0x400` caller in the X.509 chain walk).
 //! [`bn_ucmp`] ports its unsigned magnitude comparison from the same
 //! file.
+pub mod reverse_affine_words;
 pub mod evp_cipher_ctx_cleanup;
 pub mod bn_blinding_invert;
 pub mod bn_rand;
