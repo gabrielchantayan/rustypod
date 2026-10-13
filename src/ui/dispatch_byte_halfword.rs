@@ -11,8 +11,8 @@
 //! Preserve byte 1 of incoming r3, although callers do not explicitly supply
 //! it as an argument. r2 is unused. The verified 0x08038110 veneer points to
 //! IRAM 0x2200508c (raw mirror 0x0800508c adds 8 to r0 and tail-branches).
-//! That unported operation remains a target-only retailOS seam; host calls
-//! fail explicitly rather than pretend to dispatch. No padding is invented.
+//! Reuse the ported veneer for that unported operation; host calls fail
+//! explicitly rather than pretend to dispatch. No padding is invented.
 
 #[inline(always)]
 fn payload_word(kind: u32, value: u32, incoming_r3: u32) -> u32 {
@@ -34,9 +34,7 @@ pub unsafe extern "C" fn ui_dispatch_byte_halfword(
     {
         let manager = crate::ui::manager::ui_manager_instance();
         let key = core::ptr::read_volatile(0x089c_b238usize as *const u32);
-        let dispatch: unsafe extern "C" fn(*mut u8, u32, u32, *const u32) =
-            core::mem::transmute(0x2200_508cusize);
-        dispatch(manager, key, 1, &payload);
+        crate::kernel::thunks::ui_manager_dispatch_payload_veneer(manager, key, 1, &payload);
     }
     #[cfg(not(target_os = "none"))]
     {
