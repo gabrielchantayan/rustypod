@@ -38537,6 +38537,42 @@ functions:
       call while retaining those exact writes. Host tests prove all 33 words
       receive the context and every byte outside those fields remains intact.
 
+  # --- Sample-rate-dependent RAM stream-buffer sizing ---
+  - address: 0x080071d0
+    ghidra: FUN_080071d0
+    name: stream_buffer_set_sample_rate
+    size: 92
+    sig: "u32 stream_buffer_set_sample_rate(StreamBuffer *stream_buffer, u32 sample_rate)"
+    module: kernel/stream_buffer_set_sample_rate
+    status: ported
+    renames:
+      param_1/r0: stream_buffer
+      param_2/r1: sample_rate
+      param_1_plus_0x24: buffer_size
+      DAT_08007228: stream_buffer_pages_ready
+      FUN_080072cc: stream_buffer_page_initialize
+      uVar2/r2: result
+    notes: >-
+      Raw ARM has 88 bytes of code through pop {r4,pc} at 0x08007224,
+      then the 0x2200aed5 literal at 0x08007228; the next real function
+      begins at 0x0800722c, giving a true extent of 92 bytes. Independent
+      word decoding finds one outgoing plain BL to 0x080072cc, no
+      predicated BLs, and two incoming plain BLs at 0x080076ac and
+      0x0800772c. Unsigned sample rates below 22050 select 0x8000 bytes,
+      below 32000 select 0x10000, and all higher values select 0x20000.
+      The conditional subtracts implement the exact 22050 boundary, not
+      22016. An unchanged size returns zero without touching the ready
+      flag or invoking the initializer. Otherwise stores size at +0x24,
+      clears the shared IRAM-mirror flag, and calls the stock initializer
+      with (stream_buffer, 1, 0), forwarding its result. Reuses the
+      existing initializer module's callee seam and host ready storage;
+      no behavioral deviations. Host tests cover threshold neighbors,
+      unsigned maximum, unchanged bands, rebuilt derived page state,
+      return propagation, and preservation of unrelated object words.
+      ARM comparison preserves both thresholds, early return, and ordered
+      stores; LLVM tail-dispatches through the reused initializer seam
+      instead of the original direct BL.
+
   # --- RAM stream-buffer auxiliary page reset ---
   - address: 0x08007294
     ghidra: FUN_08007294
