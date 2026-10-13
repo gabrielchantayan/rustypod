@@ -39906,6 +39906,28 @@ functions:
       computes the elapsed count with u32 wrapping and returns whether it is
       at least milliseconds * 1000, as 0 or 1.
 
+  - address: 0x08038048
+    ghidra: thunk_EXT_FUN_22001f04
+    name: iram_usec_timer_elapsed_millis_veneer
+    size: 8
+    sig: "u32 iram_usec_timer_elapsed_millis_veneer(u32 start, u32 milliseconds)"
+    module: drivers/timer
+    status: ported
+    vars: {r0: start, r1: milliseconds}
+    renames:
+      0x22001f04: usec_timer_elapsed_millis_iram_mirror
+    notes: >-
+      Raw words 0xe51ff004 and 0x22001f04 encode ldr pc, [pc, #-4]
+      and its target literal. The next independent veneer at 0x08038050
+      establishes the true eight-byte extent, not Ghidra's four bytes.
+      Independent raw ARM decoding finds two plain inbound BL calls at
+      0x080fcb10 and 0x08205f84 and zero predicated BL calls. The target
+      is the IRAM mirror of the already ported usec_timer_elapsed_millis
+      at 0x08001f04. The Rust veneer preserves both arguments and the
+      unsigned result through that existing seam; it does not preserve
+      scratch registers or reproduce the literal-load tail transfer.
+      Volatile callee loading and a dedicated text section retain a
+      separately addressable hook target. No device execution performed.
   - address: 0x08001edc
     ghidra: FUN_08001edc
     name: usec_timer_read
