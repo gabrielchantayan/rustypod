@@ -16,6 +16,27 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083ed1c0
+    ghidra: FUN_083ed1c0
+    name: scanf_special_literal
+    size: 4
+    module: scanf/scanf_special_literal
+    status: ported
+    sig: "i32 scanf_special_literal(i32 no_match)"
+    vars: {r0: no_match}
+    notes: >-
+      Raw word e1a0f00e is mov pc, lr; extent ends at the next function's
+      tst r12, #0x100000 at 0x083ed1c4. One incoming plain BL at
+      0x08036454, zero predicated BLs, zero outgoing calls. The scanf
+      float engine dispatches i/I/n/N with r0=-3, then compares against
+      -3; this disabled inf/nan matcher preserves r0 and touches no state.
+      Unused register and stack arguments are omitted from the Rust ABI.
+      LLVM folds the exported symbol into no_op_u32 (same section, offset,
+      and 12-byte size; also preserve_word/tracker_trace). The shared body
+      pushes fp/lr, sets fp, and pops fp/pc without changing r0. match.py
+      cannot locate the alias label; comparison via no_op_u32 confirms
+      the only difference is frame setup/teardown versus mov pc, lr.
+
   - address: 0x08002420
     ghidra: FUN_08002420
     name: memory_controller_timing_configure

@@ -80,7 +80,8 @@
 //!   (-3 = "no literal") unchanged and the engine ALWAYS falls through
 //!   to the decimal paths. `inf`/`nan` input is therefore a plain -2
 //!   matching failure and `0x10` scans as `0.0` leaving `x10`. The
-//!   dispatch sites are kept as comments. The original also maintained a
+//!   inf/nan dispatch calls [`super::scanf_special_literal::scanf_special_literal`];
+//!   the hex dispatch remains a comment. The original also maintained a
 //!   leading-zero counter (sp+0x14) solely to gate the hex veneer (`0x`
 //!   valid only after exactly one zero); with the veneer stubbed it has
 //!   no observable effect and is not ported.
@@ -247,11 +248,14 @@ pub unsafe extern "C" fn scanf_float_engine(
     let mut exp_len = 0usize;
 
     if width > 0 {
-        // inf/nan literal dispatch @ 0x08036420 ('i'/'I'/'n'/'N' ->
-        // bl 0x083ed1c0): the veneer is a null `mov pc, lr` in retailOS
-        // and always returns -3 ("no literal"), so the characters simply
-        // fall through to the decimal paths below (a -2 failure).
-        //
+        // The retail inf/nan matcher preserves the supplied -3 sentinel.
+        if matches!(c, 0x69 | 0x49 | 0x6e | 0x4e) {
+            let result = super::scanf_special_literal::scanf_special_literal(-3);
+            if result != -3 {
+                return result;
+            }
+        }
+
         // Leading zeros (consumed, not stored) and the `0x` hex dispatch
         // (bl 0x083ed1bc — likewise a null veneer, so `0x` is never
         // hex); the original's leading-zero counter existed only to gate
