@@ -252601,3 +252601,42 @@ functions:
       mirrored builder into the veneer: stores selector 41 and both inputs
       at the correct relative request offsets, calls dispatch, and returns
       without reading request output. The veneer remains a real BL target.
+
+  - address: 0x0802e910
+    ghidra: FUN_0802e910
+    name: standard_cipher_initialize
+    size: 52
+    sig: "u32 standard_cipher_initialize(u32 *context, u32 mode, u32 round_count, const u8 *name, u32 auxiliary)"
+    module: crypto/standard_cipher_initialize
+    status: ported
+    renames:
+      param_1/r4: context
+      param_2/r1: mode
+      param_3/r2: round_count
+      param_4/r3: name
+      param_5/r5: auxiliary
+      iVar1/r0: name_status
+      FUN_0802ddcc: cipher_name_is_standard
+    notes: >-
+      Raw A32 verifies 52 executable bytes at 0x0802e910..0x0802e944;
+      0x0802e944 and 0x0802e948 are data words, and the next real function
+      starts at 0x0802e94c. One outbound plain BL at 0x0802e928 targets
+      the already-ported cipher_name_is_standard at 0x0802ddcc. Two inbound
+      plain BLs occur at 0x0802a948 and 0x0802a9b4; zero predicated BLs.
+      Stores mode and round_count at context offsets 0xf0 and 0xf4 before
+      name validation. Stores zero at 0xfc for STANDARD, auxiliary for any
+      rejected name, then clears only byte 0xf8, preserving bytes 0xf9..0xfb.
+      Preserves the validator low return word in r0 (0 accepted, 1 rejected).
+      Deliberate deviations: existing Rust validator replaces the retail BL;
+      explicit u32 return does not expose incidental r1. Volatile stores
+      preserve ordering for names aliasing context. The configure caller now
+      uses this Rust port; its obsolete initializer veneer/callback is removed.
+      Host tests cover accepted/rejected/empty/long names, ignored post-NUL
+      bytes, zero/high-bit auxiliary values, untouched storage and byte
+      padding, and name aliasing after the first two writes. Host suite and
+      ARM release build pass. Standalone smoke exercises both name outcomes
+      with the real validator and memcmp. match.py exits 1: 13 original
+      instructions versus 14 Rust instructions; same single call, status
+      comparison, conditional auxiliary selection, word stores and byte clear.
+      LLVM selects the value before one word store instead of two predicated
+      stores, and uses a frame pointer to load the fifth ABI argument.
