@@ -2456,6 +2456,150 @@ event_handler_source_child_rank:
 "#
 );
 
+/// Source-format update veneer, original `thunk_EXT_FUN_220076d4` at
+/// 0x080380e8. True size: 8 bytes, including the 0x220076d4 literal;
+/// the next veneer starts at 0x080380f0. Raw ARM decoding verifies two
+/// unconditional BL callers (0x08167900, 0x0827dcf8), zero predicated BL.
+///
+/// Tail-transfer to the IRAM mirror of the 176-byte body at 0x080076d4.
+/// If source word +0x58 differs from the requested rate, that body calls
+/// callback-target slots +0x10 and +0x30, reloads and stores the request's
+/// first word, updates the stream buffer, then calls slot +0x0c. In either
+/// case it propagates the source's three format words to eight children
+/// and the audio stream. It does not copy the request's other two words.
+///
+/// Deviations: none on ARM; preserve all registers, flags and LR with the
+/// exact literal veneer. Host builds execute the decoded body through
+/// explicit dependency operations, using firmware-width object words.
+#[cfg(target_arch = "arm")]
+extern "C" {
+    pub fn event_handler_source_format_update_veneer(source: *mut u32, format: *mut u32);
+}
+
+#[cfg(target_arch = "arm")]
+core::arch::global_asm!(
+    r#"
+    .syntax unified
+    .text
+    .p2align 2
+    .globl event_handler_source_format_update_veneer
+    .type event_handler_source_format_update_veneer, %function
+event_handler_source_format_update_veneer:
+    ldr pc, [pc, #-4]
+    .word 0x220076d4
+    .size event_handler_source_format_update_veneer, . - event_handler_source_format_update_veneer
+"#
+);
+
+/// Host operations for the unported IRAM body's dependency edges. Virtual
+/// dispatch receives its byte slot explicitly; each call obtains a fresh
+/// callback target, just as the original does.
+#[cfg(not(target_arch = "arm"))]
+#[derive(Clone, Copy)]
+pub struct SourceFormatUpdateOps {
+    pub callback_target: unsafe extern "C" fn() -> *mut u8,
+    pub callback: unsafe extern "C" fn(*mut u8, u32, *mut u32),
+    pub stream_buffer: unsafe extern "C" fn() -> *mut u8,
+    pub buffer_update: unsafe extern "C" fn(*mut u8, u32, u32, u32),
+    pub child_configure: unsafe extern "C" fn(u32, u32, u32, u32),
+    pub audio_configure: unsafe extern "C" fn(u32, u32, u32, u32),
+}
+
+/// Host embedding must install the real dependency implementations before use.
+#[cfg(not(target_arch = "arm"))]
+pub static mut SOURCE_FORMAT_UPDATE_OPS: Option<SourceFormatUpdateOps> = None;
+
+#[cfg(not(target_arch = "arm"))]
+unsafe fn source_format_update(source: *mut u32, format: *mut u32, ops: SourceFormatUpdateOps) {
+    if source.add(22).read_volatile() != format.read_volatile() {
+        (ops.callback)((ops.callback_target)(), 0x10, core::ptr::null_mut());
+        (ops.callback)((ops.callback_target)(), 0x30, format);
+        source.add(22).write_volatile(format.read_volatile());
+        let buffer = (ops.stream_buffer)();
+        (ops.buffer_update)(buffer, source.add(22).read_volatile(), 2, 16);
+        (ops.callback)((ops.callback_target)(), 0x0c, core::ptr::null_mut());
+    }
+    for index in 0..8 {
+        let rate = source.add(22).read_volatile();
+        let depth = source.add(23).read_volatile();
+        let channels = source.add(24).read_volatile();
+        (ops.child_configure)(source.add(index).read_volatile(), rate, depth, channels);
+    }
+    let stream = source.add(8).read_volatile();
+    let rate = source.add(22).read_volatile();
+    let depth = source.add(23).read_volatile();
+    let channels = source.add(24).read_volatile();
+    (ops.audio_configure)(stream, rate, depth, channels);
+}
+
+/// # Safety
+/// Source contains at least 25 aligned words; format's first word is readable
+/// and writable by the callback. Installed operations obey their retail ABI.
+#[cfg(not(target_arch = "arm"))]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn event_handler_source_format_update_veneer(
+    source: *mut u32, format: *mut u32,
+) {
+    let ops = core::ptr::read_volatile(core::ptr::addr_of!(SOURCE_FORMAT_UPDATE_OPS))
+        .expect("source format update dependencies not installed");
+    source_format_update(source, format, ops);
+}
+
+#[cfg(test)]
+mod source_format_update_tests {
+    extern crate std;
+    use self::std::vec::Vec;
+    use super::*;
+    use std::cell::RefCell;
+    std::thread_local! {
+        static EVENTS: RefCell<Vec<(u32, u32, u32, u32)>> = RefCell::new(Vec::new());
+    }
+    unsafe extern "C" fn target() -> *mut u8 { core::ptr::null_mut() }
+    unsafe extern "C" fn callback(_: *mut u8, slot: u32, format: *mut u32) {
+        EVENTS.with(|events| events.borrow_mut().push((slot, 0, 0, 0)));
+        if slot == 0x30 { format.write(48000); }
+    }
+    unsafe extern "C" fn buffer(_: *mut u8, rate: u32, channels: u32, depth: u32) {
+        EVENTS.with(|events| events.borrow_mut().push((0xff, rate, channels, depth)));
+    }
+    unsafe extern "C" fn configure(child: u32, rate: u32, depth: u32, channels: u32) {
+        EVENTS.with(|events| events.borrow_mut().push((child, rate, depth, channels)));
+    }
+
+    #[test]
+    fn rate_transition_reloads_callback_modified_request_and_preserves_other_words() {
+        for (old, requested) in [(0, 0), (44100, 44100), (0, u32::MAX)] {
+            EVENTS.with(|events| events.borrow_mut().clear());
+            let mut source = [0xa5a5a5a5; 25];
+            for index in 0..9 { source[index] = 0x100 + index as u32; }
+            source[22..25].copy_from_slice(&[old, 16, 2]);
+            let before = source;
+            let mut format = [requested, 8, 1];
+            unsafe {
+                source_format_update(source.as_mut_ptr(), format.as_mut_ptr(), SourceFormatUpdateOps {
+                    callback_target: target, callback, stream_buffer: target,
+                    buffer_update: buffer, child_configure: configure, audio_configure: configure,
+                });
+            }
+            let rate = if old == requested { old } else { 48000 };
+            assert_eq!(&source[..22], &before[..22]);
+            assert_eq!(&source[22..25], &[rate, 16, 2]);
+            assert_eq!(&format[1..], &[8, 1]);
+            EVENTS.with(|events| {
+                let events = events.borrow();
+                let mut expected = Vec::new();
+                if old != requested {
+                    expected.extend([(0x10, 0, 0, 0), (0x30, 0, 0, 0),
+                        (0xff, 48000, 2, 16), (0x0c, 0, 0, 0)]);
+                }
+                expected.extend((0..9).map(|index| (0x100 + index, rate, 16, 2)));
+                assert_eq!(*events, expected);
+            });
+        }
+    }
+}
+
 /// One thunk-table entry: the osos-side stub and its ROM target.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RomThunk {
@@ -2574,7 +2718,7 @@ pub static ROM_THUNKS: [RomThunk; 158] = [
     RomThunk { thunk_addr: 0x080380d0, rom_target: 0x22007aec, name: None },
     RomThunk { thunk_addr: 0x080380d8, rom_target: 0x220074e8, name: None },
     RomThunk { thunk_addr: 0x080380e0, rom_target: 0x22006b38, name: None },
-    RomThunk { thunk_addr: 0x080380e8, rom_target: 0x220076d4, name: None },
+    RomThunk { thunk_addr: 0x080380e8, rom_target: 0x220076d4, name: Some("event_handler_source_format_update_veneer") },
     RomThunk { thunk_addr: 0x080380f0, rom_target: 0x220029ac, name: None },
     RomThunk { thunk_addr: 0x080380f8, rom_target: 0x22006f40, name: None },
     RomThunk { thunk_addr: 0x08038100, rom_target: 0x22007c6c, name: None },

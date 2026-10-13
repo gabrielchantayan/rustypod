@@ -38308,6 +38308,37 @@ functions:
       children for retirement. ARM builds retain the exact literal veneer;
       host builds decode the leaf directly and test rank values including
       zero and both signed-halfword extrema.
+  # --- IRAM source-format update veneer ---
+  - address: 0x080380e8
+    ghidra: thunk_EXT_FUN_220076d4
+    name: event_handler_source_format_update_veneer
+    size: 8
+    sig: "void event_handler_source_format_update_veneer(u32 *source, u32 *format)"
+    module: kernel/thunks
+    status: ported
+    renames:
+      param_1/r0: source
+      param_2/r1: format
+    notes: >-
+      Raw words e51ff004 220076d4 form a literal tail-transfer veneer;
+      Ghidra omits its trailing literal. The next independent veneer begins
+      at 0x080380f0, establishing the eight-byte extent. Independent decoding
+      of every aligned ARM BL word finds two plain calls at 0x08167900 and
+      0x0827dcf8 and zero predicated calls. Target 0x220076d4 is the IRAM
+      mirror of osos 0x080076d4, not mask ROM. Its 176-byte body ends before
+      the real prologue at 0x08007788. It compares source +0x58 with the
+      request's first word; on change it invokes callback-target virtual
+      slots +0x10 and +0x30, reloads the possibly callback-mutated request,
+      stores only its first word, updates the stream buffer through
+      0x08006e88 and 0x080071d0, and invokes virtual slot +0x0c. It then
+      propagates source words +0x58/+0x5c/+0x60 to eight child handles and
+      one audio stream through veneers 0x08003920 and 0x08003928. ARM keeps
+      the exact instruction and literal, including LR and CPSR preservation.
+      Host builds execute the decoded target algorithm with explicit
+      dependency operations and firmware-width object words; tests cover
+      equal rates, zero and maximum request values, callback mutation of
+      the request, unchanged neighboring fields and ordered propagation.
+
   # --- callback-target virtual dispatch ---
   - address: 0x08007788
     ghidra: FUN_08007788
