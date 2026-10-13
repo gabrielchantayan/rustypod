@@ -1,4 +1,6 @@
 //! retailOS-native utility functions (CRC, itoa, byte swaps, ...).
+pub mod context_cleanup_noop;
+pub use context_cleanup_noop::*;
 pub mod output_word_cleanup_noop;
 pub use output_word_cleanup_noop::*;
 pub mod preserve_word;

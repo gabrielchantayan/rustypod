@@ -28565,6 +28565,27 @@ functions:
       BL sites (0x082fc4f4, 0x08343a90, and 0x08348600) and zero predicated
       direct BL sites. The leaf reads no arguments, writes no memory, and
       returns immediately while preserving r0. Deliberate deviations: none.
+  - address: 0x080276a0
+    ghidra: FUN_080276a0
+    name: context_cleanup_noop
+    size: 4
+    sig: "void *context_cleanup_noop(void *context)"
+    module: util/context_cleanup_noop
+    status: ported
+    renames:
+      param_1/r0: context
+    notes: >-
+      Raw osos.dec contains exactly 0xe12fff1e (bx lr) in the true extent
+      0x080276a0..0x080276a4; the next distinct empty function begins at
+      0x080276a4. Whole-image aligned A32 decoding finds two inbound
+      unconditional plain BL calls (0x082f8f20 and 0x08332b70), zero
+      predicated BL calls, zero outbound calls, and no aligned DATA references.
+      Both callers load a context word into r0. The leaf returns immediately
+      without accessing memory and preserves r0. The Rust signature exposes
+      that preserved word despite Ghidra's void signature. Deliberate
+      deviations: none. A distinct text section retains the real BL target.
+      The ARM implementation uses a naked bx lr body to avoid stack writes
+      from the otherwise generated frame-pointer prologue.
   - address: 0x0802a954
     ghidra: FUN_0802a954
     name: standard_cipher_configure
