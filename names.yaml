@@ -251885,3 +251885,27 @@ functions:
       exact descriptor and zero mode. Full host suite and ARM release build
       pass. match.py exits 1 with the expected LDR/B versus LDR/LDR-PC and
       two literal words, verifying descriptor and absolute tail destination.
+
+  - address: 0x08039968
+    ghidra: FUN_08039968
+    name: aes_submit_serialized
+    size: 124
+    sig: "u32 aes_submit_serialized(u32 decrypt, u32 key_source, const u8 *key, u8 *output, const u8 *input, u32 length, const u32 *iv)"
+    module: crypto/aes_submit_serialized
+    status: ported
+    vars: {r4: mutex_cache, r5: saved_status, r6: key_source, r7: key, r8: output, r9: input, r10: length, r11: iv}
+    renames: {FUN_082aadd4: operator_new, FUN_080744a4: mutex_create, FUN_0807f5c4: mutex_lock, FUN_0807f6a0: mutex_unlock, FUN_08039754: aes_engine_submit_firmware, DAT_080399e0: aes_mutex_cache}
+    notes: >-
+      Raw A32 establishes [0x08039968,0x080399e4), 124 bytes including
+      the literal 0x089d0ea8 at 0x080399e0. Ghidra's 120 bytes omit it.
+      Two inbound plain BLs at 0x080f7fb0 and 0x083690f8; five outbound
+      plain BLs and no predicated BLs. Lazily construct and publish an
+      eight-byte mutex, lock the reloaded cache, submit all seven original
+      arguments to the verified AES register-programming routine at
+      0x08039754, reload the cache for unlock, and preserve its status.
+      The first-use race and unchecked allocation remain intentional.
+      Existing allocator and mutex ports are reused; the unported AES
+      callee uses its exact firmware address on target and an explicit
+      host seam. Native host mutex allocation respects pointer width.
+      Tests cover cached reuse, release on success/error statuses, and
+      cache reload after submission. ARM codegen is reviewed with match.py.
