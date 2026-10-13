@@ -42006,6 +42006,31 @@ functions:
       via SOFTFLOAT_OPS (pow10 0x08034228, ext_mul 0x08037534, ext_div
       0x080374d4 — next batch). ERANGE on |exp|>500; canonical inf flatten.
 
+  - address: 0x0803736c
+    ghidra: FUN_0803736c
+    name: ext_fp_round_to_double
+    size: 92
+    sig: "u64 ext_fp_round_to_double(u32 sign, u32 exp, u32 mant_hi, u32 mant_lo, u32 sticky, i32 adj)"
+    module: printf/printf_float_dtoa
+    status: ported
+    renames:
+      r0: sign
+      r1: mant_hi
+      r2: mant_lo
+      r3: exp
+      r6: sticky
+      r11: adj
+    notes: >-
+      Raw A32 extent 0x0803736c..0x080373c7 has 88 executable bytes and
+      the infinity literal at 0x080373c4; next entry is 0x080373c8.
+      Two plain incoming BLs at 0x080374f8 and 0x08037558; one plain
+      outgoing BL at 0x08037390 to ext_fp_round; no predicated BLs.
+      Fold sticky halves and eleven discarded mantissa bits, subtract
+      0x3c01, normalize/round, discard sign, pack or return unsigned infinity.
+      Retains the existing Rust value seam: explicit sticky/adj replace
+      live r6/r11, split sign/exponent, u64 replaces high-r0/low-r1 return.
+      Not a direct stock-ABI hook. Host edge tests and division smoke pass;
+      ARM release builds. match.py exits 1: 22 stock vs 37 Rust instructions.
   - address: 0x080373c8
     ghidra: FUN_080373c8
     name: extended_fp_normalize_round_tail

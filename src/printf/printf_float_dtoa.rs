@@ -83,8 +83,8 @@
 //!   rounds to nearest, ties to even; adj = -1 truncates; other adj rounds
 //!   up. The negative-exponent path un-normalizes into a plain integer
 //!   (this is how the engine extracts the digit integer).
-//! - `ext_fp_round_to_double` — original: `FUN_0803736c` @ 0x0803736c (100
-//!   bytes). Rounds the extended value to a double (guard/sticky folded
+//! - `ext_fp_round_to_double` — original: `FUN_0803736c` @ 0x0803736c (88
+//!   executable bytes plus a 4-byte literal). Rounds the extended value to a double (guard/sticky folded
 //!   from the 11 low mantissa bits), packing via the implicit-bit-carry
 //!   trick; overflow yields unsigned infinity. NOTE: the original drops the
 //!   sign (`bic r0, r0, #0x80000000` before packing) — callers apply the
@@ -555,12 +555,25 @@ pub fn ext_fp_round(
     [sign | exp, mant_hi, mant_lo]
 }
 
-/// Round the extended value to a double, returned as its u64 bit pattern
-/// (hi word in bits 63..32). Original: `FUN_0803736c` @ 0x0803736c. The
-/// original drops the sign before packing (callers apply it themselves);
-/// overflow packs unsigned infinity.
+/// Round an extended value to binary64 bits (high word in bits 63..32).
+///
+/// Original: `FUN_0803736c` at load address `0x0803736c`: 92-byte extent
+/// through `0x080373c7`, comprising 88 executable bytes and the infinity
+/// literal at `0x080373c4`; the next real entry is `0x080373c8`.
+/// Raw A32 verifies two plain incoming BLs (0x080374f8, 0x08037558),
+/// one plain outgoing BL (0x08037390 to ext_fp_round), no predicated BLs.
+/// Fold sticky halves, move the eleven discarded mantissa bits into guard
+/// position, subtract the bias delta plus implicit-bit carry, normalize
+/// and round, then pack or saturate to unsigned infinity. The BIC before
+/// sign extraction deliberately discards the sign, including on overflow.
+///
+/// Deliberate ABI deviation: live r6/r11 become explicit `sticky`/`adj`
+/// arguments; sign/exponent are split, and the original high-r0/low-r1
+/// return becomes a u64 value. This is the existing Rust callers' seam,
+/// not a directly ABI-compatible firmware hook.
 #[cfg_attr(target_os = "none", no_mangle)]
-pub fn ext_fp_round_to_double(
+#[inline(never)]
+pub extern "C" fn ext_fp_round_to_double(
     sign: u32,
     exp: u32,
     mant_hi: u32,
@@ -575,13 +588,12 @@ pub fn ext_fp_round_to_double(
     let mant_hi = mant_hi >> 11;
     let exp = exp.wrapping_sub(0x3c00).wrapping_sub(1);
     let [exp, mant_hi, mant_lo] = ext_fp_round(sign, exp, mant_hi, mant_lo, sticky, adj);
-    let exp = exp & 0x7fff_ffff; // the original drops the sign here
-    let top = exp & 0x8000_0000; // always 0; kept for faithfulness
-    let hi = mant_hi.wrapping_add(exp << 20) | top;
+    let exp = exp & 0x7fff_ffff; // BIC precedes the original sign extraction.
+    let hi = mant_hi.wrapping_add(exp << 20);
     if exp.wrapping_add(1) < 0x800 {
         return ((hi as u64) << 32) | mant_lo as u64;
     }
-    (0x7ff0_0000u64 | top as u64) << 32 // overflow: unsigned infinity
+    0x7ff0_0000u64 << 32 // overflow: unsigned infinity
 }
 
 /// Extended multiply, extended result. Original: `FUN_08037504` @
@@ -1444,6 +1456,43 @@ mod tests {
         // sign is dropped by the original
         let d = ext_fp_round_to_double(0x8000_0000, 0x3fff, 0x8000_0000, 0, 0, 0);
         assert_eq!(d, 0x3FF0_0000_0000_0000);
+    }
+
+    #[test]
+    fn round_to_double_guard_sticky_and_carry() {
+        // Halfway at 1.0: retain an even low bit, increment an odd one.
+        assert_eq!(ext_fp_round_to_double(0, 0x3fff, 0x8000_0000, 0x400, 0, 0),
+                   0x3ff0_0000_0000_0000);
+        assert_eq!(ext_fp_round_to_double(0, 0x3fff, 0x8000_0000, 0xc00, 0, 0),
+                   0x3ff0_0000_0000_0002);
+        // Either half of the incoming sticky word makes a tie inexact.
+        for sticky in [1, 0x10000] {
+            assert_eq!(ext_fp_round_to_double(0, 0x3fff, 0x8000_0000, 0x400, sticky, 0),
+                       0x3ff0_0000_0000_0001);
+        }
+        assert_eq!(ext_fp_round_to_double(0, 0x3fff, 0xffff_ffff, 0xffff_ffff, 0, 0),
+                   0x4000_0000_0000_0000);
+        assert_eq!(ext_fp_round_to_double(0x8000_0000, 0x43fe, 0xffff_ffff, 0xffff_ffff, 0, 0),
+                   0x7ff0_0000_0000_0000);
+        // Explicit rounding adjustment is retained across the value seam.
+        assert_eq!(ext_fp_round_to_double(0, 0x3fff, 0x8000_0000, 0x401, 0, -1),
+                   0x3ff0_0000_0000_0000);
+        assert_eq!(ext_fp_round_to_double(0, 0x3fff, 0x8000_0000, 1, 0, 1),
+                   0x3ff0_0000_0000_0001);
+    }
+
+    #[test]
+    fn round_to_double_subnormal_boundaries() {
+        for (exp, low, expected) in [
+            (0x3c00, 0, 0x0008_0000_0000_0000),
+            (0x3bcd, 0, 1),
+            (0x3bcc, 0, 0), // exactly half the minimum subnormal, even zero
+            (0x3bcc, 1, 1), // just above half
+            (0x3bc0, 0, 0), // shift by 65, below half
+        ] {
+            assert_eq!(ext_fp_round_to_double(0, exp, 0x8000_0000, low, 0, 0), expected);
+        }
+        assert_eq!(ext_fp_round_to_double(0x8000_0000, 0, 0, 0, 0, 0), 0);
     }
 
     #[test]
