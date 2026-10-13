@@ -16,6 +16,37 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080039a0
+    ghidra: FUN_080039a0
+    name: event_handler_source_child_busy
+    size: 8
+    sig: "u32 event_handler_source_child_busy(void *child)"
+    module: kernel/thunks
+    status: ported
+    vars:
+      param_1/r0: ignored_child
+      return/r0: busy_status_zero
+      DAT_080039a4: relocated_constant_zero_target
+    notes: >-
+      Raw words e51ff004 0818c520 establish the literal tail veneer
+      extent [0x080039a0,0x080039a8), including its target word; the
+      next real veneer starts at 0x080039a8. Independent whole-image
+      aligned A32 decoding finds two plain inbound BLs at 0x08007b10
+      and 0x08007b78, no predicated inbound BLs and no outgoing BLs.
+      Startup 0x080046e0 copies the main image from file +0xaed8
+      to 0x08000000, verified by literals 0x0800478c=0xaed8 and
+      0x080047a0=0x08000000 and its source arithmetic. Thus runtime
+      target 0x0818c520 is file load address 0x081973f8, whose raw
+      e3a00000 e12fff1e words are MOV r0,#0; BX LR, followed by a
+      separate LDRB/BX entry at 0x08197400. Caller 0x08007aec selects
+      a zero-status child and retires nonzero-status children. Return
+      zero without accessing the child. Deliberate deviation: inline
+      the proven target rather than preserve the literal veneer; no
+      invented callee seam. Host suite passes 15902 tests; edge tests
+      and optimized actual-source smoke verify null/invalid pointers,
+      zero status and unchanged child bytes. ARM release build passes.
+      match.py exits 1: original literal jump versus balanced frame
+      save/restore and MOV r0,#0; the exported symbol is present.
   - address: 0x080044ac
     ghidra: FUN_080044ac
     name: stream_buffer_refill_floor_request
