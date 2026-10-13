@@ -16,6 +16,38 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083ea660
+    ghidra: FUN_083ea660
+    name: string_pair_vector_record_range_fill
+    size: 56
+    module: cxx/string_pair_vector_record_range_fill
+    status: ported
+    sig: "void string_pair_vector_record_range_fill(uint32_t *first, uint32_t *end, const uint32_t *source)"
+    renames:
+      param_1/r0/r4: first
+      param_2/r1/r6: end
+      param_3/r2/r5: source
+    notes: >-
+      Raw extent 0x083ea660..0x083ea698 ends before the next independent PUSH.
+      Whole-image A32 decoding confirms one incoming plain BL at 0x083e1704,
+      one outgoing plain BL at 0x083ea684 to 0x083e30f0, and zero predicated
+      BLs in either direction. Fill initialized 20-byte records in [first,end):
+      preserve word +0, copy source word +4, assign the nested vector at +8,
+      advance 20 bytes. Empty bounds read nothing; every iteration rereads
+      source, including when source aliases output. Caller 0x083e1614 uses
+      this in its in-capacity insertion path. Neither address had a names entry.
+      Raw code and Ghidra identify the callee as vector assignment of 12-byte
+      two-COW-string-plus-word entries; retain it as a fixed firmware seam.
+      Deliberate deviation: use its actual two-pointer ABI, omitting Ghidra's
+      extra r2/r3 parameters, which are stack scratch rather than inputs.
+      Host tests exercise empty bounds, source aliasing and mutation, field
+      ordering, preserved prefixes and the excluded end record.
+      Full host suite and ARM release build pass. Standalone exported-function
+      smoke confirms null empty bounds return without firmware access.
+      Required match.py exits 1 with a reviewed structural diff: LLVM adds an
+      early empty return and balanced frame, hoists source +8, and uses BLX
+      through literal 0x083e30f0 rather than direct BL. The scalar load/store,
+      nested assignment, 20-byte stride and equality termination are preserved.
   - address: 0x083ea6d4
     ghidra: thunk_FUN_083ea6dc
     name: find_word_range
