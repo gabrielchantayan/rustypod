@@ -16,6 +16,36 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083e2dac
+    ghidra: FUN_083e2dac
+    name: vector_record24_assign
+    size: 412
+    module: cxx/vector_record24_assign
+    status: ported
+    sig: "VectorStorage *vector_record24_assign(VectorStorage *destination, const VectorStorage *source)"
+    renames:
+      param_1/r4: destination
+      param_2/r5: source
+      r6: source_size_or_new_capacity
+      r7: old_allocation
+      r8: new_allocation
+      FUN_083d77dc: vector_size_elem24
+      FUN_083d77ec: vector_capacity_elem24_copy_77ec
+      FUN_083e8cf0: vector_copy_range_elem24_alias_8cf0
+      FUN_083e9c80: vector_record24_copy
+    notes: >-
+      Raw osos.dec establishes extent 0x083e2dac..0x083e2f48 (412 bytes),
+      not the reported 168 bytes. Final pop at 0x083e2f44 precedes the
+      next independent push at 0x083e2f48. Whole-image aligned A32 decoding
+      finds one inbound plain BL at 0x0822c6f4, no predicated inbound BLs,
+      17 outgoing plain BLs and no predicated outgoing BLs. Assign trivial
+      24-byte records; self-assignment returns unchanged. Reallocation grows
+      to max(source size, old size + 32, old size + old size/2 + old size/8).
+      Shrink/equal assignment deliberately reduces storage end to live end;
+      growth within capacity preserves storage end. Omit empty destructor
+      loops and inline signed distance/24 helpers; reuse registered copy,
+      checked allocation and deallocation ports. Ghidra's r2/r3 arguments
+      are stack scratch, not inputs.
   - address: 0x083e6c9c
     ghidra: FUN_083e6c9c
     name: three_word_swap
