@@ -132,6 +132,7 @@ pub mod pkcs7_get_octet_string;
 pub mod obj_name_alias_register;
 pub mod ipod_serial_nid_ensure;
 pub mod xor_f6_in_place;
+pub mod xor_22_copy;
 pub mod standard_cipher_table_one;
 pub mod standard_cipher_table_two;
 pub mod buf_strdup;

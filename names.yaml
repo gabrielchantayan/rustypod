@@ -16,6 +16,44 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0800f17c
+    ghidra: FUN_0800f17c
+    name: xor_22_copy
+    size: 48
+    sig: "u32 xor_22_copy(const u8 *src, u8 *dst, i32 len)"
+    module: crypto/xor_22_copy
+    status: ported
+    vars:
+      param_1/r0: src
+      param_2/r1: dst
+      param_3/r2: len
+      iVar1/r3: index
+      r12: saved_src
+      return/r0: zero
+    notes: >-
+      Raw A32 code occupies [0x0800f17c,0x0800f1ac), 48 bytes.
+      BX LR at 0x0800f1a8 terminates the loop; the intervening words
+      0xa7ae8400 and 0x6d85d450 are not executed. The next real function
+      starts at 0x0800f1b4, independently called by plain BLs at
+      0x08014ba0 and 0x080186e8. Whole-image aligned A32 scanning verifies
+      two plain inbound BLs at 0x0800c9a8 and 0x0800cee0, zero predicated
+      inbound BLs and zero outgoing calls. Callers FUN_0800c964 and
+      FUN_0800ce9c decode 256-byte lookup tables from source immediately
+      preceding destination and set initialization flag bits 1 and 2.
+      Copy forwards with immediate byte loads and stores, XORing with 0x22.
+      Signed non-positive lengths access no memory; overlap observes earlier
+      writes. No NULL guard for positive lengths. Preserve the raw zero
+      return in r0 despite Ghidra's void signature. No callee seams or
+      behavioral deviations. Volatile accesses preserve byte ordering.
+      Registered module and inline-never dedicated section retain an exported
+      ARM symbol. All 15890 host tests pass, including byte values, independent
+      alignments, range boundaries, overlap directions and negative lengths.
+      ARM release build passes. Optimized actual-source executable smoke
+      passes the 256-byte table, forward overlap and signed no-access path.
+      match.py exits 1 with a reviewed structural diff: both versions have
+      12 instructions; LLVM uses a signed entry guard, post-increment byte
+      pointers and countdown loop instead of predicated indexed accesses,
+      adds balanced frame save/restore, and explicitly returns zero.
   - address: 0x08027608
     ghidra: FUN_08027608
     name: obfuscated_state_machine_zero
