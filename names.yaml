@@ -126110,6 +126110,39 @@ functions:
       the veneer names the third. match.py structural: ldr/ldr/bx through
       a literal - the original's indirect-jump-through-a-literal shape
       plus one indirection and the crate's fp frame.
+  - address: 0x08038240
+    ghidra: thunk_EXT_FUN_22001ed0
+    name: iram_timer_e_counter_read_veneer
+    size: 8
+    sig: "u32 iram_timer_e_counter_read_veneer(void)"
+    module: drivers/timer
+    status: ported
+    vars: {DAT_08038244: iram_timer_e_counter_reader}
+    notes: >-
+      Raw words 0xe51ff004 and 0x22001ed0 form an 8-byte absolute
+      tail-transfer veneer; Ghidra's 4-byte extent excludes the literal.
+      Next real veneer starts at 0x08038248. Full aligned ARM BL decoding
+      finds two plain unconditional calls at 0x08295d98 and 0x08295dec,
+      zero predicated BL calls. Both sample around a callback in
+      FUN_08295d20 and store the wrapping difference at object +0x220.
+      Relocator 0x080046e0 copies 0xaed8 bytes from 0x08000000 to
+      0x22000000, so 0x22001ed0 is IRAM, not mask ROM. Its osos body
+      is 12 bytes ending at the next body 0x08001edc: ldr r0 from the
+      literal at 0x080023d0 (0x3c700000), ldr r0 at +0xb4, bx lr.
+      Returns the raw Timer E microsecond counter without arguments.
+      Deliberate deviations: call existing usec_timer_read at 0x08001edc,
+      whose behavior is identical, rather than introduce a new callee
+      identity for 0x08001ed0. Host uses the existing deterministic counter
+      seam. Volatile function-pointer load and dedicated text section
+      retain the separate hook target with an extra indirection/frame.
+      Host edge tests cover raw bits, exactly one counter sample, and
+      callback elapsed-time subtraction across u32 wrap.
+      match.py reports the stock single ldr pc versus the Rust frame,
+      volatile callee-pointer load, frame restore, and bx tail dispatch;
+      the additional indirection is intentional, not a different counter.
+      Linked ARM code and raw stock veneer executed under Unicorn agree
+      for seven counter cases including sign-bit and wrap extremes, with
+      exactly one aligned TECNT read each; elapsed across wrap is seven.
   # --- IRAM veneer for the microsecond deadline predicate ---
   - address: 0x08037eb8
     ghidra: thunk_EXT_FUN_22001ee8
