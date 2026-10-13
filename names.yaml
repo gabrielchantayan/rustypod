@@ -254507,3 +254507,39 @@ functions:
       instruction state, caller ABI, and real function boundaries.
       No Rust implementation, behavioral tests, ARM build, match.py
       comparison, emulator execution, or device execution claimed.
+
+  - address: 0x0880818c
+    ghidra: FUN_0880818c
+    name: unresolved_tlmt_data_candidate_0880818c
+    size: null
+    sig: "unresolved; executable entry and ABI not established"
+    module: null
+    status: identified
+    notes: >-
+      Honest deferral: Ghidra's one-byte function is not established by
+      raw osos.dec at file offset 0x0080818c. Seven words in
+      [0x0880818c,0x088081a8) are 00000000, decoding as A32 ANDEQ
+      r0,r0,r0 or Thumb MOVS r0,r0, not a return or veneer. Following
+      words at 0x088081a8/0x088081ac are 00000001/000000ac.
+      ASCII TLMT markers at 0x088080f8, 0x088081b0 and 0x08808268
+      repeat every 0xb8 bytes, supporting a data-record interpretation.
+      No next real function boundary, true executable size, signature,
+      or algorithm can be established. Whole-image aligned A32 immediate
+      BL decoding finds zero plain inbound candidates and one predicated
+      candidate at 0x08585d84: word 0b0a0900 decodes as BLEQ to this
+      address. Surrounding words 08040807, 00000007, 04040c0b,
+      0b0b0c04 and 0900090a do not establish an executable caller;
+      the apparent call occurs in small-valued byte data. Whole-image
+      halfword-aligned ARMv5 Thumb BL decoding finds zero inbound
+      candidates. No outgoing BL appears in the seven zero entry words;
+      a real function call count cannot be asserted without boundaries.
+      Ghidra assembly interprets the entry as Thumb MOV r0,r0 and
+      nearby ffff halfwords as BL #0xffe. Decompiled C invents indirect
+      calls using incoming LR and uninitialized r5 across these records.
+      Full names.yaml had no existing entry for the assigned address.
+      No callee identity, seam, replacement behavior, or dependency on
+      the undecrypted region is invented. Faithful porting requires
+      verified executable mapping, instruction state, caller ABI and
+      function boundaries. Deliberate deviation: no Rust implementation.
+      Raw-byte and branch-decoding probes executed; no host behavior
+      tests, ARM build, match.py comparison or device execution claimed.
