@@ -254818,3 +254818,36 @@ functions:
       Deliberate deviation: no Rust port. Raw branch scans and A32/Thumb
       objdump probes executed; no host tests, ARM build, match.py or
       device behavior verification claimed.
+  - address: 0x087f59f4
+    ghidra: FUN_087f59f4
+    name: structured_data_record_0102_second_value
+    size: 4
+    sig: "data word; executable ABI unverified"
+    status: identified
+    notes: >-
+      Deferred: assigned address is structured data, not a verified
+      function. Size 4 describes the assigned word, not a function
+      extent; Ghidra reports 27 bytes without a real executable boundary.
+      Raw record [0x087f59e4,0x087f5a00) contains 00000014, 00000000,
+      00000102, 0dad01a4, 0dad01a5, 000cffff, 0200ffff. The assigned
+      word is record 0x102 second value. The next record starts at
+      0x087f5a00 with identifier 0x103 and values 0dad064d/0dad065c.
+      Thumb decoding of the assigned halves yields LSLS r5, r4, #6
+      and LSRS r5, r5, #22; neighboring ffff halfwords are not valid
+      ARMv5 Thumb BL pairs. Ghidra invents LR-relative indirect calls
+      across the data records. Independent whole-image aligned A32
+      BL decoding finds zero plain incoming candidates and one
+      predicated candidate: 0b0b0b0b at 0x08532dc0 decodes as BLEQ
+      0x087f59f4. Surrounding sequential 15 through 29 bytes mixed
+      with repeated 0b bytes identify table-like data, not a verified
+      executable caller. Whole-image halfword-aligned ARMv5 Thumb BL
+      decoding finds zero incoming candidates. Raw candidate extent
+      [0x087f59f4,0x087f5a10) contains zero plain or predicated A32 BL
+      instructions and zero Thumb BL pairs. No true executable extent,
+      next real function boundary, caller ABI or callee identity can be
+      established. Full names.yaml had no existing entry for this address.
+      Faithful porting requires verified executable mapping and boundaries;
+      no Rust seam or undecrypted-region dependency is invented.
+      Deliberate deviation: no Rust port. Raw word and branch scans
+      executed; no host behavior tests, ARM build, match.py or device
+      behavior verification claimed.
