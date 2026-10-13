@@ -16,6 +16,36 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083e0990
+    ghidra: FUN_083e0990
+    name: vector_head_swap
+    size: 52
+    module: cxx/three_word_swap
+    status: ported
+    sig: "void vector_head_swap(uint32_t *left, uint32_t *right)"
+    renames:
+      param_1/r0: left
+      param_2/r1: right
+      r2/r3/r12: per-word swap temporaries
+    notes: >-
+      Raw extent 0x083e0990..0x083e09c4 ends in BX LR before the next
+      independent PUSH. Whole-image aligned A32 decoding finds one incoming
+      plain BL at 0x0815f530, zero predicated incoming BLs, and zero outgoing
+      plain or predicated BLs. Caller 0x0815f47c exchanges a temporary vector
+      head with its object's member at +0x0c. Swap aligned words at offsets
+      0, 4, 8 sequentially, loading both words before each pair of stores.
+      Preserve self-aliasing and both overlap directions; no callee seams
+      or behavioral deviations. Reuse the existing three_word_swap module;
+      LLVM may fold identical exports. Host reference tests exercise disjoint
+      records, guards, high-bit values and every pair of offsets 1..5.
+      Actual-source smoke verifies shifted overlap, self-swap and preserved
+      guards. Host suite and ARM release build pass. Both exported symbols
+      share the same archive object and offset (verified with nm).
+      Required match.py cannot find vector_head_swap because objdump labels
+      the folded body three_word_swap. Supplemental match against that label
+      reviews 15 Rust instructions versus 13 stock: balanced fp/LR frame,
+      reordered independent loads and no right-pointer writeback, retaining
+      all three sequential exchanges and zero outgoing calls.
   - address: 0x083e15ec
     ghidra: FUN_083e15ec
     name: cxx_string_pair_vector_owner_range_destroy
