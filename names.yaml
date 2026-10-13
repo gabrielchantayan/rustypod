@@ -16,6 +16,34 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08027660
+    ghidra: FUN_08027660
+    name: obfuscated_second_word
+    size: 56
+    sig: "u32 obfuscated_second_word(u32 ignored_word, u32 result_word)"
+    module: app/obfuscated_second_word
+    status: ported
+    vars:
+      param_1/r0: ignored_word
+      param_2/r1: result_word
+      return/r0: result_word
+    notes: >-
+      Executable body is eight bytes: e1a00001 e12fff1e (MOV r0,r1; BX LR).
+      Boundary extent is [0x08027660,0x08027698), 56 bytes. Twelve trailing
+      BX LR words have no aligned inbound branches or address literals;
+      the next real entry at 0x08027698 has four independent branch references.
+      Full-image aligned A32 decoding finds two plain inbound BLs at
+      0x08343990 and 0x08348784, zero predicated BLs, zero outgoing calls.
+      Callers FUN_0834358c and FUN_08348038 consume the second word in
+      byte-masked arithmetic. Return all 32 bits of r1, ignore r0, access
+      no memory. Concrete argument types remain opaque; no callee seams.
+      No behavioral deviations; unreachable trailing words are omitted.
+      Dedicated text section and inline-never retain the patch target.
+      Host edge tests and actual-source executable smoke cover full-width
+      Full host suite and ARM release build pass. Actual-source executable
+      smoke checks 1036 exact results. match.py exits 1 with a structural
+      difference: balanced PUSH {fp,lr}; MOV fp,sp; MOV r0,r1; POP {fp,pc}
+      instead of MOV r0,r1; BX LR. The result and ABI are preserved.
   - address: 0x080276a8
     ghidra: FUN_080276a8
     name: obfuscated_word_noop

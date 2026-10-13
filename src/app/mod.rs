@@ -2,6 +2,7 @@
 //! context and the small helpers its view classes lean on.
 pub mod obfuscated_context_noop;
 pub mod obfuscated_word_noop;
+pub mod obfuscated_second_word;
 pub mod descriptor_apply_counted_string;
 pub use descriptor_apply_counted_string::descriptor_apply_counted_string;
 pub mod descriptor_lookup_attach;
