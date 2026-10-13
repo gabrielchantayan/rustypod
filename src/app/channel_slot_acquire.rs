@@ -34,9 +34,55 @@ pub unsafe extern "C" fn channel_slot_acquire(
     0
 }
 
+/// Acquire a channel slot through the startup veneer.
+///
+/// `FUN_08003850` @ 0x08003850, 8 bytes through 0x08003858:
+/// raw words `e51ff004 08201518` load PC from the adjacent literal.
+/// Whole-image A32 decoding verifies two plain inbound BLs (0x0800604c,
+/// 0x080064dc), zero predicated inbound BLs and zero outgoing BLs.
+/// Startup relocation adds 0xaed8, resolving the target to the existing
+/// `channel_slot_acquire` @ 0x0820c3f0. Select a record, reset or preserve
+/// its buffer address, copy that address to output, publish state 2,
+/// and return zero without advancing the selector.
+/// Deliberate deviation: Rust forwards rather than loading PC.
+///
+/// # Safety
+/// The alignment, valid-record and synchronization requirements of
+/// `channel_slot_acquire` apply unchanged, including output aliasing.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn channel_slot_acquire_veneer(
+    base: *mut u32, channel: u32, output: *mut u32, preserve: u32,
+) -> u32 {
+    channel_slot_acquire(base, channel, output, preserve)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn veneer_preserves_alias_order_and_resets_selected_buffer() {
+        for selected in [0usize, 1] {
+            for preserve in [0, u32::MAX] {
+                let mut words = [0xaabbccddu32; 32];
+                words[1] = selected as u32;
+                let record = 14 + selected * 7;
+                words[record + 3] = 0x12345678;
+                let mut expected = words;
+                let address = if preserve != 0 { 0x12345678 }
+                    else if selected == 0 { 0x08adc7a8 } else { 0x08ae07a8 };
+                expected[record + 3] = address;
+                expected[record + 2] = (address & !0xff) | 2;
+                unsafe {
+                    let base = words.as_mut_ptr();
+                    assert_eq!(channel_slot_acquire_veneer(
+                        base, 1, base.add(record + 2), preserve), 0);
+                }
+                assert_eq!(words, expected);
+            }
+        }
+    }
 
     #[test]
     fn selected_slot_reset_or_preserve_without_advancing() {

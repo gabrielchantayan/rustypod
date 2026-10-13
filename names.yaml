@@ -16,6 +16,35 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08003850
+    ghidra: FUN_08003850
+    name: channel_slot_acquire_veneer
+    size: 8
+    sig: "u32 channel_slot_acquire_veneer(u32 *base, u32 channel, u32 *output, u32 preserve)"
+    module: app/channel_slot_acquire
+    status: ported
+    vars:
+      r0: base
+      r1: channel
+      r2: output
+      r3: preserve
+      DAT_08003854: relocated_channel_slot_acquire
+      return/r0: status_zero
+    notes: >-
+      Raw e51ff004 08201518 establishes [0x08003850,0x08003858), eight
+      bytes through the next veneer. Whole-image A32 decoding verifies
+      two plain inbound BLs at 0x0800604c and 0x080064dc, zero predicated
+      inbound BLs and zero outgoing BLs. Startup relocation +0xaed8 maps
+      runtime 0x08201518 to already-ported channel_slot_acquire at
+      0x0820c3f0. Reuses its four-argument ABI without a new callee seam.
+      Reset or preserve the selected buffer, copy its address to output,
+      publish byte state 2 and return zero without advancing the selector.
+      Deliberate deviation: Rust forwards instead of loading PC. Existing
+      module is registered. Host suite and ARM release build pass; edge
+      tests and optimized actual-source smoke verify reset, preservation,
+      output alias ordering and selector stability. match.py exits 1:
+      literal jump versus five instructions with a balanced frame,
+      R_ARM_CALL to channel_slot_acquire and explicit zero return.
   - address: 0x08003858
     ghidra: FUN_08003858
     name: channel_slot_publish_veneer
