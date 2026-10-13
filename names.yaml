@@ -16,6 +16,30 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080276a8
+    ghidra: FUN_080276a8
+    name: obfuscated_word_noop
+    size: 4
+    sig: "u32 obfuscated_word_noop(u32 word)"
+    module: app/obfuscated_word_noop
+    status: ported
+    vars:
+      r0: opaque_word
+    notes: >-
+      Raw e12fff1e is BX LR. True extent [0x080276a8,0x080276ac);
+      next entry has independent BL callers at 0x08343cf0 and 0x08348354.
+      Whole-image aligned A32 decoding verifies two plain inbound BLs
+      at 0x082fa92c and 0x08312ed0, zero predicated inbound BLs,
+      zero outgoing calls, and no aligned address-word references.
+      Obfuscated state-machine callers FUN_082fa514 and FUN_08312b70
+      load r0 from sp+0x14c and sp+0x148; neither consumes the result.
+      Return without memory access, preserving the opaque word. Concrete
+      type and destructor identity are unknown; no callee seams introduced.
+      Deliberately expose preserved r0 as a u32 return despite Ghidra's
+      void prototype. Dedicated text section prevents identical-body folding.
+      Host edge tests, actual-source executable smoke, full host suite and
+      ARM release build pass. match.py exits 1: stock BX LR versus balanced
+      PUSH {fp,lr}, MOV fp,sp, POP {fp,pc}; r0 remains untouched.
   - address: 0x080276ac
     ghidra: FUN_080276ac
     name: obfuscated_context_noop
