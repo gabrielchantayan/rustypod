@@ -16,6 +16,35 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083e6c9c
+    ghidra: FUN_083e6c9c
+    name: three_word_swap
+    size: 52
+    module: cxx/three_word_swap
+    status: ported
+    sig: "void three_word_swap(uint32_t *left, uint32_t *right)"
+    renames:
+      param_1/r0: left
+      param_2/r1: right
+      r2/r3/r12: per-word swap temporaries
+    notes: >-
+      Raw A32 extent 0x083e6c9c..0x083e6cd0 is 52 bytes, ending in
+      BX LR before the next independent PUSH. Whole-image aligned raw
+      decoding finds one incoming plain BL at 0x0816f378, zero predicated
+      incoming BLs, and zero outgoing plain or predicated BLs. Caller
+      0x0816f360 exchanges a temporary three-word record with its object's
+      member at +0x68. Swap aligned words at offsets 0, 4 and 8 in order,
+      loading both operands before either store for each word. Preserve
+      self-aliasing and shifted overlap; do not snapshot the full records.
+      No previous address entry, no callees and no new firmware seams.
+      Deliberate behavioral deviations: none. Host tests cover disjoint
+      records, high-bit values, guards and every pair of offsets 1..5,
+      including self-aliasing and both overlap directions. Full host suite:
+      15964 passed. ARM release build passed. Standalone actual-source
+      smoke verified shifted overlap and self-aliasing. Required match.py
+      exits 1: 15 Rust instructions versus 13 stock. LLVM adds an fp/LR
+      frame and changes load order/registers, retaining all three sequential
+      load/load/store/store exchanges with no outgoing calls.
   - address: 0x083e876c
     ghidra: FUN_083e876c
     name: string_word_record_merge_backward
