@@ -16,6 +16,39 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083ea64c
+    ghidra: FUN_083ea64c
+    name: word_pair_range_fill
+    size: 20
+    module: cxx/word_pair_range_fill
+    status: ported
+    sig: "uint32_t *word_pair_range_fill(uint32_t *first, uint32_t *end, const uint32_t *source)"
+    renames:
+      param_1/r0: first (returned final cursor)
+      param_2/r1: end
+      param_3/r2: source
+      uVar1/r12: high
+      r3: low
+    notes: >-
+      Raw extent 0x083ea64c..0x083ea660 comprises CMP, LDMNE, STMNE,
+      BNE back to entry, and BX LR; next real function starts PUSH.
+      Whole-image aligned A32 decoding independently finds one incoming
+      plain BL at 0x083e0854, zero predicated incoming BLs, and zero
+      outgoing plain or predicated BLs. Caller 0x083e07d4 uses this in
+      its in-capacity eight-byte vector insertion path. Fill [first,end)
+      with two aligned source words, loading both before either store,
+      reloading source each iteration, and advancing eight bytes.
+      Empty bounds read nothing. No existing address entry or callee seam.
+      Deliberate deviation: expose the final r0 cursor as a pointer return,
+      rather than Ghidra's void; raw execution leaves r0 equal to end.
+      Host tests cover all pair subranges, high-bit values, preserved
+      boundaries, empty null operands, and word-shifted source aliasing
+      against a sequential pair-snapshot reference. Standalone actual-source
+      smoke confirms overlap mutation, returned end and null empty bounds.
+      Full host suite and ARM release build pass. Required match.py exits 1:
+      LLVM uses an early empty return and balanced fp/LR frame, then the
+      same LDM/STM pair snapshot, eight-byte advance and equality loop.
+      The exported symbol remains a real function with no outgoing calls.
   - address: 0x083ea660
     ghidra: FUN_083ea660
     name: string_pair_vector_record_range_fill
