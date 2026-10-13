@@ -251909,3 +251909,36 @@ functions:
       host seam. Native host mutex allocation respects pointer width.
       Tests cover cached reuse, release on success/error statuses, and
       cache reload after submission. ARM codegen is reviewed with match.py.
+
+  - address: 0x080391e0
+    ghidra: FUN_080391e0
+    name: stream_read_format_record
+    size: 156
+    sig: "i32 stream_read_format_record(u32 stream, u32 *record, u32 incoming_r2)"
+    module: util/stream_read_format_record
+    status: ported
+    vars: {param_1/r0: stream, param_2/r1: record, param_3/r2: incoming_r2, local_18: format, uStack_14: ignored_word}
+    notes: >-
+      Raw A32 verifies [0x080391e0,0x0803927c); the next function begins
+      with PUSH. Two incoming plain BLs at 0x08038ff0 and 0x08138258,
+      zero predicated incoming BLs, nine outgoing plain BLs and zero
+      predicated outgoing BLs. Seek tag 6 using stream_seek_tagged_entry,
+      discard six big-endian words on success, then read a big-endian
+      halfword into record[0]. A missing tag stores the low halfword of
+      -24 (0xffe8). Read and seek statuses are ignored. The halfword
+      stack slot initially contains incoming r2, so a failed read keeps
+      its low halfword; both callers leave r2 uninitialized as an argument.
+      Preserve these register bits explicitly, not an invented zero default.
+      Incoming r3 only seeds an unread scratch slot and is omitted.
+      Finally call the unported six-word format-record helper at the
+      raw-verified address 0x08056fa0 with (0,1,record), then return zero.
+      Existing stream ports are reused; the helper remains a target
+      fixed-address call with an injectable host seam, not a second port.
+      Host suite passes 15820 tests, including missing-tag truncation,
+      failed discard reads, halfword seed preservation, and output guards.
+      A standalone stream smoke produces [49164,16000,20,160,16000,16]
+      at cursor 66. ARM release build succeeds. match.py reports a structural
+      diff (39 original versus 48 generated instructions); relocations
+      confirm the tag seeker, six u32 reads, one u16 read, and the final
+      literal-address BLX to 0x08056fa0. Stack layout and register allocation
+      differ intentionally; branching, truncation and call order agree.
