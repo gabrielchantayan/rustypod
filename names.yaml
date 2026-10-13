@@ -16,6 +16,48 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0800d124
+    ghidra: FUN_0800d124
+    name: reverse_affine_words
+    size: 200
+    sig: "u32 reverse_affine_words(u32 *end, u32 count)"
+    module: crypto/reverse_affine_words
+    status: ported
+    vars:
+      param_1/r0: end
+      param_2/r1: count
+      r10: index_bias
+      r6: bound_mask
+      r1: encoded_index
+      r12: adjusted_count
+      return/r0: zero
+    notes: >-
+      Raw A32 extent [0x0800d124,0x0800d1ec) is 200 bytes; the next
+      function has its own stack-save entry and independently targeted BLs.
+      Whole-image aligned raw-word scanning verifies two plain inbound BLs
+      at 0x0802cd44 and 0x0802dbd8, zero predicated inbound BLs, and zero
+      outgoing plain or predicated BLs. No callee seams are required.
+      Callers pass count 256 and the end pointer advanced by the word decoder
+      at 0x0802b5d4. Walk backward over aligned u32 words and return zero.
+      Preserve the exact wrapping MBA stopping predicate and its signed
+      final sign test; ordinary nonnegative counts process count words.
+      Literal pool 0x0800dd1c..0x0800dd38 contains 445f52c1, 99ea4e00,
+      bba0ad3e, 1a33640b, 725560f6, b57d1ebf and 0c916c82.
+      The affine map is (word * 1a33640b - 725560f6) * b57d1ebf
+      - 0c916c82 modulo 2^32, folded to word * 326fee35 - a1bf980c.
+      Deliberate deviations are this equivalent constant folding and delaying
+      pointer subtraction until the bound passes, avoiding invalid unused
+      pointer formation on no-access paths. Registered crypto module exports
+      an inline-never ARM symbol in a dedicated text section. Host edge tests
+      cover counts 0..256, arithmetic wraparound, neighboring sentinels and
+      null no-access counts 0, 80000000, 80000001 and ffffffff.
+      All 15892 host tests pass; ARM build-std core release build passes.
+      Optimized actual-source executable smoke exercises the caller's 256-word
+      path, both sentinels, zero return and null zero count. match.py exits 1
+      with a reviewed structural diff (50 original instructions versus 32
+      reported Rust instructions including literal words). LLVM folds the
+      constant MBA terms, retains the signed bound and backward word loop,
+      uses MLA for the affine map, and explicitly returns zero without calls.
   - address: 0x0800f17c
     ghidra: FUN_0800f17c
     name: xor_22_copy
