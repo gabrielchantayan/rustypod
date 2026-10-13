@@ -631,7 +631,24 @@ pub unsafe extern "C" fn ext_mul_ext(a: *const u32, b: *const u32, adj: i32, out
     out.add(2).write(r[2]);
 }
 
-/// `ext_div_ext` entry — original: `FUN_080374a4` @ 0x080374a4.
+/// Extended divide entry point.
+///
+/// Original: `FUN_080374a4` at load address `0x080374a4`, 48 bytes,
+/// ending at the next prologue at `0x080374d4`. Raw A32 words verify two
+/// plain incoming BLs (0x0803265c, 0x08034348), no predicated incoming BLs,
+/// and two plain outgoing BLs (0x08037024, 0x080373c8).
+/// The two BICS instructions require bit 31 of each mantissa-high word
+/// and reject bit 30 of either exponent word. Rejected inputs return `a`
+/// unchanged; accepted inputs divide and normalize/round the quotient.
+///
+/// Deliberate ABI deviation: retailOS returns the three words in r0-r2
+/// and carries `adj` in r11 into its internal rounding tail. This existing
+/// Rust seam passes `adj` explicitly and writes the result to `out`.
+///
+/// # Safety
+/// `a` and `b` each point to three readable, aligned u32 words; `out`
+/// points to three writable, aligned u32 words. Output may alias an input.
+#[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn ext_div_ext(a: *const u32, b: *const u32, adj: i32, out: *mut u32) {
     let a = [a.read(), a.add(1).read(), a.add(2).read()];
@@ -1486,6 +1503,42 @@ mod tests {
         assert_eq!(result, marked);
         unsafe { ext_mul_ext(one.as_ptr(), marked.as_ptr(), 0, result.as_mut_ptr()) };
         assert_eq!(result, one);
+    }
+
+    #[test]
+    fn ext_div_ext_rejects_either_marker_or_missing_normalization_bit() {
+        let finite = [0x3fff, 0x9234_5678, 0x89ab_cdef];
+        for rejected in [
+            [0x4000_3fff, 0x8000_0000, 7],
+            [0x3fff, 0x7fff_ffff, 9],
+            [0, 0, 0],
+        ] {
+            let mut result = [0; 3];
+            unsafe { ext_div_ext(rejected.as_ptr(), finite.as_ptr(), 0, result.as_mut_ptr()) };
+            assert_eq!(result, rejected);
+            unsafe { ext_div_ext(finite.as_ptr(), rejected.as_ptr(), 0, result.as_mut_ptr()) };
+            assert_eq!(result, finite);
+        }
+    }
+
+    #[test]
+    fn ext_div_ext_exact_signed_quotients_and_aliasing() {
+        let two = [0x4000, 0x8000_0000, 0];
+        for sign_a in [0, 0x8000_0000] {
+            for sign_b in [0, 0x8000_0000] {
+                let mut a = [sign_a | 0x4000, 0xc000_0000, 0]; // +/-3
+                let b = [sign_b | two[0], two[1], two[2]]; // +/-2
+                let expected = [sign_a ^ sign_b | 0x3fff, 0xc000_0000, 0];
+                let ptr = a.as_mut_ptr();
+                unsafe { ext_div_ext(ptr, b.as_ptr(), 0, ptr) };
+                assert_eq!(a, expected); // +/-1.5, not rounded to a double
+            }
+        }
+        let a = [0x3fff, 0x8000_0000, 1];
+        let one = [0x3fff, 0x8000_0000, 0];
+        let mut result = [0; 3];
+        unsafe { ext_div_ext(a.as_ptr(), one.as_ptr(), 0, result.as_mut_ptr()) };
+        assert_eq!(result, a); // retain precision below a double's LSB
     }
 
     // ---- block cipher helpers ----
