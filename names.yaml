@@ -252731,3 +252731,42 @@ functions:
       1 with 15 stock versus 53 Rust instructions including the table literal:
       LLVM unrolls the loops into sixteen byte lookups, adds a frame, and
       retains no outgoing calls. The exported symbol remains a real target.
+
+  - address: 0x0802ad38
+    ghidra: FUN_0802ad38
+    name: standard_cipher_expand_key
+    size: 108
+    sig: "void standard_cipher_expand_key(u32 key_mode, u32 first, u32 second, u32 third, u32 fourth, const u8 *key, u32 round_count, u8 *schedule)"
+    module: crypto/standard_cipher_expand_key
+    status: ported
+    renames:
+      param_1/r4: key_mode
+      param_2: first
+      param_3: second
+      param_4: third
+      param_5: fourth
+      param_6/r12: key
+      param_7/r5: round_count
+      param_8/r6: schedule
+      auStack_20: serialized
+    notes: >-
+      Raw A32 extent [0x0802ad38, 0x0802ada4) is 108 bytes, ending in
+      POP before the next distinct function's PUSH. Two outgoing plain BLs
+      at 0x0802ad84 and 0x0802ad98 target the verified four-word big-endian
+      serializer at 0x0802a158 and retail key expansion at 0x0802dec0.
+      Full-image aligned decoding finds two incoming plain BLs at
+      0x0802af5c and 0x082ea1d0; no predicated BLs in either direction.
+      Mode 2 serializes four scalar words into a sixteen-byte stack key,
+      ignoring the supplied key pointer. Other modes use that pointer.
+      Mode, round-count bits, and output pointer pass unchanged to expansion.
+      Reuses the Rust serializer and existing expansion veneer; its shared
+      pointer arguments now preserve native host pointers without changing
+      the ARM ABI. No extra validation or NULL guards. Host regression
+      verifies the first nonlinear expansion round with raw substitution
+      bytes, mode-2 NULL key, mode-0 ignored scalar words, unaligned buffers,
+      source preservation, and output canaries. Full host suite and ARM
+      release build pass. Executable smoke with the reference zero-round
+      and copy branches covers modes 0, 2, 3, 1, and a signed-negative
+      round count. match.py exits 1: 27 stock versus 25 Rust instructions;
+      mode selection, stack serialization, and both call sites remain,
+      with different register allocation and a frame-pointer prologue.
