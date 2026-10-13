@@ -41499,6 +41499,27 @@ functions:
       predicated bl or tail b callers. No separate Rust symbol; hook
       0x0803171c to the existing __rt_exit implementation in runtime/exit.rs.
 
+  - address: 0x08033714
+    ghidra: thunk_FUN_08033720
+    name: rt_exit_checked_payload_thunk
+    size: 4
+    sig: "noreturn rt_exit_checked_payload_thunk(i32 code)"
+    module: exit
+    status: ported
+    vars: {r0: code}
+    renames: {FUN_08033720: __rt_exit}
+    notes: >-
+      Raw word ea000001 is a pure b 0x08033720 dispatch alias, preserving
+      r0 and lr. Next real function boundary is the empty return
+      e1a0f00e at 0x08033718; another empty return follows at 0x0803371c.
+      Whole-image aligned A32 decoding finds one plain BL at 0x082ab6a0
+      and one BLEQ at 0x082ab6b4, both rejecting missing payload/tracker
+      records; zero outbound BLs. Reuse canonical __rt_exit in
+      src/runtime/exit.rs as the hook symbol, matching rt_exit_thunk
+      at 0x0803171c; no duplicate implementation or new seam.
+      Alias deviations: none. The shared exit implementation retains its
+      documented handler-storage and termination limitations.
+
   - address: 0x08033720
     name: __rt_exit
     size: 56

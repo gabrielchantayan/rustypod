@@ -254,6 +254,19 @@ pub unsafe extern "C" fn abort() -> ! {
 /// 0x0803171c to the existing `__rt_exit` symbol below. Deliberate
 /// deviations: none.
 ///
+/// rt_exit_checked_payload_thunk — original: `thunk_FUN_08033720` @
+/// 0x08033714 (4 bytes). Raw word `ea000001` tail-branches to 0x08033720,
+/// preserving r0 and lr. The next real entry at 0x08033718 is the empty
+/// return `e1a0f00e` (`mov pc, lr`); 0x0803371c is another empty return.
+/// Whole-image aligned A32 decoding verifies one plain BL at 0x082ab6a0
+/// and one predicated BLEQ at 0x082ab6b4; the thunk itself has no BLs.
+///
+/// Both callers reject a missing payload/tracker record. Like the alias
+/// above, hook this address to `__rt_exit`; no redundant Rust symbol or
+/// new callee seam is needed. Deliberate deviations: the alias has none;
+/// the shared exit implementation retains the module's documented
+/// handler-storage and termination limitations.
+///
 /// __rt_exit — original: `FUN_08033720` @ 0x08033720.
 ///
 /// Runs the registered atexit handler chain (LIFO), then the
@@ -346,6 +359,21 @@ mod tests {
             reset();
             assert_eq!(rt_exit_body(-7), 1);
             assert!((*core::ptr::addr_of!(CALL_ORDER)).is_empty());
+        }
+    }
+
+    #[test]
+    fn rt_exit_ignores_extreme_codes_and_consumes_handlers_once() {
+        let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        unsafe {
+            reset();
+            assert!(__exit_push_handler(handler_a));
+            assert_eq!(rt_exit_body(i32::MIN), 1);
+            assert_eq!(*core::ptr::addr_of!(CALL_ORDER), vec![1]);
+            assert_eq!(rt_exit_body(i32::MAX), 1);
+            assert_eq!(*core::ptr::addr_of!(CALL_ORDER), vec![1]);
+            assert_eq!(*core::ptr::addr_of!(ATEXIT_COUNT), 0);
+            reset();
         }
     }
 
