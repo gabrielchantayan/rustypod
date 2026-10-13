@@ -21,6 +21,24 @@ pub extern "C" fn obfuscated_second_word(_ignored_word: u32, result_word: u32) -
     result_word
 }
 
+/// Obfuscated status-word identity — `FUN_08027650` @ 0x08027650.
+///
+/// True size: 8 bytes, [0x08027650,0x08027658). Raw words e1a00001
+/// e12fff1e decode as MOV r0,r1; BX LR; the next entry is independently
+/// called. Whole-image aligned A32 decoding verifies two plain inbound BLs
+/// (0x082fa850, 0x0831311c), zero predicated BLs, and zero outgoing calls.
+/// Return all 32 bits of the second word, ignore the first, access no memory.
+/// Both callers pass a byte-masked obfuscated status and subsequently
+/// multiply and mask the result; the helper itself performs no narrowing.
+/// No behavioral deviations or callee seams. A dedicated text section
+/// retains this patch target separately from the identical 0x08027660 body.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.obfuscated_status_word_identity")]
+#[inline(never)]
+pub extern "C" fn obfuscated_status_word_identity(_ignored_word: u32, status_word: u32) -> u32 {
+    status_word
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -36,6 +54,21 @@ mod tests {
                 let result = 1u32 << bit;
                 assert_eq!(obfuscated_second_word(ignored, result), result);
                 assert_eq!(obfuscated_second_word(ignored, !result), !result);
+            }
+        }
+    }
+
+    #[test]
+    fn status_identity_preserves_bits_beyond_callers_byte_mask() {
+        for ignored in [0, 1, 0x0800_0001, 0x8000_0000, u32::MAX] {
+            for status in [0, 1, 0xff, 0x100, 0x7fff_ffff, 0x8000_0000,
+                           u32::MAX, 0xaaaa_aaaa, 0x5555_5555] {
+                assert_eq!(obfuscated_status_word_identity(ignored, status), status);
+            }
+            for bit in 0..32 {
+                let status = 1u32 << bit;
+                assert_eq!(obfuscated_status_word_identity(ignored, status), status);
+                assert_eq!(obfuscated_status_word_identity(ignored, !status), !status);
             }
         }
     }
