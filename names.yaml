@@ -254980,3 +254980,38 @@ functions:
       dependency is invented. Deliberate deviation: no Rust port.
       Raw branch scans and A32/Thumb objdump probes executed; no host
       behavior tests, ARM build, match.py or device verification claimed.
+  - address: 0x087f5404
+    ghidra: FUN_087f5404
+    name: structured_data_record_00ce_flags
+    size: 4
+    sig: "data word; executable ABI unverified"
+    status: identified
+    notes: >-
+      Deferred: assigned raw word ffff000e lies in structured data, not a
+      verified function. Size 4 describes the data word, not a true
+      executable extent; Ghidra's one-byte function is unsupported.
+      Record [0x087f53f0,0x087f540c) contains 00000014, 00000000,
+      000000ce, 0dad01a4, 0dad01a5, ffff000e, 0200ffff, followed
+      by 00000004 at 0x087f540c. Records at 0x087f5410 and
+      0x087f542c contain identifiers cf and d0, paired 0dad values,
+      ffffffff sentinels and the same 0200ffff trailer. The semantic
+      meaning of the assigned flags/sentinel field remains unverified.
+      A32 objdump decodes ffff000e as undefined; Thumb decodes 000e
+      as MOVS r6, r1, followed by the undefined ffff/ffff pair.
+      This is neither a return nor a veneer nor a valid ARMv5 Thumb BL.
+      Ghidra's MOV r6,r1 and subsequent BL #0xffe interpretation
+      does not establish executable code; its C invents LR-relative
+      indirect calls across these records.
+      Independent whole-image aligned raw A32 BL decoding finds zero
+      plain inbound candidates and one predicated candidate: 0b030b03
+      at 0x087327f0 decodes as BLEQ 0x087f5404. Objdump of
+      [0x087327e0,0x08732810) shows repeated 0b030b03 words with
+      0b040b03 and 0b050b03 variants targeting consecutive data words,
+      not a verified executable caller. Whole-image halfword-aligned
+      ARMv5 Thumb BL decoding finds zero inbound candidates.
+      No true function extent, next real executable boundary, caller ABI
+      or callee identity is established. Faithful porting requires verified
+      executable mapping and boundaries; no Rust seam or undecrypted-region
+      dependency is invented. Deliberate deviation: no Rust port.
+      Raw branch scans and A32/Thumb objdump probes executed; no host
+      behavior tests, ARM build, match.py or device verification claimed.
