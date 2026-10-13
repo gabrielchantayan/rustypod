@@ -174122,6 +174122,32 @@ functions:
       unaligned, and dangling pointers, and has a unique text section to
       prevent identical-code folding. Host tests cover pointer preservation
       and prove that a live object has no modified byte.
+  - address: 0x080276b8
+    ghidra: FUN_080276b8
+    name: object_no_op_080276b8
+    size: 4
+    sig: "void *object_no_op_080276b8(void *object)"
+    module: cxx/object_no_op_080276b8
+    status: ported
+    renames:
+      param_1/r0: object
+      return/r0: object
+    notes: >-
+      Raw osos.dec verifies the exact 4-byte extent 0x080276b8..0x080276bc:
+      e12fff1e (bx lr), not a branch or literal-load veneer. The next return
+      stub at 0x080276bc is independently called by BL at 0x082fc304.
+      Complete-image immediate ARM B/BL decoding finds two inbound plain
+      unconditional BL calls at 0x082f8df4 and 0x08332b84, zero predicated
+      BL calls, zero B tail calls, and no outgoing calls. No aligned DATA
+      word equals this entry address. Callers load the object from stack
+      slots sp+0x11c and sp+0x130 respectively; the concrete object class
+      and destructor identity are unestablished. Return the incoming object
+      unchanged without reading, writing, or releasing memory; NULL,
+      unaligned, and dangling pointers are accepted. No behavioral deviations.
+      Dedicated text section preserves a distinct callable symbol. match.py
+      reports LLVM's push {fp, lr}; mov fp, sp; pop {fp, pc} in place of
+      bx lr; this preserves r0 and restores sp. Host tests cover address
+      preservation and unchanged live-object bytes.
   - address: 0x080276b0
     ghidra: FUN_080276b0
     name: empty_destructor_080276b0
