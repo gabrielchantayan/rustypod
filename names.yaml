@@ -255829,3 +255829,44 @@ functions:
       twelve stock instructions: explicit branches replace predication and
       frame/register allocation differs; equality/NULL guards, virtual slot
       +0x04 and post-callback store are preserved. No device run claimed.
+
+  # --- owned work-object assignment ---
+  - address: 0x083e74c0
+    ghidra: FUN_083e74c0
+    name: work_object_assign
+    size: 48
+    sig: "void work_object_assign(void **slot, void *replacement)"
+    module: cxx/work_object_assign
+    status: ported
+    renames:
+      param_1/r0/r4: slot
+      param_2/r1/r5: replacement
+      slot_deref/r0: old_object
+      old_object_vtable_plus_0x04: unresolved_virtual_release
+    notes: >-
+      Raw osos.dec verifies twelve A32 words at 0x083e74c0..0x083e74ef;
+      the next independently entered function starts at 0x083e74f0.
+      Whole-image aligned decoding finds one incoming plain BL at
+      0x081e1690 and zero predicated BLs. The body has zero plain or
+      predicated BLs and one BLXNE at 0x083e74e4 through vtable +0x04.
+      Identity skips object access and stores. Otherwise a non-NULL old
+      object receives the unresolved virtual call before replacement is
+      stored, overwriting any callback writes to slot. No fixed-address
+      callee seam or guessed virtual method identity is introduced.
+      Caller 0x081e1624 initializes an empty owner with a newly constructed
+      work object; raw code reloads the slot before virtual dispatch and
+      return, so Ghidra's apparent use of the assignment return is spurious.
+      No Rust caller seam exists for this address. Deliberate deviations:
+      native-width host pointers preserve target word indices, and void
+      replaces the unconsumed path-dependent stock r0. Host edge tests and
+      the full x86_64 test suite pass. Standalone public-API smoke passed
+      adoption, identity, replacement, clear and callback ordering.
+      ARM release build succeeds. Raw bytes match error_object_assign at
+      0x083e74f0; objdump's symbol table verifies work_object_assign and
+      error_object_assign share the same section, offset and 56-byte extent.
+      LLVM intentionally folds these identical exports. match.py cannot
+      find the alias's disassembly heading; comparison via error_object_assign
+      exits 1 with fourteen Rust versus twelve stock instructions.
+      Equality and NULL guards, virtual slot +0x04, and the post-callback
+      store are preserved; explicit branches replace predication and frame
+      allocation differs. No device execution claimed.
