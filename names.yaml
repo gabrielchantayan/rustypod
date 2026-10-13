@@ -253737,3 +253737,35 @@ functions:
       order. Host tests cover ordering, ignored returns, preserved adjacent
       fields, and every nonzero byte with an invalid decoder. Native smoke
       exercises initialization and repeated-call bypass. No device run claimed.
+
+  - address: 0x08004518
+    ghidra: FUN_08004518
+    name: stream_buffer_level_decrement
+    size: 28
+    sig: "u32 stream_buffer_level_decrement(void)"
+    module: app/buffer_refill_request
+    status: ported
+    vars: {DAT_08004530: stream_buffer_level, return: callee_r0}
+    notes: >-
+      Raw extent [0x08004518,0x08004534) is six ARM instructions (24 bytes)
+      plus the 0x2200ad14 literal at 0x08004530; the next real entry opens
+      with PUSH at 0x08004534. Independent aligned ARM BL decoding finds
+      two plain callers at 0x08002974 and 0x080044f0, no predicated callers,
+      and no outgoing BLs. Read the level once with volatile access; zero
+      returns zero, otherwise subtract one and tail-enter the verified
+      retail level-apply body at 0x0800284c. Ghidra incorrectly incorporates
+      that tail target into this function. names.yaml has no entry for the
+      assigned address or that callee; the seam describes its verified role,
+      not a guessed library identity. Keep the retail target unported.
+      Deliberate deviations: LLVM emits an unconditional indirect tail
+      transfer after the zero check, with a frame and absolute target literal;
+      host builds share the existing level cell and use a level-apply callback.
+      Preserve the observable r0 result, discarded by both callers. Host
+      edge tests cover zero bypass, level-one drain, level-three decrement,
+      high-bit levels and UINT32_MAX without clamping. Host suite and ARM
+      release build pass. match.py prints an expected structural diff with
+      the same load/check/subtract/tail-call behavior. Actual-source native
+      smoke steps 3 to 2 to 1 to 0 and then bypasses the callee. Full-crate
+      native example linking was unavailable (staticlib-only configuration;
+      host rlib compilation also encounters existing unresolved symbols).
+      No device execution claimed.
