@@ -40443,6 +40443,36 @@ functions:
       use target-default dispatch seams in runtime/startup_wait; focused host
       tests script each dependency and verify the polling order.
 
+  - address: 0x08038278
+    ghidra: thunk_EXT_FUN_22000428
+    name: i2c0_wait_transfer_done_iram_veneer
+    size: 8
+    sig: "u32 i2c0_wait_transfer_done_iram_veneer(u32 timeout_usec)"
+    module: runtime/i2c0_transfer
+    status: ported
+    vars: {r0: timeout_usec_and_status}
+    renames: {0x22000428: i2c0_wait_transfer_done_iram_mirror}
+    notes: >-
+      Raw words e51ff004 22000428 establish an eight-byte literal-load
+      veneer ending at the independent veneer 0x08038280, not Ghidra's
+      four-byte instruction extent. The target is the IRAM mirror of
+      the already-ported i2c0_wait_transfer_done at 0x08000428, not ROM.
+      Whole-image A32 BL decoding finds two plain incoming calls at
+      0x0836ba1c and 0x0836bc4c, zero predicated incoming calls and no
+      outgoing BL. Both callers pass a timeout and check status 0x1f.
+      Reuses the existing Rust callee without a new seam: waits for bus
+      idle or byte completion, checks timeout, drains IICCON and sets
+      IICSTA2 bit 8 on every return path. Deliberately preserves the C
+      ABI timeout and status, not incidental scratch registers or flags
+      of the stock tail transfer; inherits the callee's target MMIO and
+      host register/ops behavior. Host suite passes 15823 tests; ARM
+      release build passes. Edge tests cover completion and timeout.
+      Standalone production-source smoke returns zero for idle completion
+      with timeouts 0, 1 and UINT32_MAX without touching timer or IRQ ops.
+      match.py exits 1: one stock instruction versus four Rust instructions;
+      LLVM adds frame setup/teardown then tail-branches, with R_ARM_JUMP24
+      relocation to i2c0_wait_transfer_done. The target and ABI agree.
+
   - address: 0x08000428
     ghidra: FUN_08000428
     name: i2c0_wait_transfer_done

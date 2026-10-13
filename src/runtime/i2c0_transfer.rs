@@ -233,6 +233,25 @@ pub unsafe extern "C" fn i2c0_wait_transfer_done(timeout_usec: u32) -> u32 {
     status
 }
 
+/// I2C0 transfer-completion IRAM veneer — `thunk_EXT_FUN_22000428`
+/// @ 0x08038278 (8 bytes, including the literal; next entry 0x08038280).
+///
+/// Raw words `0xe51ff004, 0x22000428` tail-transfer to the IRAM mirror
+/// of [`i2c0_wait_transfer_done`] @ 0x08000428. Independently decoding
+/// firmware BL words finds two plain calls (0x0836ba1c, 0x0836bc4c) and
+/// zero predicated calls. Passes the microsecond timeout through and
+/// returns the completion status after the callee drains IICCON and
+/// acknowledges IICSTA2, including on timeout.
+///
+/// Deviation: uses the existing Rust callee and its MMIO/host ops instead
+/// of the copied IRAM address. Preserves the C ABI argument and result,
+/// not incidental scratch-register or flag state of the literal jump.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn i2c0_wait_transfer_done_iram_veneer(timeout_usec: u32) -> u32 {
+    i2c0_wait_transfer_done(timeout_usec)
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -431,6 +450,38 @@ mod tests {
                 sta2_write_event: STA2_WRITE_EVENT,
             }
         }
+    }
+
+    #[test]
+    fn iram_veneer_completed_busy_bus_preserves_unrelated_flag_bits() {
+        let _lock = OPS_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        HOST_I2C0_STAT.store(I2C0_STAT_BUSY, core::sync::atomic::Ordering::Relaxed);
+        HOST_I2C0_STA2.store(0xa500_0104, core::sync::atomic::Ordering::Relaxed);
+        HOST_I2C0_CON.store(0, core::sync::atomic::Ordering::Relaxed);
+
+        // A completed byte wins over busy even for a zero timeout; this
+        // exercises the real host register defaults, not a replacement callee.
+        assert_eq!(unsafe { i2c0_wait_transfer_done_iram_veneer(0) }, 0);
+        assert_eq!(
+            HOST_I2C0_STA2.load(core::sync::atomic::Ordering::Relaxed),
+            0xa500_0104,
+        );
+        HOST_I2C0_STAT.store(0, core::sync::atomic::Ordering::Relaxed);
+        HOST_I2C0_STA2.store(0, core::sync::atomic::Ordering::Relaxed);
+    }
+
+    #[test]
+    fn iram_veneer_timeout_still_drains_and_acknowledges() {
+        let _guard = install_mocks(I2C0_STAT_BUSY, u32::MAX, 0, u32::MAX, 2, u64::MAX, 0);
+
+        assert_eq!(
+            unsafe { i2c0_wait_transfer_done_iram_veneer(u32::MAX) },
+            I2C0_TRANSFER_TIMEOUT,
+        );
+        let c = counts();
+        assert_eq!(c.sta2_written, I2C0_STA2_BYTE_DONE);
+        assert!(c.con_zero_event > 0);
+        assert!(c.con_zero_event < c.sta2_write_event);
     }
 
     #[test]
