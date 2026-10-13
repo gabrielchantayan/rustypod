@@ -1,5 +1,6 @@
 //! retailOS application/UI framework glue — the global application
 //! context and the small helpers its view classes lean on.
+pub mod obfuscated_context_noop;
 pub mod descriptor_apply_counted_string;
 pub use descriptor_apply_counted_string::descriptor_apply_counted_string;
 pub mod descriptor_lookup_attach;
