@@ -255761,3 +255761,36 @@ functions:
       does not establish behavioral correctness. No port is delivered.
       Resolve the shared empty-representation write contract before
       implementing this constructor with the existing string ports.
+
+  - address: 0x083e7544
+    ghidra: FUN_083e7544
+    name: owned_observable_array_slot_replace
+    size: 56
+    sig: "void owned_observable_array_slot_replace(void **slot, void *replacement)"
+    module: app/owned_observable_array_slot_replace
+    vars: {param_1: slot, param_2: replacement, iVar1: old_allocation, FUN_08271d2c: observable_array_destruct, FUN_082aad24: operator_delete}
+    status: ported
+    notes: >-
+      Raw osos.dec establishes fourteen A32 words at [0x083e7544,0x083e757c),
+      ending with pop at 0x083e7578 before the next independent push.
+      Whole-image aligned branch decoding finds one incoming plain BL at
+      0x081fa688 and no predicated BLs. Two outgoing plain BLs at 0x083e7568
+      and 0x083e7570 call the canonical observable_array_destruct and
+      operator_delete ports; no outgoing predicated BLs. The sole caller
+      passes its owned allocation slot at +0x30. Equality skips all work;
+      otherwise destroy non-NULL old+4, delete the destructor return minus
+      four, then publish the saved replacement. Ghidra's noreturn annotation
+      on operator_delete incorrectly hides the store and epilogue. Native
+      slot pointers widen on hosts; ObservableArray remains target-width.
+      Host tests cover NULL and identical slots, clearing, teardown ordering,
+      redirected destructor return, and callback mutation of the slot.
+      Full host suite passes 15952 tests; ARM release build succeeds.
+      A throwaway public-API host smoke passes NULL identity, empty-slot
+      adoption and non-NULL identity. Standalone non-test host build is
+      blocked by four unrelated missing cfg-specific callees; smoke uses
+      the host test harness. No device execution claimed. match.py exits 1:
+      fourteen stock versus fifteen Rust instructions preserve equality
+      and NULL guards, two calls, and final slot store. LLVM uses saved old
+      for delete because the existing destructor returns its input; source
+      preserves return-minus-four semantics. Frame/register allocation
+      differs; archive call targets remain unresolved pending relocation.
