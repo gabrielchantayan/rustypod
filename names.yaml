@@ -16,6 +16,34 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083ed078
+    ghidra: thunk_FUN_08032d70
+    name: printf_decimal_float
+    size: 4
+    module: printf/printf_float
+    status: ported
+    sig: "void printf_decimal_float(PrintfState *state, uint8_t spec, const uint64_t *bits)"
+    vars: {r0: state, r1: conversion_character, r2: double_pointer}
+    notes: >-
+      Raw word eaf1173c is an unconditional B to 0x08032d70, independently
+      identified in names.yaml as the ported convert_float (Rust convert_fe).
+      True extent ends at the next real function, 0x083ed07c (mov pc, lr).
+      Whole-image aligned A32 decoding finds one incoming plain BL at
+      0x080347bc, zero predicated BLs, zero outgoing BLs and no literal
+      address references. The printf caller passes state, conversion character
+      and an eight-aligned double pointer for e/E/f/F/g/G. ARM uses a naked
+      tail branch, preserving argument registers and LR without a stack frame.
+      Host deviation: calls the existing converter; inherits its documented
+      formatting deviations and DTOA hook. printf_core now defaults to this
+      veneer. Existing float cases run through it; added signed-zero, precision
+      zero, sign-before-zero-padding and deferred fraction-zero regression cases.
+      Host suite: 15918 passed. ARM release build passed. match.py exit 1 shows
+      one B versus one B with an unresolved archive target; objdump verifies
+      R_ARM_JUMP24 convert_fe, not a self-loop. Standalone real-source smoke
+      confirms zero scientific notation, padded negative zero and 20 fractional
+      zero digits with output counts 12, 12 and 22. Production host library
+      build is blocked by four unrelated missing host-only function definitions;
+      smoke compiles the actual float/helper/locale/ctype/errno modules directly.
   - address: 0x083ed07c
     ghidra: FUN_083ed07c
     name: printf_hex_float

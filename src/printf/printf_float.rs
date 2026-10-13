@@ -25,8 +25,8 @@
 //! lo/hi pair into a stack slot and calls the wrapper as
 //! `(state, spec, bits_ptr)` — r1 is the conversion character, r2 a
 //! POINTER to the 8 value bytes. That is exactly the committed
-//! `printf_core::FloatConverterFn` hook signature; `convert_fe` is that
-//! hook's shipped default. One wrapper serves all of
+//! `printf_core::FloatConverterFn` hook signature; its shipped default
+//! is `printf_decimal_float`, the veneer to `convert_fe`. One wrapper serves all of
 //! %e/%E/%f/%F/%g/%G (the %a/%A veneer @ 0x083ed07c is a dead
 //! `mov pc, lr` in this build), so there are no per-spec variants.
 //!
@@ -580,6 +580,31 @@ pub unsafe extern "C" fn convert_fe(state: *mut PrintfState, spec: u8, bits: *co
     pad_emit_zero(state);
 }
 
+/// Decimal float veneer — original: `thunk_FUN_08032d70` @ 0x083ed078.
+///
+/// True size: 4 bytes, ending at 0x083ed07c. Raw word 0xeaf1173c
+/// branches to 0x08032d70 (`convert_fe`); one incoming plain BL at
+/// 0x080347bc, zero predicated BLs, zero outgoing BLs. Tail-dispatches
+/// (state, conversion character, double pointer) without changing registers.
+/// Deliberate deviation: host builds use a Rust call to the same converter;
+/// ARM retains the naked tail branch and inherits the converter's deviations.
+#[cfg(target_os = "none")]
+#[unsafe(naked)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn printf_decimal_float(
+    _state: *mut PrintfState, _spec: u8, _bits: *const u64,
+) {
+    core::arch::naked_asm!("b {converter}", converter = sym convert_fe);
+}
+
+#[cfg(not(target_os = "none"))]
+#[inline(never)]
+pub unsafe extern "C" fn printf_decimal_float(
+    state: *mut PrintfState, spec: u8, bits: *const u64,
+) {
+    convert_fe(state, spec, bits);
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -747,7 +772,7 @@ mod tests {
         let bits = value.to_bits();
         let mut st = make_state(flags, width, precision, &mut sink);
         unsafe {
-            convert_fe(&mut st, spec, &bits);
+            printf_decimal_float(&mut st, spec, &bits);
         }
         (sink.buf, st.count)
     }
@@ -760,6 +785,14 @@ mod tests {
 
     const P: u32 = FLAG_PRECISION_GIVEN;
 
+
+    #[test]
+    fn decimal_veneer_signed_zero_and_deferred_fraction_zeros() {
+        assert_eq!(out(b'f', 0, 0, 0, -0.0), b"-0.000000");
+        assert_eq!(out(b'G', P, 0, 0, -0.0), b"-0");
+        assert_eq!(out(b'f', P | FLAG_ZERO_PAD, 12, 2, -0.0), b"-00000000.00");
+        assert_eq!(out(b'f', P, 0, 20, 0.0), b"0.00000000000000000000");
+    }
     // ---- %e / %E ----
 
     #[test]
