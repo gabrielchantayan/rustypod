@@ -255050,3 +255050,35 @@ functions:
       Deliberate deviation: no Rust port. Raw branch scans and A32/Thumb
       objdump probes executed; no host behavior tests, ARM build,
       match.py or device behavior verification claimed.
+  - address: 0x087f53e8
+    ghidra: FUN_087f53e8
+    name: structured_data_record_00cd_sentinel
+    size: 4
+    sig: "data word; executable ABI unverified"
+    status: identified
+    notes: >-
+      Deferred: raw osos.dec establishes a structured-data word, not a
+      verified function. Size 4 describes the word, not an executable
+      extent; Ghidra's one-byte extent is unsupported. Raw words in
+      [0x087f53d4,0x087f53f0) are 00000014, 00000000, 000000cd,
+      0dad01af, 0dad01b0, ffffffff, 0200ffff. The assigned word is the
+      penultimate ffffffff sentinel. The next record at 0x087f53f0 repeats
+      the layout with identifier ce, paired 0dad01a4/0dad01a5 values,
+      and ffff000e replacing the sentinel. ARM and ARMv5 Thumb objdump
+      both decode the assigned ffffffff word as undefined, not a return,
+      BL pair, or veneer. Independent whole-image aligned A32 BL decoding
+      finds zero plain incoming candidates and one predicated candidate:
+      0b030b03 at 0x087327d4 decodes as BLEQ 0x087f53e8. Surrounding
+      [0x087327c0,0x087327f0) contains repeated 0b030b03 words and a
+      0b040b03 variant; this is not a verified executable caller.
+      Whole-image halfword-aligned ARMv5 Thumb BL decoding finds zero
+      incoming candidates. The assigned word contains zero plain or
+      predicated outbound A32 BL instructions and zero Thumb BL pairs.
+      No true function extent, next real executable boundary, caller ABI,
+      or callee identity is established. Ghidra's recovered C invents
+      LR-relative indirect calls across these data records. Faithful porting
+      requires verified executable mapping and boundaries; no Rust seam
+      or undecrypted-region dependency is invented. Deliberate deviation:
+      no Rust port. Raw scans and ARM/Thumb objdump probes executed;
+      no host behavior tests, ARM build, match.py, or device verification
+      claimed. Existing standalone 087f53e8.yaml evidence is retained.
