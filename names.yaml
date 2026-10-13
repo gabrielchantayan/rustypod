@@ -16,6 +16,50 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083e876c
+    ghidra: FUN_083e876c
+    name: string_word_record_merge_backward
+    size: 168
+    module: cxx/string_word_record_merge_backward
+    status: ported
+    sig: "StringWordRecord *string_word_record_merge_backward(const StringWordRecord *left, const StringWordRecord *left_end, const StringWordRecord *right, const StringWordRecord *right_end, StringWordRecord *result_end, const void *comparator)"
+    renames:
+      param_1/r0/r8: left
+      param_2/r1/r5: left_end
+      param_3/r2/r7: right
+      param_4/r3/r6: right_end
+      param_5/stack_0/r4: result_end
+      stack_4: comparator
+      FUN_083d6550: string_object_less
+      FUN_081f5014: string_word_record_copy_assign
+      FUN_083e811c: string_word_record_copy_backward
+    notes: >-
+      Raw A32 extent 0x083e876c..0x083e8814 is exactly 168 bytes,
+      bounded by the next function's push at 0x083e8814. Whole-image
+      aligned decoding finds one inbound unconditional BL at 0x083e85c8,
+      zero predicated inbound BLs. Body has three unconditional BLs:
+      comparator at 0x083e87bc, assignment at 0x083e87d4 and 0x083e87f0;
+      zero predicated BLs. Final B at 0x083e8810 tail-calls backward-copy.
+      Stable backward merge of sorted 12-byte StringWordRecord ranges into
+      initialized storage ending at result_end. Select left's last record
+      only when right's last key is less, otherwise select right (including
+      ties), preserving left-before-right stability in the final output.
+      Backward-copy the remaining range and return the destination start.
+      Caller 0x083e8538 supplies six arguments; Ghidra omits the comparator
+      stack word. All three callees already have named Rust ports.
+      Deliberate deviations: typed repr(C) strides preserve host pointer
+      widening; pass the ignored stateless comparator value rather than the
+      address of its stack slot. No behavioral deviation or new seam.
+      Host reference tests cover all 400 pairs of sorted sequences of up to
+      three keys from a three-key alphabet, ties, both exhaustion tails,
+      empty ranges, payloads, opaque words, output guards, overlapping left
+      input and null empty bounds. Full host suite: 15935 passed. ARM release
+      build passed. Actual-port standalone host smoke verified equal-key
+      stability, overlapping input and returned start. Required match.py
+      exits 1 with a structural diff: 38 Rust instructions versus 42 stock;
+      LLVM merges the two assignment branches, preserves descending 12-byte
+      cursors and comparator selection, and retains the backward-copy tail
+      branch. Frame setup and register allocation differ intentionally.
   - address: 0x083ea64c
     ghidra: FUN_083ea64c
     name: word_pair_range_fill
