@@ -16,6 +16,35 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08003528
+    ghidra: thunk_FUN_082dab10
+    name: pmu_voltage_boot_set
+    size: 8
+    sig: "usize pmu_voltage_boot_set(u32 millivolts)"
+    module: drivers/i2c
+    status: ported
+    renames:
+      DAT_0800352c: relocated_pmu_voltage_set
+      r0: millivolts
+    notes: >-
+      Raw e51ff004/082dab10 owns [0x08003528,0x08003530), through
+      the next independent veneer. Whole-image aligned A32 BL decoding
+      finds zero plain calls, two BLCC calls at 0x08002878/0x08002938,
+      and no outgoing BL in the veneer. Startup relocation at 0x080046e0
+      subtracts 0xaed8, resolving the literal to raw 0x082e59e8, not
+      the interior block Ghidra reports at raw 0x082dab10. Resolved body
+      ends at the next prologue 0x082e5a20: unsigned wrapping subtract
+      601, divide by 25, truncate to byte, wait semaphore 17 then 5,
+      write [code,1,0,0x10] to PMU register 0x1e, signal 5 then 17.
+      Return the outer release result, not the transfer status. Callers
+      select 1200 or the word at 0x08002d44 and ignore the result.
+      Reuses existing semaphore and pmu_i2c_write ports; no new stock
+      seam. Deliberate deviation: inline resolved voltage and packet
+      algorithm instead of literal PC dispatch and ADS division.
+      Host tests cover subtraction underflow, quotient boundaries,
+      byte rollover and releasing both locks on I2C failure. ARM release
+      build succeeds. match.py exits 1: literal dispatch versus 27
+      instructions, reciprocal UMULL division, packet stores and five calls.
   - address: 0x080035c8
     ghidra: thunk_FUN_080d9428
     name: current_task_priority_boot_veneer

@@ -650,6 +650,35 @@ pub unsafe extern "C" fn peripheral_0x39_mode_action(action: i32, mode: i32) -> 
 
 
 
+/// pmu_voltage_boot_set — original: `thunk_FUN_082dab10` @ 0x08003528.
+/// True extent [0x08003528,0x08003530): eight bytes, including the literal.
+/// Raw aligned A32 decoding finds zero plain and two predicated (BLCC)
+/// incoming calls at 0x08002878/0x08002938, and no outgoing BL in the veneer.
+///
+/// Words e51ff004/082dab10 tail-dispatch without changing registers. Startup
+/// relocation at 0x080046e0 subtracts 0xaed8, resolving the runtime target
+/// to raw 0x082e59e8 (56 bytes, next prologue at 0x082e5a20).
+/// That body computes the low byte of unsigned (millivolts - 601) / 25,
+/// with wrapping subtraction, acquires semaphore 17 then 5, and writes
+/// [code, 1, 0, 0x10] to PMU register 0x1e. It releases 5 then 17 and
+/// returns the latter release's r0, not the I2C transfer status.
+///
+/// Deliberate deviation: implement the resolved algorithm directly through
+/// existing Rust semaphore/I2C ports rather than loading a relocated PC.
+/// Constant unsigned division replaces ADS division at raw 0x08036f14;
+/// the packet helper at raw 0x0836d628 is inlined without a new seam.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn pmu_voltage_boot_set(millivolts: u32) -> usize {
+    let code = (millivolts.wrapping_sub(601) / 25) as u8;
+    kernel_sem17_wait();
+    kernel_sem5_wait();
+    let packet = [code, 1, 0, 0x10];
+    pmu_i2c_write(0x1e, 4, packet.as_ptr());
+    kernel_sem5_signal();
+    kernel_sem17_signal()
+}
+
 /// pmu_i2c_write — original: `FUN_0836d524` @ 0x0836d524 (60
 /// bytes; 17 plain `bl` call sites, 0 predicated `bl`,
 /// binary-verified by decoding every B/BL word in osos.dec).
@@ -920,6 +949,26 @@ pub(crate) mod tests {
         }
         drop(state.0);
     }
+    #[test]
+    fn voltage_boot_set_preserves_unsigned_boundaries_and_unlocks_on_error() {
+        let _fixture = install_raw_i2c_for_test(-7, 0, 0);
+        unsafe {
+            for (millivolts, code) in [
+                (0, 139), (600, 163), (601, 0), (625, 0),
+                (626, 1), (1200, 23), (7000, 255), (7001, 0),
+                (u32::MAX, 139),
+            ] {
+                (*addr_of_mut!(RAW_WRITE_PACKETS)).clear();
+                (*addr_of_mut!(SEM_LOG)).clear();
+                assert_eq!(pmu_voltage_boot_set(millivolts), 0);
+                assert_eq!((*addr_of!(RAW_WRITE_PACKETS)).clone(),
+                    std::vec![std::vec![0x1e, code, 1, 0, 0x10]]);
+                assert_eq!((*addr_of!(SEM_LOG)).clone(),
+                    std::vec![(0, 17), (0, 5), (1, 5), (1, 17)]);
+            }
+        }
+    }
+
     #[test]
     fn status_transaction_forwards_response_and_releases_locks_on_error() {
         let fixture = install_raw_i2c_for_test(0, 0, 0);
