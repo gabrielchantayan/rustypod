@@ -95,6 +95,28 @@ unsafe extern "C" {
     pub fn dispatch_event_loop_callback(source: *const u8) -> u32;
 }
 
+/// dispatch_event_loop_callback_iram — original: `thunk_EXT_FUN_220074e8`
+/// @ 0x080380d8 (8 bytes including the target literal; 2 plain BL callers,
+/// 0 predicated BL callers, independently decoded from the full raw image).
+///
+/// The original `ldr pc, [pc, #-4]; .word 0x220074e8` tail-jumps to the
+/// IRAM mirror of 0x080074e8. That function loads source +0x20 and dispatches
+/// the callback, preserving the target's r0 result.
+///
+/// Deliberate deviation: call the existing Rust port rather than the copied
+/// retailOS address, so this entry follows the same implementation on hosts
+/// and on-device. The ordinary C ABI preserves the argument and result.
+///
+/// # Safety
+///
+/// `source` must be valid for an aligned 32-bit read at +0x20, and the
+/// callback must satisfy the retail dispatch target's requirements.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn dispatch_event_loop_callback_iram(source: *const u8) -> u32 {
+    dispatch_event_loop_callback(source)
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -146,6 +168,36 @@ mod tests {
             assert_eq!(addr_of!(RECORDED_CALLBACK).read(), 0x1234_5678);
         }
         assert_eq!(result, 0xc001_c0de, "tail target result is forwarded unchanged");
+        restore_default(guard);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn iram_entry_reads_a_target_word_at_the_guard_page_boundary() {
+        unsafe extern "C" {
+            fn getpagesize() -> i32;
+            fn mmap(address: usize, length: usize, protection: i32,
+                flags: i32, fd: i32, offset: i64) -> usize;
+            fn mprotect(address: usize, length: usize, protection: i32) -> i32;
+            fn munmap(address: *mut u8, length: usize) -> i32;
+        }
+        let guard = install_recorder();
+        unsafe {
+            let page = getpagesize() as usize;
+            let address = mmap(0, page * 2, 3, 0x22, -1, 0);
+            assert_ne!(address, usize::MAX);
+            let mapping = address as *mut u8;
+            assert_eq!(mprotect(address + page, page, 0), 0);
+            // Exactly nine target words fit before the inaccessible page.
+            // A host-width load or incorrectly scaled +0x20 crosses it.
+            let source = mapping.add(page - 36);
+            for callback in [0u32, u32::MAX] {
+                source.add(0x20).cast::<u32>().write(callback);
+                assert_eq!(dispatch_event_loop_callback_iram(source), 0xc001_c0de);
+                assert_eq!(addr_of!(RECORDED_CALLBACK).read(), callback);
+            }
+            assert_eq!(munmap(mapping, page * 2), 0);
+        }
         restore_default(guard);
     }
 

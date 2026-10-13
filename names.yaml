@@ -38487,6 +38487,36 @@ functions:
       decrements source +0x50 then retires enabled table children with a greater
       rank. The opaque child targets remain target/host seams; their identities
       are not claimed beyond this verified caller behavior.
+  # --- IRAM event-loop callback dispatch veneer ---
+  - address: 0x080380d8
+    ghidra: thunk_EXT_FUN_220074e8
+    name: dispatch_event_loop_callback_iram
+    size: 8
+    sig: "u32 dispatch_event_loop_callback_iram(const EventLoopCallbackSource *source)"
+    module: drivers/event_loop_callback
+    status: ported
+    renames:
+      r0: source
+      DAT_080380dc: iram_event_loop_callback_dispatch_target
+    notes: >-
+      Raw words are 0xe51ff004 and 0x220074e8: an ARM literal tail-jump
+      veneer occupying 8 bytes through the next real entry at 0x080380e0,
+      not Ghidra's 4-byte instruction-only extent. Full-image ARM word
+      decoding finds two unconditional BL callers, at 0x08167884 and
+      0x081b0ea0, and zero predicated BL callers. The target is the IRAM
+      mirror of osos 0x080074e8, copied by 0x080046e0, not mask ROM.
+      The existing dispatch_event_loop_callback port loads source +0x20
+      and tail-dispatches through the 0x08003900 veneer to 0x0818c528,
+      preserving the r0 result used by both callers. This Rust entry
+      deliberately calls that existing port instead of the retail IRAM
+      address; no new unported callee seam is introduced. Host guard-page
+      tests cover an exact nine-word source ending at an inaccessible page,
+      zero and all-bits-set callback words, and nonzero result preservation.
+      ARM release codegen retains the exported symbol with a balanced
+      push/mov/pop frame followed by a tail B to dispatch_event_loop_callback.
+      match.py reports the deliberate structural difference from the
+      literal veneer (its original extent remains Ghidra's 4-byte estimate).
+
   # --- event-loop callback dispatch ---
   - address: 0x080074e8
     ghidra: FUN_080074e8
