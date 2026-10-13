@@ -461,6 +461,33 @@ pub unsafe extern "C" fn iram_usec_timer_read_veneer() -> u32 {
     body()
 }
 
+/// iram_timer_e_counter_read_veneer — original: `thunk_EXT_FUN_22001ed0`
+/// @ 0x08038240 (**8 bytes**, 0x08038240..0x08038248; the next veneer
+/// starts at 0x08038248). Words: `0xe51ff004`, `0x22001ed0`.
+///
+/// **2 plain BL call sites**, at 0x08295d98 and 0x08295dec; **0 predicated
+/// BL calls**, independently decoded from every aligned word in osos.dec.
+/// Tail-transfers without arguments to the IRAM copy of 0x08001ed0,
+/// returning Timer E's raw microsecond counter in r0. The copied body is
+/// `ldr r0,[pc,#0x4f8]; ldr r0,[r0,#0xb4]; bx lr`, with the literal
+/// 0x3c700000 at 0x080023d0. Its separately linked next body starts at
+/// 0x08001edc and implements the existing [`usec_timer_read`] behavior.
+/// The two callers subtract samples around a callback using wrapping u32
+/// arithmetic; no scaling, saturation, or counter reset occurs here.
+///
+/// Deliberate deviations: reuse the behaviorally identical port at
+/// 0x08001edc rather than execute its IRAM twin. Host builds use the existing
+/// deterministic counter seam. As in [`iram_usec_timer_read_veneer`], a
+/// volatile callee load and dedicated section preserve the independent hook
+/// target; generated code adds an indirection and the crate's frame.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.iram_timer_e_counter_read_veneer")]
+#[inline(never)]
+pub unsafe extern "C" fn iram_timer_e_counter_read_veneer() -> u32 {
+    let body = core::ptr::read_volatile(&(usec_timer_read as unsafe extern "C" fn() -> u32));
+    body()
+}
+
 /// usec_timer_elapsed — original: `FUN_08001ee8` @ 0x08001ee8 (28 bytes).
 /// Reference: `ipod-decomp/decomp/c/000/08001ee8_FUN_08001ee8.c` and
 /// `ipod-decomp/decomp/osos.asm` @ 0x08001ee8..0x08001efc.
@@ -1014,6 +1041,29 @@ mod usec_timer_tests {
         assert_eq!(unsafe { iram_usec_timer_read_veneer() }, 1_000);
         assert_eq!(HOST_USEC_TIMER_READS.load(Ordering::Relaxed), 1);
         assert_eq!(unsafe { iram_usec_timer_read_veneer() }, 1_007);
+        assert_eq!(HOST_USEC_TIMER_READS.load(Ordering::Relaxed), 2);
+    }
+
+    #[test]
+    fn timer_e_iram_reader_preserves_raw_counter_bits() {
+        let _guard = configure_usec_timer(0, 1);
+        for counter in [0, 999, 1_000, 0x8000_0000, u32::MAX] {
+            HOST_USEC_TIMER_COUNT.store(counter, Ordering::Relaxed);
+            HOST_USEC_TIMER_READS.store(0, Ordering::Relaxed);
+            assert_eq!(unsafe { iram_timer_e_counter_read_veneer() }, counter);
+            assert_eq!(HOST_USEC_TIMER_READS.load(Ordering::Relaxed), 1);
+            assert_eq!(HOST_USEC_TIMER_COUNT.load(Ordering::Relaxed), counter.wrapping_add(1));
+        }
+    }
+
+    #[test]
+    fn timer_e_iram_samples_measure_callback_time_across_wrap() {
+        let _guard = configure_usec_timer(u32::MAX - 3, 7);
+        let start = unsafe { iram_timer_e_counter_read_veneer() };
+        let end = unsafe { iram_timer_e_counter_read_veneer() };
+        assert_eq!(start, u32::MAX - 3);
+        assert_eq!(end, 3);
+        assert_eq!(end.wrapping_sub(start), 7);
         assert_eq!(HOST_USEC_TIMER_READS.load(Ordering::Relaxed), 2);
     }
 
