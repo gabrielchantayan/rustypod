@@ -23,7 +23,7 @@ const ARENA_STATE_ADDRESS: usize = 0x08b2_f7e8;
 
 #[cfg(target_os = "none")]
 #[inline(always)]
-unsafe fn arena_state() -> *mut u32 {
+pub(super) unsafe fn arena_state() -> *mut u32 {
     ARENA_STATE_ADDRESS as *mut u32
 }
 
@@ -32,7 +32,7 @@ pub static mut ZEROING_BUMP_ARENA_STATE: *mut u32 = core::ptr::null_mut();
 
 #[cfg(not(target_os = "none"))]
 #[inline(always)]
-unsafe fn arena_state() -> *mut u32 {
+pub(super) unsafe fn arena_state() -> *mut u32 {
     core::ptr::read_volatile(core::ptr::addr_of!(ZEROING_BUMP_ARENA_STATE))
 }
 
@@ -78,14 +78,15 @@ pub unsafe extern "C" fn zeroing_bump_alloc(requested_len: u32) -> *mut u8 {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     extern crate std;
 
     use super::*;
     use crate::testing::{hints, try_map_u32_slab};
-    use std::sync::{LazyLock, Mutex};
+    use std::sync::LazyLock;
+    use parking_lot::Mutex;
 
-    static TEST_LOCK: Mutex<()> = Mutex::new(());
+    pub(crate) static TEST_LOCK: Mutex<()> = Mutex::new(());
     const SLAB_BYTES: usize = 0x1000;
     const DATA_OFFSET: usize = 0x100;
 
@@ -113,7 +114,7 @@ mod tests {
 
     #[test]
     fn aligns_consumes_slack_and_zeros_the_full_consumed_span() {
-        let _lock = TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _lock = TEST_LOCK.lock();
         let Some((state, data)) = fixture() else { return };
         unsafe {
             state.write(1);
@@ -133,7 +134,7 @@ mod tests {
 
     #[test]
     fn disabled_or_exactly_exhausted_state_leaves_it_unchanged() {
-        let _lock = TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _lock = TEST_LOCK.lock();
         let Some((state, data)) = fixture() else { return };
         unsafe {
             state.write(0);

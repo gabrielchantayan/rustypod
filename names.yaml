@@ -16,6 +16,31 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08038ef8
+    ghidra: FUN_08038ef8
+    name: arena_backed_object_destroy
+    size: 76
+    sig: "u32 *arena_backed_object_destroy(u32 *object)"
+    module: util/arena_backed_object_destroy
+    status: ported
+    renames:
+      param_1/r4: object
+      FUN_08057164: empty_destructor_08057164
+      FUN_08057168: reset_bump_arena
+    notes: >-
+      Raw ARM verifies extent 0x08038ef8..0x08038f44, followed by an
+      independent cmp-r0 function. Two inbound plain BLs at 0x080392c8
+      and 0x08138394, no predicated inbound BLs. Outbound: three plain
+      BLs, two BLNEs, and a final tail B. All destructor targets at
+      0x08057164 are verified bx-lr no-ops. Reads object words +0xb0,
+      +0x10c, +0x144 and, for nonzero +0x10c, pointee word +8.
+      The decoded leaf at 0x08057168 resets arena word 1 from word 0,
+      then word 2 from word 3, at 0x08b2f7e8. Returns the object without
+      clearing or freeing it. Deliberately omits inert destructor calls,
+      retains aligned volatile field reads, and inlines the reset leaf.
+      Reuses allocator host backing and test lock. Host tests cover optional
+      records, zero/max reset values, unchanged storage, and return identity.
+      Reference C: decomp/c/002/08038ef8_FUN_08038ef8.c.
   - address: 0x0803a1dc
     ghidra: FUN_0803a1dc
     name: asn1_object_new
