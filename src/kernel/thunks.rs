@@ -1828,6 +1828,42 @@ callback_target_getter:
     .size callback_target_getter, . - callback_target_getter
 "#
 );
+/// Child busy-status query — `FUN_080039a0` at load address `0x080039a0`.
+///
+/// True extent: 8 bytes, through the target literal at `0x080039a4`; the
+/// next veneer starts at `0x080039a8`. Whole-image raw A32 decoding verifies
+/// two plain inbound BLs (`0x08007b10`, `0x08007b78`), no predicated BLs,
+/// and no outgoing BLs in the veneer.
+///
+/// Startup `0x080046e0` copies the main image down by `0xaed8`, so literal
+/// target `0x0818c520` has its bytes at file load address `0x081973f8`.
+/// Those bytes are `mov r0, #0; bx lr`: the child argument is never read.
+/// The caller selects a zero-status child and retires nonzero-status children.
+///
+/// Deliberate deviation: inline the verified constant-zero target instead
+/// of retaining the literal tail veneer. No target seam or pointer access.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn event_handler_source_child_busy(_child: *mut u8) -> u32 {
+    0
+}
+
+#[cfg(test)]
+mod source_child_busy_tests {
+    use super::event_handler_source_child_busy;
+
+    #[test]
+    fn busy_query_does_not_access_the_child() {
+        for child in [core::ptr::null_mut(), 1usize as *mut u8,
+                      usize::MAX as *mut u8] {
+            assert_eq!(unsafe { event_handler_source_child_busy(child) }, 0);
+        }
+        let mut child = [0xffu8; 64];
+        assert_eq!(unsafe { event_handler_source_child_busy(child.as_mut_ptr()) }, 0);
+        assert_eq!(child, [0xff; 64]);
+    }
+}
+
 /// Osos staging address of the audio stream configuration veneer.
 pub const AUDIO_STREAM_CONFIGURE_VENEER: u32 = 0x0800_3928;
 pub const AUDIO_STREAM_CONFIGURE_INSN: u32 = 0xe51f_f004;
