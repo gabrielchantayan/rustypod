@@ -8,8 +8,8 @@
 //! only the low return word.
 //!
 //! Siblings in the same cluster, ported elsewhere: `block_sub_bytes`
-//! 0x0802e118 / ShiftRows-family 0x0802e190+ (in
-//! `printf/printf_float_dtoa`, corrected in names.yaml) and
+//! 0x0802e118 (in `printf/printf_float_dtoa`, corrected in names.yaml),
+//! ShiftRows-family 0x0802e190/0x0802e1f4 (in `crypto`) and
 //! `xor_transposed_4x4` 0x0802e54c (in `util/xor_transposed_block`).
 
 use crate::libc::memcmp::memcmp;

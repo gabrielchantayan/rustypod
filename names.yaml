@@ -16,6 +16,33 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0802e190
+    ghidra: FUN_0802e190
+    name: block_shift_rows
+    size: 100
+    sig: "void block_shift_rows(u8 *state)"
+    module: crypto/block_shift_rows
+    status: ported
+    vars:
+      param_1/r0: state
+      uVar1/r1: saved_row_byte
+      r2: next_row_byte
+    notes: >-
+      Raw A32 extent [0x0802e190, 0x0802e1f4) comprises 25 instructions,
+      ending in BX LR immediately before the inverse row permutation.
+      Full-image aligned decoding verifies two incoming plain BLs at
+      0x0802e5f8 and 0x0802e630, zero incoming predicated BLs, and zero
+      outgoing calls. The encrypt-block caller at 0x0802e58c transposes
+      its input into contiguous rows; leave row zero unchanged and rotate
+      rows one through three left by their row index. Byte accesses accept
+      any alignment. Moved the existing misplaced printf implementation
+      into crypto, with no compatibility alias. No memory-permutation or
+      C ABI deviations; ordinary RAM accesses may be reordered by LLVM.
+      Host permutation tests cover every byte value, all byte alignments,
+      adjacent sentinels, isolated-byte movement, and inverse roundtrips.
+      Host suite and release ARM build pass. match.py exits 1: 25 stock
+      versus 27 Rust instructions; LLVM adds a frame and reorders byte
+      loads/stores while retaining every permutation and no calls.
   - address: 0x08037e98
     ghidra: thunk_EXT_FUN_22004260
     name: gateway_service25_request

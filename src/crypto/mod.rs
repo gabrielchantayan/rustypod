@@ -160,3 +160,4 @@ pub mod asn1_string_compare;
 pub mod asn1_object_new;
 pub mod aes_submit_serialized;
 pub mod block_inv_shift_rows;
+pub mod block_shift_rows;
