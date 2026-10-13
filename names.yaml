@@ -38401,6 +38401,37 @@ functions:
       verbatim global assembly; the host-only noreturn shim is the deliberate
       deviation because a normal host call cannot supply that ARM context.
 
+  - address: 0x08003828
+    ghidra: thunk_FUN_080c7e40
+    name: opaque_stack_accumulator_continuation_veneer
+    size: 8
+    module: kernel/thunks
+    status: identified
+    renames:
+      DAT_0800382c: stack_accumulator_continuation_target
+    notes: >-
+      Raw osos.dec contains `ldr pc, [pc, #-4]` (0xe51ff004) at
+      0x08003828 followed by literal 0x080c7e40. The next real veneer
+      begins at 0x08003830, making the true extent 8 bytes rather than
+      Ghidra's 4. An independent full-image aligned ARM BL decode finds
+      exactly two plain unconditional calls, at 0x08005f3c and
+      0x08005f44, and zero predicated BL calls. The veneer itself has
+      no BL instructions and preserves the incoming registers and lr.
+      Neither this entry nor its destination has an existing names.yaml
+      mapping. The destination is an inner continuation: it loads r2
+      from [sp,#0x68], stores live r1 to [sp,#0x6c], and updates stack
+      accumulators using live r0 and stack-derived multipliers. It then
+      compares live r4 with [sp,#0x120], branches back to 0x080c7b3c
+      when signed-less-than, or adds 0x124 to sp and pops
+      {r4-r9,sl,fp,pc}. The observed caller 0x08005f18 saves only
+      {r4-r6,lr} and sets only r0 immediately before each call, so its
+      ordinary call frame does not establish this continuation's required
+      register and stack context. Ghidra's inferred void call is not a
+      usable ABI. A faithful semantic Rust port requires recovery of that
+      context and the intended callee identity; neither is established.
+      Deliberately unported rather than inventing a C signature or a
+      host shim. No dependency on the undecrypted region is asserted.
+
   - address: 0x08003818
     ghidra: FUN_08003818
     name: kernel_indirect_dispatch
