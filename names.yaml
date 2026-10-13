@@ -254052,3 +254052,38 @@ functions:
       Need verified runtime retargeting or the actual target entry ABI
       before a faithful Rust port. No Rust implementation, host tests,
       ARM build, match result, or device execution claimed.
+
+  - address: 0x08003720
+    ghidra: FUN_08003720
+    name: record_callback_store_continuation_veneer
+    size: 8
+    status: identified
+    notes: >-
+      Raw extent [0x08003720,0x08003728) contains e51ff004 (LDR PC,
+      [PC,#-4]) and literal 081b0d0c; the next distinct veneer starts
+      at 0x08003728. Ghidra's four-byte extent omits the literal.
+      Whole-image aligned ARM BL decoding independently finds two plain
+      callers at 0x08005150 and 0x0800551c, zero predicated callers,
+      and zero outgoing BL instructions in this veneer. Both callers
+      pass record+0x28 in r0; the first consumes the returned r0.
+      Algorithm: transfer to literal 0x081b0d0c without changing registers,
+      LR, SP, or flags. The semantic name describes the observed record
+      caller and store continuation, not a recovered standalone callee.
+      Blocked on the target entry contract: raw 0x081b0d0c is e8bd4070
+      (POP {r4,r5,r6,lr}), followed by ea005e50 (B 0x081c8658).
+      This is the epilogue of the routine at 0x081b0cf4, whose preceding
+      instructions prepare r1/r2; entering at the literal skips both
+      its prologue and that preparation. At 0x081c8658, r0 gains 0xcb0
+      and branches to 0x081af74c, which stores r1/r2 at r0+12/r0+16
+      and returns through the restored LR. Caller 0x08005114 saves
+      {r4,r5,r6,lr}, so this POP consumes its whole frame and returns
+      past the BL continuation. Caller 0x080054a8 saves
+      {r4,r5,r6,r7,r8,lr}, so this POP loads its saved r7 into LR
+      and leaves two saved words on the stack. A raw-word stack-transfer
+      smoke calculation verifies these two incompatible return paths.
+      No existing full-registry entry identifies this veneer, literal
+      target, preceding routine, or store helper. Need verified runtime
+      retargeting or the actual register/stack entry contract before a
+      faithful Rust port; an ordinary C seam would invent that contract.
+      No Rust implementation, host tests, ARM build, match result,
+      emulator execution, or device execution claimed.
