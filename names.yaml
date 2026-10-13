@@ -256038,3 +256038,46 @@ functions:
       word transfers and omits the inert cursor loop; equality guard,
       forward copy, end reload, masked subtraction and return remain.
       No new runtime seams and no device execution.
+
+  - address: 0x083e4210
+    ghidra: FUN_083e4210
+    name: tagged_buffer_vector_fill_construct
+    size: 140
+    sig: "u32 *tagged_buffer_vector_fill_construct(u32 *vector, u32 count, const u8 *source)"
+    module: cxx/tagged_buffer_vector_fill_construct
+    status: ported
+    renames:
+      param_1/r5: vector
+      param_2/local_1c: count
+      param_3/r8: source
+      uVar4/r7: capacity
+      iVar2/r4: cursor
+      uVar3/r6: remaining
+      FUN_08266c70: operator_new_checked
+      FUN_0827c18c: tagged_buffer_copy_construct
+      return/r0: vector
+    notes: >-
+      Raw osos.dec establishes the 140-byte extent 0x083e4210..0x083e429c:
+      the pop at 0x083e4298 ends the body and the next function begins
+      with push at 0x083e429c. Whole-image aligned A32 decoding finds one
+      incoming plain BL at 0x0827c830 and zero incoming predicated BL.
+      Internal calls are one plain BL at 0x083e424c to checked allocation
+      and one BLNE at 0x083e4268 to tagged-buffer copy construction.
+      Zero the three vector words, allocate max(count,32)<<4 bytes, fill
+      count 16-byte elements from source, skipping only a zero output
+      cursor, then store capacity end before logical end and return vector.
+      The caller at 0x0827c7f4 builds a default tagged buffer and passes a
+      fourth argument that this body never reads. Deviations: direct existing
+      Rust ports, explicit wrapping u32 arithmetic and target-width vector
+      fields on hosts; unused fourth argument and stack scratch omitted.
+      There is deliberately no allocation-failure bailout: count one with
+      NULL allocation skips construction but stores logical end 16.
+      Host tests cover counts 0,1,31,32,33, untouched padding and spare
+      storage, NULL source for an empty fill, and NULL allocation for zero
+      and one element. Host suite passed 15968 tests; ARM release build
+      passed. Standalone smoke with a host mmap allocator verified all 33
+      elements, 528-byte capacity and padding (empty release asserted).
+      match.py exits 1: 35 original versus 31 Rust instructions. LLVM keeps
+      the allocation call, predicated constructor call, 16-byte loop advance,
+      begin reload and capacity-before-end stores; max/shift folds and stack
+      scratch disappears. No new runtime seams; no device execution.
