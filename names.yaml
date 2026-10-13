@@ -254690,3 +254690,35 @@ functions:
       function boundaries. Deliberate deviation: no Rust port. Raw
       scans and ARM/Thumb objdump probes executed; no host behavior
       tests, ARM build, match.py or device execution claimed.
+  - address: 0x087f5aa0
+    ghidra: FUN_087f5aa0
+    name: structured_data_record_0108_first_value
+    size: 4
+    sig: "data word; executable ABI unverified"
+    status: identified
+    notes: >-
+      Deferred: raw bytes identify structured data, not a verified function.
+      Size 4 describes the assigned word, not an executable extent;
+      Ghidra's reported 1-byte size is invalid. Record starting at
+      0x087f5a94 contains 00000014, 00000000, 00000108, 0dad01a4,
+      0dad01a5, ffffffff. After 0200ffff at 0x087f5aac, the next
+      record starts at 0x087f5ab0 with identifier 0x109 and values
+      0dad064d/0dad0659. A32 decodes 0dad01a4 as STCEQ p1, c0,
+      [sp, #656]!; Thumb decodes its halves as LSLS r4, r4, #6
+      and LSRS r5, r5, #22. Ghidra invents indirect LR-relative
+      calls from neighboring ffff halfwords and continues across records.
+      Independent whole-image aligned A32 BL decoding finds zero plain
+      incoming candidates and one predicated candidate: 0b0b0b0b at
+      0x08532e6c decodes as BLEQ 0x087f5aa0. Its surrounding repeated
+      0b bytes and sequential 74/75/76 and 77/78/79 bytes indicate
+      table data, not a verified executable caller. Halfword-aligned
+      ARMv5 Thumb BL decoding finds zero incoming candidates. The
+      assigned word contains zero plain or predicated A32 BL instructions;
+      true outgoing call count and next real function boundary cannot
+      be established. Full names.yaml had no entry for this address.
+      Faithful porting requires verified executable mapping, instruction
+      state, caller ABI and function boundaries. No callee identity,
+      Rust seam or undecrypted-region dependency is invented. Deliberate
+      deviation: no Rust port. Raw scans and ARM/Thumb objdump probes
+      executed; no host behavior tests, ARM build, match.py or device
+      execution claimed.
