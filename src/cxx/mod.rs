@@ -34,6 +34,7 @@ pub use selector_value_record_create::*;
 pub mod owned_object_handle_construct;
 pub use owned_object_handle_construct::*;
 pub mod owned_object_handle_replace;
+pub mod error_object_assign;
 pub mod owned_object_handle_release;
 pub mod vtable_object_owner_destruct;
 pub mod record_nested_object_destruct;
