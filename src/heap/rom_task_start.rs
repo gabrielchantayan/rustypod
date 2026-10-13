@@ -119,13 +119,17 @@ mod tests {
     fn task_start_veneer_preserves_full_width_gateway_results() {
         let guard = install_recorder();
         unsafe {
-            for task_id in [0, 1, u32::MAX] {
+            for (task_id, input_r1, input_r3) in [
+                (0, u32::MAX, 0),
+                (1, 0, u32::MAX),
+                (u32::MAX, 0x8000_0000, 0x7fff_ffff),
+            ] {
                 let result = crate::kernel::thunks::task_start_gateway_veneer(
-                    task_id, u32::MAX, 0xdead_beef, 0,
+                    task_id, input_r1, 0xdead_beef, input_r3,
                 );
                 assert_eq!(
                     addr_of!(RECORDED_REQUEST).read(),
-                    [0x15, u32::MAX, task_id, 0],
+                    [0x15, input_r1, task_id, input_r3],
                 );
                 assert_eq!(result, 0x1234_5678_feed_cafe);
             }

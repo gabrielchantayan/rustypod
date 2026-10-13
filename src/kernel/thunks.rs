@@ -608,6 +608,11 @@ retail_continuation_dispatch_veneer:
 /// `0x08003e00`, not mask ROM. That body submits service 0x15 with task id
 /// in r0, preserving raw r1/r3 inputs, and returns the gateway's r0/r1 pair.
 /// Deviation: none on ARM; host builds execute the existing Rust mirror.
+///
+/// # Safety
+/// The boot-time IRAM copy must be installed before target execution. The
+/// task id and live register inputs must satisfy the RTXC service contract.
+/// On hosts, the shared gateway binding must be installed and serialized.
 #[cfg(target_arch = "arm")]
 extern "C" {
     pub fn task_start_gateway_veneer(

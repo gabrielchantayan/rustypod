@@ -252370,3 +252370,38 @@ functions:
       and LLVM emits a framed call to the Rust body plus constant-zero
       return rather than the original literal tail jump. This structural
       deviation is intentional; no device execution was performed.
+
+  - address: 0x08037f78
+    ghidra: thunk_EXT_FUN_22003e00
+    name: task_start_gateway_veneer
+    size: 8
+    sig: "u64 task_start_gateway_veneer(u32 task_id, u32 input_r1, u32 input_r2, u32 input_r3)"
+    module: kernel/thunks
+    status: ported
+    renames:
+      r0: task_id
+      r1: input_r1
+      r2: input_r2
+      r3: input_r3
+      DAT_08037f7c: task_start_iram_target
+    notes: >-
+      Raw words e51ff004/22003e00 encode ldr pc,[pc,#-4] plus its target
+      literal. The next real veneer at 0x08037f80 establishes eight bytes,
+      not Ghidra's four. Whole-image aligned ARM decoding finds two BL
+      callers: plain at 0x080b16d0 and BLNE at 0x08394014; tail branches
+      at 0x080b4c48 and 0x08103e94; no outgoing BL. The target is the IRAM
+      mirror of osos 0x08003e00, copied during boot, not mask ROM. Its
+      existing rom_task_start port constructs service-21 request words
+      {21, input_r1, task_id, input_r3} and returns the gateway's r0/r1
+      pair. ARM uses the exact literal veneer to preserve all registers,
+      SP and LR. Deliberate host deviation: execute the existing Rust
+      mirror through its shared gateway binding. Boundary tests include
+      zero and maximum task ids and full-width live register inputs.
+      Host suite passes 15831 tests; ARM release build succeeds. Isolated
+      execution of the actual host veneer and mirror verifies the request
+      and result 0x80000000ffffffff. Whole-crate non-test host linking is
+      blocked by unrelated missing host callees in prepare_entry_metadata,
+      shared_payload_select_kind and calendar_schedule. match.py exits one
+      because Ghidra omits the literal and absolute disassembly annotations
+      differ; the ARM instruction and target literal match the raw veneer.
+      No device execution was performed.
