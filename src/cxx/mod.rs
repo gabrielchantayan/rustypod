@@ -6,6 +6,7 @@ pub mod return_zero;
 pub mod red_black_tree_range_count;
 pub mod red_black_tree_range_count_083e7c14;
 pub mod red_black_tree_range_count_083e7b78;
+pub mod red_black_tree_range_count_083e7adc;
 pub mod word_pair_range_fill;
 pub mod string_pair_range_fill;
 pub mod string_pair_vector_record_range_fill;
