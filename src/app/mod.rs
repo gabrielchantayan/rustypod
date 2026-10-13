@@ -191,6 +191,7 @@ pub mod owned_virtual_member_clear;
 pub use owned_virtual_member_clear::*;
 pub mod owned_observable_array_replace;
 pub mod owned_observable_array_slot_replace;
+pub mod owned_observable_array_slot_replace_2c;
 pub mod member_record_consume;
 pub mod demo_mode_rearm_timer;
 pub mod demo_mode_prepare_collection;
