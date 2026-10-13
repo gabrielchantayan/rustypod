@@ -230,6 +230,7 @@ pub mod negative_product_rescale_in_place;
 pub mod i2s_transfer_slot;
 pub mod i2s_transfer_channel_teardown;
 pub mod i2s_transfer_slot_wait;
+pub mod i2s_transfer_slot_wait_timeout;
 pub mod is_tagged_c0;
 pub mod indexed_record_lookup;
 pub mod indexed_record_bounded_value;
