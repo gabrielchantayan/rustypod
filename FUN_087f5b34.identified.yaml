@@ -1,0 +1,35 @@
+# Identification record; not a Rust port or callable firmware seam.
+# Kept separately because names.yaml reads omit the required edit snapshot tag.
+address: 0x087f5b34
+ghidra: FUN_087f5b34
+name: noncode_record_word_087f5b34
+status: identified
+notes: >-
+  Cannot establish an executable function, signature, or true function extent.
+  Raw osos.dec at file offset 0x007f5b34 contains word 0x0dad0659,
+  not a return instruction or veneer. A32 decoding gives STCEQ p6, c0,
+  [sp, #356]!; the following word at 0x087f5b38 is undefined 0xffffffff.
+  Surrounding records repeat 0x0200ffff, 0x00000014, zero, increasing
+  identifiers 0x10c through 0x110, paired 0x0dadxxxx words, and
+  0xffffffff sentinels. The assigned word is the second paired word in
+  the record with identifier 0x10d at 0x087f5b2c; its first paired word
+  at 0x087f5b30 is 0x0dad064d. Record boundaries are not function boundaries.
+  Ghidra functions.csv reports one-byte entries at 0x087f5b34 and
+  0x087f5b36, followed by a 27-byte entry at 0x087f5b38; these cannot
+  establish real executable boundaries. Ghidra's Thumb interpretation
+  decodes the assigned halfword as LSL r1, r3, #25, then interprets the
+  repeated sentinel halfwords as BL #0xffe. The decompiled C consequently
+  contains repeated indirect calls and does not provide reliable semantics.
+  Independent whole-image aligned A32 branch-immediate decoding finds zero
+  plain inbound BLs and one predicated inbound candidate: 0x08532e08,
+  word 0x0b0b0b49, decoding as BLEQ 0x087f5b34. Its surrounding bytes
+  contain repeated 0x0b padding and ascending byte values, including
+  words 0x0b0b0b0b at 0x08532df8 and 0x08532e0c, and 0x53525150
+  at 0x08532e18; this is not an established executable caller.
+  Independent whole-image halfword-aligned ARMv5 Thumb BL decoding finds
+  zero inbound candidates. GNU arm-none-eabi-objdump confirms both the
+  assigned A32 word and the reported BLEQ candidate. names.yaml contains
+  no entry for this address. No callee identity, seam, Rust implementation,
+  host behavior test, or match claim is invented. Faithful porting requires
+  evidence of a real executable entry and its extent; current evidence
+  instead identifies a spurious function in data.
