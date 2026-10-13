@@ -2,6 +2,8 @@
 //! retailOS's application layer is built on. They live in the
 //! 0x083c0000-0x083dffff block of osos (~1000 functions), separate from
 //! the ARM ADS C runtime.
+pub mod three_word_swap;
+pub use three_word_swap::*;
 pub mod return_zero;
 pub mod red_black_tree_range_count;
 pub mod red_black_tree_range_count_083e7c14;
