@@ -37229,6 +37229,31 @@ functions:
       references. ARM builds retain the exact literal tail veneer; host builds
       read target-width words directly so 64-bit host pointer width cannot
       alter the two +0x1c offsets.
+  - address: 0x08038220
+    ghidra: thunk_EXT_FUN_22004ee4
+    name: ui_manager_context_continuation_veneer
+    size: 8
+    status: identified
+    notes: >-
+      Raw words at 0x08038220 and 0x08038224 are e51ff004 and
+      22004ee4: ldr pc,[pc,#-4] followed by its literal. The next
+      independent veneer starts at 0x08038228, establishing eight bytes.
+      Whole-image aligned ARM BL decoding finds two plain unconditional
+      callers at 0x08201fc0 and 0x08202078, with zero predicated BLs.
+      The IRAM mirror of 0x08004ee4 loads r0 from manager +0x1c and
+      tail-branches to mirrored 0x080036f8; that literal veneer targets
+      DRAM 0x080ea540. No canonical entry names that callee or either
+      intermediate address. Raw target instructions sub r0,r2,r3;
+      str r0,[sp,#0xa8]; ldr r0,[sp,#0x120]; cmp r6,#0 establish
+      a live-register and existing-stack-frame continuation, not a
+      normal one-argument context operation. The preceding instructions
+      at 0x080ea534 load r2,r3,r1 from sp+0xf8,+0xf0,+0xf4, but
+      this target skips them. Ghidra places the target inside FUN_080ea434.
+      Both observed callers acquire the manager immediately before BL
+      and do not establish that continuation frame. Faithful Rust ABI
+      and host behavior remain blocked on the actual runtime entry
+      contract or evidence of runtime relocation/fixup of this literal.
+      Do not invent a callee identity, signature, or host callback.
   - address: 0x0833dd78
     ghidra: FUN_0833dd78
     name: xor_b2_in_place
