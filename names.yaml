@@ -16,6 +16,37 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08002420
+    ghidra: FUN_08002420
+    name: memory_controller_timing_configure
+    size: 44
+    sig: "void memory_controller_timing_configure(u32 frequency)"
+    module: drivers/memory_controller_timing_configure
+    status: ported
+    vars:
+      param_1/r0: frequency
+      r2: memory_controller_registers
+      DAT_080025e8: memory_controller_base_0x38100000
+      DAT_080025ec: timing_configuration_0x1fb621
+    notes: >-
+      Raw extent [0x08002420,0x0800244c) contains eleven A32 instructions,
+      ending BX LR before the next PUSH. Whole-image aligned word scan
+      verifies two plain inbound BLs at 0x08002194 and 0x0800249c,
+      zero predicated inbound BLs and zero outgoing BLs of either kind.
+      Ghidra's additional caller at 0x08001dcc is a spurious overlapping
+      interpretation of the initialization body. Clear MMIO offset 0xf0,
+      write 0x41000 + (frequency * 64000 modulo 2^32 >> 13) to offset 8,
+      then write 0x1fb621 to offset 0x10. Fixed base is 0x38100000.
+      Caller initialization obtains its clock ratio from the division
+      veneer at 0x08003510; no callee seam is introduced. Individual
+      register bit meanings remain unidentified. Deliberate deviations:
+      volatile MMIO stores and isolated host register storage; no widened
+      multiply or input validation. Host tests cover zero, ordinary ratios,
+      overflow boundary, modulo period, signed-looking inputs and untouched
+      registers. All 15913 host tests and ARM release build pass. Actual-source
+      executable smoke verifies frequencies 96, 67109 and 0xffffffff.
+      match.py exits 1: LLVM adds a frame and rebases the register pointer
+      to 0x38100008, preserving all three stores in order and MUL/LSR/ADD.
   - address: 0x080034c8
     ghidra: thunk_FUN_082c5b18
     name: kernel_pool_node_take
