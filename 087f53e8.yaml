@@ -1,0 +1,36 @@
+# Assigned-address evidence; no executable function has been established.
+# Kept separately because the read tool omitted names.yaml's required edit tag.
+address: 0x087f53e8
+ghidra: FUN_087f53e8
+name: structured_data_record_00cd_sentinel
+size: 4
+sig: "data word; executable ABI unverified"
+status: identified
+notes: >-
+  Deferred: raw osos.dec identifies structured data, not a verified function.
+  Size 4 describes the assigned word, not an executable extent; Ghidra's
+  reported one-byte function is unsupported. Raw [0x087f53d4,0x087f53f0)
+  contains 00000014, 00000000, 000000cd, 0dad01af, 0dad01b0, ffffffff,
+  0200ffff. The assigned word is the penultimate ffffffff sentinel.
+  The next record [0x087f53f0,0x087f540c) repeats the structure with
+  identifier ce, paired 0dad01a4/0dad01a5 values and ffff000e instead
+  of ffffffff. A32 objdump decodes the assigned word as undefined;
+  its ffff/ffff halfwords are not an ARMv5 Thumb BL pair. It is neither
+  a return nor a branch veneer. Ghidra incorrectly reports BL #0xffe;
+  its recovered C invents LR-relative indirect calls across data records.
+  Independent whole-image aligned raw A32 BL decoding finds zero plain
+  incoming candidates and one predicated candidate: 0b030b03 at
+  0x087327d4 decodes as BLEQ 0x087f53e8. Objdump of
+  [0x087327c0,0x087327f0) shows repeated 0b030b03 words targeting
+  consecutive data words, with a 0b040b03 variant, not a verified
+  executable caller. Whole-image halfword-aligned ARMv5 Thumb BL
+  decoding finds zero incoming candidates. The assigned word contains
+  zero plain or predicated outbound A32 BL instructions and zero ARMv5
+  Thumb BL pairs. No true function extent, next real executable boundary,
+  caller ABI or callee identity can be established. The complete names.yaml
+  scan found no entry for this address; existing adjacent identified entries
+  independently document the same structured records. Faithful porting
+  requires verified executable mapping and boundaries; no Rust seam or
+  undecrypted-region dependency is invented. Deliberate deviation: no Rust
+  port. Raw branch scans and A32/Thumb objdump probes executed; no host
+  behavior tests, ARM build, match.py or device verification claimed.
