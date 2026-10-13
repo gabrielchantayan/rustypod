@@ -8,6 +8,7 @@ pub mod red_black_tree_range_count_083e7c14;
 pub mod red_black_tree_range_count_083e7b78;
 pub mod red_black_tree_range_count_083e7adc;
 pub mod red_black_tree_range_count_083e7a40;
+pub mod red_black_tree_range_count_083e79a4;
 pub mod word_pair_range_fill;
 pub mod string_pair_range_fill;
 pub mod string_pair_vector_record_range_fill;
