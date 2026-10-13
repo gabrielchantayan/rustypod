@@ -253711,3 +253711,29 @@ functions:
       preserves 68 pointer identities and all 64 live storage bytes.
       match.py reports an exact single-instruction match. No device execution
       claimed.
+
+  - address: 0x08005e14
+    ghidra: FUN_08005e14
+    name: ui_dispatch_pending_initialize
+    size: 56
+    sig: "int ui_dispatch_pending_initialize(DecoderInitializationSlot *slot)"
+    module: ui/pending_initialize
+    status: ported
+    vars: {param_1: slot, DAT_08005e48: ui_notification_context}
+    notes: >-
+      Raw extent [0x08005e14,0x08005e4c) contains 52 instruction bytes plus
+      the context literal 0x22008cb8 at 0x08005e48; the next real function
+      begins at 0x08005e4c. Independent aligned ARM decoding verifies two
+      plain outgoing BLs (0x08005e2c to 0x08005f00 and 0x08005e34 to
+      0x080035d0), zero predicated outgoing BLs, and two plain inbound BLs
+      (0x08005134 and 0x08005500), zero predicated inbound BLs. A zero
+      initialization byte at owner +6 triggers the existing decoder_initialize
+      port and existing opaque tail_call_retail_080cc22c veneer with the fixed
+      context, then stores one. All nonzero flags skip calls and stores.
+      Always returns zero, discarding both callee results. No guessed callee
+      identity or new foreign seam. The context is in the IRAM mirror, not ROM.
+      Deliberate deviations: repr(C) shifts the flag with native host pointer
+      width while retaining ARM +6; volatile accesses preserve publication
+      order. Host tests cover ordering, ignored returns, preserved adjacent
+      fields, and every nonzero byte with an invalid decoder. Native smoke
+      exercises initialization and repeated-call bypass. No device run claimed.

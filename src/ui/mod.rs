@@ -162,6 +162,7 @@ pub mod indexed_rect;
 pub mod noop_f7f4;
 pub mod operation_unavailable;
 pub mod pending_cleanup;
+pub mod pending_initialize;
 pub mod width_inset;
 pub mod static_descriptor;
 pub mod styled_text_view;
