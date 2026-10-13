@@ -16,6 +16,45 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0800cbe8
+    ghidra: FUN_0800cbe8
+    name: reverse_affine_table_words
+    size: 320
+    sig: "u32 reverse_affine_table_words(u32 *end, u32 count)"
+    module: crypto/reverse_affine_table_words
+    status: ported
+    vars:
+      param_1/r0: end
+      param_2/r1: count
+      r10: index_bias
+      r1: encoded_index
+      r12: adjusted_count
+      return/r0: zero
+    notes: >-
+      Raw extent [0x0800cbe8,0x0800cd28) is 320 bytes: 200 executable
+      bytes and 120 trailing literal/data bytes, not the Ghidra size alone.
+      Next entry has an independent stack-save prologue and inbound BLs.
+      Whole-image aligned raw scanning verifies two plain inbound BLs at
+      0x0802cb2c and 0x0802d910, zero predicated inbound BLs, and zero
+      outgoing plain or predicated BLs. No callee seams are required.
+      Both callers supply the end pointer advanced by FUN_0802b5d4 and
+      count 256. Transform aligned words backward and return zero.
+      Preserve the wrapping MBA stopping predicate and final signed sign
+      test. Literal pool 0x0800cd0c..0x0800cd24 supplies 6cd60ec1,
+      9329f13e, 40407e00, 149660ff, 1220abc2, 808107a3, bcb72aa2.
+      Affine map (word * 149660ff - 1220abc2) * 808107a3 + bcb72aa2
+      modulo 2^32 is folded to word * 98e5bb5d + c075801c.
+      Deliberate deviations are equivalent constant folding and delayed
+      pointer subtraction on no-access paths; trailing data is not copied.
+      Host tests cover counts 0..256, wrapping inputs, both neighboring
+      sentinels, and null no-access counts 0, 80000000, 80000001, ffffffff.
+      Host suite and ARM build-std core release build pass. Optimized
+      actual-source executable smoke verifies the caller's 256-word path,
+      both sentinels, zero status and null zero count. match.py exits 1
+      with a reviewed structural diff: 50 original instructions versus
+      32 Rust instructions including literal words. LLVM folds the MBA
+      constants, retains the signed stopping check and backward word loop,
+      emits MLA for the affine map and returns zero without outgoing calls.
   - address: 0x0800d124
     ghidra: FUN_0800d124
     name: reverse_affine_words
