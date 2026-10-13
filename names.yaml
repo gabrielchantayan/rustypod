@@ -16,6 +16,36 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08027628
+    ghidra: FUN_08027628
+    name: obfuscated_four_word_zero
+    size: 8
+    sig: "u32 obfuscated_four_word_zero(u32 first, u32 second, u32 third, u32 fourth)"
+    module: app/obfuscated_zero_word
+    status: ported
+    vars:
+      param_1/r0: ignored_first_word
+      param_2/r1: ignored_second_word
+      param_3/r2: ignored_third_word
+      param_4/r3: ignored_fourth_word
+      return/r0: zero_word
+    notes: >-
+      Raw e3a00000 e12fff1e is MOV r0,#0; BX LR. True extent
+      [0x08027628,0x08027630) is eight bytes; the next real entry is
+      the independently called obfuscated_arithmetic_word_identity.
+      Whole-image aligned A32 decoding verifies two plain inbound BLs
+      at 0x082f91f4 and 0x08332acc, zero predicated inbound BLs,
+      and zero outgoing calls. Callers FUN_082f8c18 and FUN_08332634
+      supply four opaque register words and store zero at sp+0x11c
+      and sp+0x130 respectively. Ignore all inputs, return zero,
+      access no memory. Concrete types remain unknown; no callee seams
+      or behavioral deviations. Existing module already registered.
+      Dedicated text section and inline-never retain a distinct patch
+      symbol. Host edge tests and full host suite pass; ARM release
+      build passes. Actual-source optimized executable smoke verifies
+      65536 full-width calls. match.py exits 1: MOV r0,#0; BX LR
+      versus PUSH {fp,lr}, MOV fp,sp, MOV r0,#0, POP {fp,pc};
+      zero result and balanced stack are preserved.
   - address: 0x08027630
     ghidra: FUN_08027630
     name: obfuscated_arithmetic_word_identity
