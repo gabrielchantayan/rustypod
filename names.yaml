@@ -43322,6 +43322,30 @@ functions:
     module: printf/printf_float_dtoa
     status: ported
 
+  - address: 0x080374a4
+    ghidra: FUN_080374a4
+    name: ext_div_ext
+    size: 48
+    sig: "void ext_div_ext(const u32 *a, const u32 *b, i32 adj, u32 *out)"
+    module: printf/printf_float_dtoa
+    status: ported
+    renames:
+      param_1/r0: numerator
+      param_2/r1: denominator
+      r2/r11: rounding_adjustment
+    notes: >-
+      Raw A32 extent 0x080374a4..0x080374d3 ends before the next PUSH.
+      Two plain incoming BLs at 0x0803265c and 0x08034348, zero predicated
+      incoming BLs; two plain outgoing BLs to 0x08037024 and 0x080373c8.
+      BICS/BICSMI accept only operands with mantissa bit 31 set and exponent
+      bit 30 clear; otherwise return all three numerator words unchanged.
+      Reuses ext_fp_div_core and ext_fp_round, including guard/sticky state.
+      Deliberate ABI deviation: explicit adj and output pointer replace
+      internal live-register rounding and r0-r2 aggregate return. Existing
+      Rust dtoa/pow10 callers retain their established value seam. Host edge
+      tests and executable 3/2 smoke pass; ARM release build passes.
+      match.py exits 1: 12 stock versus 40 Rust instructions; combined
+      predicate, bypass, division/rounding calls and three result words remain.
   - address: 0x08037504
     ghidra: FUN_08037504
     name: ext_mul_ext
