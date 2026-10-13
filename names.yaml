@@ -256238,3 +256238,40 @@ functions:
       exercise null, empty allocated, singleton, spare capacity, and full
       vectors through the real export and heap fixture, preserving descriptor
       and storage. All 15979 host tests pass and the ARM release build passes.
+  - address: 0x083e09c4
+    ghidra: FUN_083e09c4
+    name: vector_reserve_record8
+    size: 224
+    sig: "void vector_reserve_record8(VectorStorage *vector, u32 requested)"
+    module: cxx/vector_reserve_record8
+    status: ported
+    vars: {param_1/r0/r4: vector, param_2/r1: requested, r5: storage, r6: capacity, local_20: growth}
+    renames:
+      FUN_083d76b4: vector_capacity_elem8
+      FUN_083d76a4: vector_size_elem8
+      FUN_083b69cc: vector_growth_capacity
+      FUN_08266abc: cxx_new_handler_dispatch
+      FUN_08266c70: operator_new_checked
+      thunk_FUN_083e89fc: vector_copy_range_record8
+      FUN_08266f2c: cxx_array_dealloc
+    notes: >-
+      Raw extent 0x083e09c4..0x083e0aa4 is 224 bytes: 220 executable bytes
+      and the zero-string literal at 0x083e0aa0; the next real function
+      starts at 0x083e0aa4. Whole-image aligned A32 decoding finds one
+      inbound plain BL at 0x0815f554 and no predicated inbound BLs.
+      The body has seven plain BLs and one BLHI (length-error dispatch).
+      Reserve max(requested, growth(current size)) only when capacity is
+      insufficient. Report requests above 0x1fffffff with code 8 and both
+      descriptor arguments equal to 0x083e0aa0, continuing if the handler
+      returns. Allocate capacity<<3 with 32-bit wrapping, copy word/byte/
+      halfword fields while preserving destination padding, release the old
+      buffer, and rebuild the three bounds. All callees reuse existing ports;
+      the naked growth export is cast to its verified r0-to-r0 ABI.
+      Deliberately omit the trivial no-effect destruction walk; repr(C)
+      pointer fields widen on hosts. match.py reports 56 versus 55 instructions:
+      the diagnostic port is inlined, the empty loop and dead free-count
+      computation disappear, and final bounds stores are combined/reordered.
+      Allocation, growth, field-copy, release, and capacity guard remain.
+      Host tests cover no-op requests, empty and populated growth, growth from
+      size rather than capacity, requested-capacity precedence, and untouched
+      padding and unused storage. All 15981 host tests and ARM release pass.

@@ -997,3 +997,4 @@ pub mod embedded_array_attached_owner_destruct;
 pub mod descriptor_vector_owner_construct;
 pub mod settings_dispatch_three_words;
 pub mod opaque_context_cleanup_noop;
+pub mod vector_reserve_record8;
