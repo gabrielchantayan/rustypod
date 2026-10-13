@@ -16,6 +16,29 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083ed1bc
+    ghidra: FUN_083ed1bc
+    name: scanf_hex_literal
+    size: 4
+    module: scanf/scanf_hex_literal
+    status: ported
+    sig: "i32 scanf_hex_literal(i32 no_match)"
+    vars: {r0: no_match}
+    notes: >-
+      Raw word e1a0f00e is mov pc, lr; the next real function is the
+      inf/nan matcher at 0x083ed1c0. One incoming plain BL at 0x080364dc,
+      zero predicated BLs, zero outgoing calls, verified from raw words.
+      The scanf float engine dispatches x/X after exactly one leading
+      zero with r0=-3, then compares against -3. This disabled hex-float
+      matcher preserves r0 and accesses no state. Unused register and
+      stack arguments are omitted. The Rust engine restores the gated
+      dispatch; hexadecimal floating literals still fall back to decimal.
+      LLVM folds the export into no_op_u32 (same section, offset, and
+      12-byte size). match.py cannot locate the alias label; comparing
+      no_op_u32 shows only push fp/lr, mov fp/sp, pop fp/pc instead of
+      mov pc/lr, with r0 unchanged. Host tests and a runtime smoke over
+      the -3 sentinel and 100000 register patterns pass; ARM build passes.
+
   - address: 0x083ed1c0
     ghidra: FUN_083ed1c0
     name: scanf_special_literal

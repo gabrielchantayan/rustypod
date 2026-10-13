@@ -6,3 +6,4 @@ pub mod scanf_int;
 pub mod scanf_engine;
 pub mod scanf_float_engine;
 pub mod scanf_special_literal;
+pub mod scanf_hex_literal;
