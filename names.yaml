@@ -16,6 +16,30 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080284bc
+    ghidra: FUN_080284bc
+    name: empty_destructor_080284bc
+    size: 4
+    sig: "void *empty_destructor_080284bc(void *object)"
+    module: cxx/empty_destructor_080284bc
+    status: ported
+    vars:
+      param_1/r0: object
+    notes: >-
+      Raw word e12fff1e is BX LR; true extent [0x080284bc,0x080284c0),
+      followed by an independent BX LR body. Full-image aligned A32
+      decoding finds two plain inbound BLs at 0x082ea24c and 0x082ea424,
+      zero predicated inbound BLs, zero outbound calls, and no aligned
+      DATA references. Both cleanup paths in FUN_082e9b54 load the saved
+      object from sp+0x48; neither consumes the returned r0. Concrete owner
+      type unrecovered; preserve incoming r0 despite Ghidra's void
+      prototype. No memory access or callee seams. Dedicated text section
+      prevents folding into another empty destructor. No behavioral
+      deviations. Host tests cover NULL, unaligned, dangling, native-width
+      addresses, and unchanged live storage with adjacent sentinels.
+      Host suite, actual-source executable smoke, and ARM release build
+      pass. match.py exits 1: stock BX LR versus PUSH {fp,lr}, MOV fp,sp,
+      POP {fp,pc}; r0 remains untouched and the frame is balanced.
   - address: 0x080284c4
     ghidra: FUN_080284c4
     name: empty_destructor_080284c4
