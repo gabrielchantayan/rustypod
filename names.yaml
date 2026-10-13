@@ -16,6 +16,28 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08003508
+    ghidra: FUN_08003508
+    name: encode_clkcon1_divider_ratio
+    size: 8
+    sig: "u32 encode_clkcon1_divider_ratio(u32 control)"
+    module: drivers/clock_config
+    status: ported
+    vars: {param_1: control, DAT_0800350c: relocated_clkcon1_transform}
+    notes: >-
+      True extent [0x08003508,0x08003510): e51ff004 plus literal
+      080d2e08. Full-image aligned A32 decoding finds two plain BL
+      callers at 0x08001fe8/0x08002120, no predicated BL callers, and
+      no outgoing BL in the veneer. Startup 0x080046e0 relocates by
+      0xaed8, resolving the body to raw 0x080ddce0, not the interior
+      byte-swap block at raw 0x080d2e08. Body is 68 bytes through the
+      next prologue at 0x080ddd24; its one plain BL calls the already
+      ported __rt_udiv at 0x08036f14. Divide ([12:8]+1) by ([20:16]+1),
+      encode quotient 1 as 0, 2 as 1, otherwise wrapping quotient-2;
+      return (control & ~63) OR encoding, without masking the encoding.
+      Port directly implements the resolved body using Rust division.
+      Host tests exhaust all divider pairs and cover zero-quotient wrap.
+      ARM build and match.py reviewed: full body replaces literal veneer.
   - address: 0x08003528
     ghidra: thunk_FUN_082dab10
     name: pmu_voltage_boot_set
