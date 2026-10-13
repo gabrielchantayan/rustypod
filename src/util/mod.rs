@@ -1,4 +1,6 @@
 //! retailOS-native utility functions (CRC, itoa, byte swaps, ...).
+pub mod visit_word_range_return_callback;
+pub use visit_word_range_return_callback::*;
 pub mod context_cleanup_noop;
 pub use context_cleanup_noop::*;
 pub mod output_word_cleanup_noop;
