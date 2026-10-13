@@ -254582,3 +254582,42 @@ functions:
       ABI and function boundaries. Deliberate deviation: no Rust port.
       Raw-byte scans and ARM/Thumb objdump probes executed; no host
       behavior tests, ARM build, match.py or device execution claimed.
+
+  - address: 0x087f5c28
+    ghidra: FUN_087f5c28
+    name: unresolved_data_record_candidate_087f5c28
+    size: null
+    sig: "unresolved; executable entry and ABI not established"
+    module: null
+    status: identified
+    notes: >-
+      Honest deferral: raw osos.dec at offset 0x007f5c28 does not
+      establish Ghidra's reported 23-byte function. The seven words in
+      [0x087f5c28,0x087f5c44) are 00000014, 00000000, 00000116,
+      0dad0644, 0dad064b, ffffffff and 0200ffff. A32 decoding gives
+      conditional AND instructions and coprocessor stores, not a normal
+      entry, return or veneer. Neighboring records contain identifiers
+      0x115 at 0x087f5c14, 0x116 at 0x087f5c30, and 0x117 at
+      0x087f5c50, pairs of 0dad-prefixed values and ffffffff terminators.
+      The next repeated 00000014 word at 0x087f5c48 is data, not a
+      verified function boundary. True executable extent, ABI and
+      algorithm cannot be established.
+      Whole-image aligned A32 BL decoding finds zero plain incoming
+      candidates and one predicated candidate at 0x08532e54:
+      0b0b0b73 decodes as BLEQ 0x087f5c28. Surrounding words
+      0b0b6867, 0b0b0b0b, 6a690b0b, 6e6d6c6b, 7271706f
+      and 0b767574 exhibit sequential byte-table values and repeated
+      0b bytes, not a verified executable caller. Whole-image
+      halfword-aligned ARMv5 Thumb BL decoding finds zero incoming
+      candidates. The seven entry words contain zero plain or
+      predicated A32 BL instructions; a real function call count cannot
+      be asserted without verified boundaries.
+      Ghidra assembly misinterprets ffff halfwords as BL #0xffe;
+      decompiled C invents indirect calls using incoming LR and proceeds
+      across neighboring records. Full names.yaml had no prior entry
+      at this address. No callee identity, seam, replacement behavior
+      or undecrypted-region dependency is invented. Faithful porting
+      requires verified executable mapping, instruction state, caller
+      ABI and function boundaries. Deliberate deviation: no Rust port.
+      Raw-byte scans and objdump probes executed; no host behavior
+      tests, ARM build, match.py or device execution claimed.
