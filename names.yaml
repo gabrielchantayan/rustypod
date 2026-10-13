@@ -255707,3 +255707,57 @@ functions:
       Archive relocation confirms R_ARM_CALL word_insertion_sort_insert;
       the apparent self-call in match.py is an unresolved archive relocation.
       LLVM adds a frame and moves the empty check ahead of its prologue.
+
+  - address: 0x083e7734
+    ghidra: FUN_083e7734
+    name: numeric_punctuation_construct
+    size: 168
+    sig: "NumericPunctuation *numeric_punctuation_construct(NumericPunctuation *this, uint32_t references, NumericPunctuationSource *source)"
+    status: identified
+    vars:
+      param_1/r0: this
+      param_2/r1: references
+      param_3/r2/r5: source
+      param_4/r3: unused_saved_register
+      r4: punctuation_fields
+      DAT_083e77d8: numeric_punctuation_vtable
+      FUN_082a89b4: opaque_header_payload_construct
+      FUN_083d8c20: cxx_string_default_ctor
+      FUN_083d8ca0: cxx_string_assign_cstr
+      FUN_082aad14: operator_delete_tag3
+    notes: >-
+      Raw osos.dec A32 words establish [0x083e7734,0x083e77dc), 168 bytes:
+      164 instruction bytes through POP at 0x083e77d4 and the literal
+      0x089a8adc at 0x083e77d8. The next independent PUSH is at 0x083e77dc.
+      Whole-image aligned branch decoding finds one inbound plain BL at
+      0x083dae2c and zero inbound predicated BLs. The body has seven plain
+      BLs (one base constructor, three default string constructors, three
+      C-string assignments) and one BLNE to tag-3 delete at 0x083e77c4.
+      Initializes base words to vtable, category 0x80, zero, references;
+      constructs strings at +20/+24/+28; sets separators at +16/+17.
+      Null source uses '.' and ',' and leaves all strings empty. Otherwise
+      copies source bytes +1/+2 and assigns grouping, true name, false name
+      from pointers +4/+8/+12, then deletes the source iff byte +0 is
+      nonzero. Source builder 0x082673c4 copies locale punctuation/grouping
+      and raw true/false literals at 0x08267498/0x082674a0. Writes the
+      final vtable only after source release, returns this in r0. Ghidra's
+      fourth argument and u64 return misinterpret saved r1-r3; r3 is
+      unused. Raw caller 0x083dae0c passes references in r1, source in r2,
+      and overwrites the returned object's vtable. All four callees have
+      existing ported names entries. Padding +18/+19 remains untouched.
+      Port blocked by an existing callee defect: cxx_string_default_ctor
+      initializes each string to empty_rep_data(), backed by immutable
+      static EMPTY_REP with refcount zero (src/cxx/string.rs:200-203).
+      cxx_string_assign_cstr tests that zero refcount at line 1477 and
+      writes length and data at lines 1478-1479 even for this singleton.
+      A host test assigning empty grouping from a non-null source crashes
+      with SIGSEGV; GDB places the fault at string.rs:1478, called from
+      the constructor's first assignment. Empty grouping is valid and
+      cannot be omitted or special-cased to hide this dependency failure.
+      The attempted port and tests were removed rather than introducing
+      a duplicate seam for an already ported callee or altering a second
+      function. ARM release compilation succeeded; match.py printed a
+      structural diff (43 Rust versus 41 original instructions), but that
+      does not establish behavioral correctness. No port is delivered.
+      Resolve the shared empty-representation write contract before
+      implementing this constructor with the existing string ports.
