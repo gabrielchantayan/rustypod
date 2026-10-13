@@ -107,8 +107,8 @@
 //!   5 callers, r0 = 0, r1 = 2/3 or a pointer.
 //! - 0x08037ed8 -> 0x22001e70 `irq_fiq_disable` — interrupt lockout:
 //!   `mrs r1, cpsr; and r0, r1, #0xc0; orr r1, r1, #0xc0; msr cpsr_c, r1;
-//!   bx lr` — masks IRQ+FIQ, returns the previous I/F bits. (The paired
-//!   restore @ 0x22001e84 is thunk 0x08037f00, outside this span.)
+//!   bx lr` — masks IRQ+FIQ, returns the previous I/F bits. Uses the native
+//!   CPSR port; the paired restore is mirrored at 0x08001e84 (thunk 0x08037f00).
 //!   2 callers.
 //! - 0x08037ee0 -> 0x22003b00 — tail stub: `mov r0, #1; b gateway'` (the
 //!   alternate gateway entry @ 0x08003640 in the mirror). 1 caller.
@@ -160,11 +160,6 @@ pub const THUNK_STRIDE: u32 = 8;
 
 /// Number of thunk wrappers in the span (and in ROM_KERNEL / THUNK_CATALOG).
 pub const WRAPPER_COUNT: usize = 32;
-/// Number of still-foreign ROM entries represented by [`RomThunkOps`].
-///
-/// Slots 3, 10, and 12 call their already ported mirror bodies directly.
-const ROM_HOOK_COUNT: usize = WRAPPER_COUNT - 3;
-
 /// The full span catalog: (thunk address, ROM target, exported symbol),
 /// in address order. Verified word-for-word against osos.dec.
 pub static THUNK_CATALOG: [(u32, u32, &str); WRAPPER_COUNT] = [
@@ -265,8 +260,6 @@ pub struct RomThunkOps {
     pub rom_svc_22003e44: unsafe extern "C" fn(a0: usize) -> usize,
     /// ROM gateway service 27 @ 0x22003bcc.
     pub rom_svc_22003bcc: unsafe extern "C" fn(a0: usize, a1: usize) -> usize,
-    /// IRQ+FIQ lockout @ 0x22001e70: masks both, returns previous I/F bits.
-    pub irq_fiq_disable: unsafe extern "C" fn() -> usize,
     /// Alternate-gateway tail stub @ 0x22003b00.
     pub rom_svc_22003b00: unsafe extern "C" fn() -> usize,
     /// Compound ROM function @ 0x220044c8 (sem 22 wait + irq lockout).
@@ -334,7 +327,6 @@ pub static mut ROM_KERNEL: RomThunkOps = RomThunkOps {
     rom_svc_22000364: missing1,
     rom_svc_22003e44: missing1,
     rom_svc_22003bcc: missing2,
-    irq_fiq_disable: missing0,
     rom_svc_22003b00: missing0,
     rom_svc_220044c8: missing0,
     tick_delay: missing1,
@@ -933,12 +925,19 @@ pub unsafe extern "C" fn rom_svc_22003bcc(a0: usize, a1: usize) -> usize {
     (hook!(rom_svc_22003bcc))(a0, a1)
 }
 
-/// irq_fiq_disable — original: thunk @ 0x08037ed8 -> ROM 0x22001e70. Masks
-/// IRQ+FIQ in CPSR and returns the previous I/F bits (restore lives at ROM
-/// 0x22001e84, thunk 0x08037f00 — outside this span).
+/// irq_fiq_disable — original: `thunk_EXT_FUN_22001e70` @ `0x08037ed8`.
+///
+/// True extent: 8 bytes, through the literal at `0x08037edc`; the next
+/// veneer starts at `0x08037ee0`. Raw ARM decoding finds two plain BL callers
+/// (`0x08067fac`, `0x0809a7ac`), no predicated BL callers, and no internal BL.
+/// `ldr pc,[pc,#-4]` transfers to `0x22001e70`, the IRAM mirror of the
+/// 20-byte CPSR helper at `0x08001e70`: return the prior I/F bits and set both.
+/// Deliberate deviation: call the existing native CPSR port instead of jumping
+/// into IRAM. Host builds use that port's simulated CPSR, not a kernel hook.
 #[cfg_attr(target_os = "none", no_mangle)]
-pub unsafe extern "C" fn irq_fiq_disable() -> usize {
-    (hook!(irq_fiq_disable))()
+#[inline(never)]
+pub unsafe extern "C" fn irq_fiq_disable() -> u32 {
+    crate::drivers::interrupts::cpsr_disable_irq_fiq()
 }
 
 /// rom_svc_22003b00 — original: thunk @ 0x08037ee0 -> ROM 0x22003b00, a
@@ -1081,7 +1080,6 @@ pub(crate) mod tests {
     mock1!(m24, 24); // rom_svc_22000364
     mock1!(m25, 25); // rom_svc_22003e44
     mock2!(m26, 26); // rom_svc_22003bcc
-    mock0!(m27, 27); // irq_fiq_disable
     mock0!(m28, 28); // rom_svc_22003b00
     mock0!(m29, 29); // rom_svc_220044c8
     mock1!(m30, 30); // tick_delay
@@ -1112,7 +1110,6 @@ pub(crate) mod tests {
         rom_svc_22000364: m24,
         rom_svc_22003e44: m25,
         rom_svc_22003bcc: m26,
-        irq_fiq_disable: m27,
         rom_svc_22003b00: m28,
         rom_svc_220044c8: m29,
         tick_delay: m30,
@@ -1187,15 +1184,6 @@ pub(crate) mod tests {
         }
     }
 
-    /// The table holds one independent fn pointer for each foreign thunk
-    /// target; mailbox-send and task-unlock are directly ported instead.
-    #[test]
-    fn ops_table_excludes_directly_ported_targets() {
-        assert_eq!(
-            core::mem::size_of::<RomThunkOps>(),
-            ROM_HOOK_COUNT * core::mem::size_of::<usize>()
-        );
-    }
 
     /// task_lock (thunk 0x08037e48 -> ROM 0x22003ea0): the kernel id in r0
     /// reaches the ROM hook and the r0 result word comes back.
@@ -1450,7 +1438,6 @@ pub(crate) mod tests {
             check(24, rom_svc_22000364(0), &[0]);
             check(25, rom_svc_22003e44(0), &[0]);
             check(26, rom_svc_22003bcc(0, 2), &[0, 2]);
-            check(27, irq_fiq_disable(), &[]);
             check(28, rom_svc_22003b00(), &[]);
             check(29, rom_svc_220044c8(), &[]);
             check(30, tick_delay(10), &[10]);
