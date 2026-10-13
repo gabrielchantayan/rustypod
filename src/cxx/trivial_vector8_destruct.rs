@@ -59,6 +59,38 @@ unsafe fn trivial_vector8_destruct_with(vector: *mut *mut u8, release: StorageFr
         vector
     }
 }
+/// `trivial_vector8_destruct_temporary` — original: `FUN_083e0ab8` @
+/// `0x083e0ab8` (64 bytes, through `0x083e0af7`; next prologue at
+/// `0x083e0af8`). Whole-image ARM word decoding finds one plain inbound BL
+/// at `0x0815f538` and no predicated inbound BLs. The body has one plain BL
+/// at `0x083e0aec`, to `cxx_array_dealloc` @ `0x08266f2c`, and no predicated BLs.
+///
+/// Releases the backing allocation of the temporary vector used by
+/// `FUN_0815f47c`, passing the arithmetic-shifted capacity difference divided
+/// by eight and zero, then returns the unchanged descriptor.
+///
+/// Deliberate deviation: omit the empty trivial-element walk; valid descriptors
+/// have an end reachable from begin in eight-byte steps. Preserve the signed
+/// target-width subtraction/shift. Pointer fields are indexed by word on ARM
+/// and by native pointer width on hosts, matching the existing vector API.
+///
+/// # Safety
+/// `vector` must point to three initialized pointer fields `{begin, end,
+/// capacity}`. Its backing allocation must be suitable for the retail heap
+/// deallocator (or null); the descriptor remains dangling after destruction.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn trivial_vector8_destruct_temporary(
+    vector: *mut *mut u8,
+) -> *mut *mut u8 {
+    unsafe {
+        let begin = vector.read();
+        let capacity = vector.add(2).read();
+        let capacity_bytes = (capacity as usize).wrapping_sub(begin as usize) as i32;
+        crate::heap::veneers::cxx_array_dealloc(begin, (capacity_bytes >> 3) as usize, 0);
+        vector
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -129,5 +161,39 @@ mod tests {
         assert_eq!(empty_vector.after, empty_before.after, "empty suffix guard");
         assert_eq!(FREE_CALLS.load(Ordering::SeqCst), 1);
         assert_eq!(FREED_STORAGE.load(Ordering::SeqCst), empty_before.begin as usize);
+    }
+
+    #[test]
+    fn temporary_destroy_preserves_descriptor_and_storage_for_empty_and_populated_ranges() {
+        use crate::heap::veneers::tests::{mock_heap, free_log};
+
+        for (used, capacity) in [(0, 0), (0, 4), (1, 1), (2, 4), (4, 4)] {
+            let _lock = mock_heap();
+            let mut storage = [0xa5u8; 32];
+            let begin = storage.as_mut_ptr();
+            let mut descriptor = [
+                begin,
+                begin.wrapping_add(used * 8),
+                begin.wrapping_add(capacity * 8),
+            ];
+            let original = descriptor;
+            let vector = descriptor.as_mut_ptr();
+            assert_eq!(unsafe { trivial_vector8_destruct_temporary(vector) }, vector);
+            assert_eq!(free_log(), (1, begin, 2));
+            assert_eq!(descriptor, original);
+            assert_eq!(storage, [0xa5; 32]);
+        }
+    }
+
+    #[test]
+    fn temporary_destroy_null_storage_is_a_heap_no_op() {
+        use crate::heap::veneers::tests::{mock_heap, free_log};
+
+        let _lock = mock_heap();
+        let mut descriptor = [core::ptr::null_mut(); 3];
+        let vector = descriptor.as_mut_ptr();
+        assert_eq!(unsafe { trivial_vector8_destruct_temporary(vector) }, vector);
+        assert_eq!(free_log().0, 0);
+        assert_eq!(descriptor, [core::ptr::null_mut(); 3]);
     }
 }

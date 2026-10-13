@@ -256209,3 +256209,32 @@ functions:
       match.py shows 12 Rust instructions versus 10 original: LLVM adds an
       early empty-range return and frame pointer, and reuses the callee's
       preserved owner return for iteration. The BL and four-byte loop remain.
+
+  - address: 0x083e0ab8
+    ghidra: FUN_083e0ab8
+    name: trivial_vector8_destruct_temporary
+    size: 64
+    sig: "u8 **trivial_vector8_destruct_temporary(u8 **vector)"
+    module: cxx/trivial_vector8_destruct
+    status: ported
+    vars: {param_1/r4: vector, iVar1/r2: begin, iVar2/r0: current}
+    renames: {FUN_08266f2c: cxx_array_dealloc}
+    notes: >-
+      Raw ARM establishes 0x083e0ab8..0x083e0af7, bounded by the next
+      prologue at 0x083e0af8. Whole-image aligned BL decoding finds one
+      unconditional inbound call at 0x0815f538 and zero predicated calls.
+      The body has one unconditional BL at 0x083e0aec to the registered
+      cxx_array_dealloc at 0x08266f2c, and zero predicated BLs. The caller
+      constructs a three-word temporary vector at sp+4, uses it, and destroys
+      it here. The empty eight-byte-element walk has no element effects.
+      Release begin with arithmetic-shifted wrapping target-width
+      (capacity - begin) / 8 and zero, then return the unchanged descriptor.
+      Deliberately omit the empty walk for valid descriptors. Existing
+      pointer-field indexing preserves target +0/+4/+8 and native host
+      pointer spacing. LLVM eliminates the dead capacity arithmetic and
+      inlines the deallocation veneer: match.py reports seven instructions
+      versus sixteen, retaining release and return-self; the BL relocation
+      resolves to operator_delete, the verified veneer target. Host tests
+      exercise null, empty allocated, singleton, spare capacity, and full
+      vectors through the real export and heap fixture, preserving descriptor
+      and storage. All 15979 host tests pass and the ARM release build passes.
