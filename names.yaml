@@ -254376,3 +254376,35 @@ functions:
       No signature, true size, or replacement behavior invented.
       No Rust implementation, host tests, ARM build, match.py result,
       emulator execution, or device execution claimed.
+
+  - address: 0x08833b2c
+    ghidra: FUN_08833b2c
+    name: unresolved_data_candidate_08833b2c
+    status: identified
+    notes: >-
+      Deferred: raw bytes do not establish an executable function,
+      calling contract, algorithm, or true function extent. The entry
+      word ffffffff is undefined in both ARMv5 A32 and Thumb decoding.
+      Subsequent words are 00000000, 0000008c, 74657874 (ASCII txet),
+      and 00000012; preceding words are 00000001, 00000003, 00000007.
+      This supports a data interpretation, not a destructor or veneer.
+      Ghidra reports 11 bytes and the next function at 0x08833b38,
+      where the ASCII word begins; this is not a verified real boundary.
+      Whole-image aligned A32 immediate BL decoding finds zero plain
+      incoming calls and one predicated candidate at 0x086f0f1c:
+      0b050b02 (BLEQ), arithmetically targeting the assigned address.
+      Adjacent words 0b010ae4, 0b030b02, 0b040b03, 0b060ae2,
+      0b080b07, 0b0a0b09, and 0b0c0b0b likewise decode as widely
+      scattered conditional calls; no executable caller is established.
+      Whole-image halfword-aligned ARMv5 Thumb BL decoding finds zero
+      incoming candidates. Ghidra's assembly has no direct BL reference
+      to this address and misdecodes the ffff halfwords as BL #0xffe.
+      No valid outgoing A32 or Thumb BL occurs in the reported extent.
+      Decompiled C reads uninitialized LR, r5, r6, and r7 and extends
+      across neighboring data-like bytes; it cannot establish semantics.
+      Full names.yaml has no prior entry for this address. No callee
+      identity or seam invented, and no undecrypted-region dependency
+      asserted. Faithful implementation requires verified executable
+      mapping, instruction state, caller ABI, and real boundaries.
+      No Rust implementation, host behavior tests, ARM build, match.py
+      result, emulator execution, or device execution claimed.
