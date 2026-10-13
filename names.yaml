@@ -255794,3 +255794,38 @@ functions:
       for delete because the existing destructor returns its input; source
       preserves return-minus-four semantics. Frame/register allocation
       differs; archive call targets remain unresolved pending relocation.
+  # --- owned error-object assignment ---
+  - address: 0x083e74f0
+    ghidra: FUN_083e74f0
+    name: error_object_assign
+    size: 48
+    sig: "void error_object_assign(void **slot, void *replacement)"
+    module: cxx/error_object_assign
+    status: ported
+    renames:
+      param_1/r0/r4: slot
+      param_2/r1/r5: replacement
+      slot_deref/r0: old_object
+      old_object_vtable_plus_0x04: unresolved_virtual_release
+    notes: >-
+      Raw osos.dec verifies twelve A32 words from push at 0x083e74f0 through
+      pop at 0x083e751c; the next independently entered function starts at
+      0x083e7520. Whole-image aligned decoding finds one inbound plain BL at
+      0x081d1774, zero predicated BLs. The body has zero plain or predicated
+      BLs and one BLXNE at 0x083e7514 through the old object's vtable +0x04.
+      Equal pointers return without object access or stores. Otherwise a
+      non-NULL old object receives the unresolved virtual call before slot
+      is overwritten with replacement, including when the callback changes
+      slot. No concrete virtual callee identity is assumed. The verified caller
+      stream_parse_error_result now uses this Rust port on target and host;
+      its obsolete fixed-address and mock assignment seams were removed.
+      Deliberate deviations are native-width host pointer/vtable entries and
+      a void return because stock r0 is path-dependent and unconsumed. Raw
+      bytes are identical to owned_object_handle_replace at 0x081573c8;
+      LLVM intentionally folds the two exported symbols. Host edge tests and
+      a standalone public-API smoke exercise identity, empty adoption, virtual
+      release ordering and callback writes overwritten by final assignment.
+      ARM release build succeeds. match.py exits 1 with fourteen Rust versus
+      twelve stock instructions: explicit branches replace predication and
+      frame/register allocation differs; equality/NULL guards, virtual slot
+      +0x04 and post-callback store are preserved. No device run claimed.

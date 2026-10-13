@@ -18,25 +18,23 @@
 //!
 //! # Deliberate deviations
 //!
-//! The classifier, first constructor, and owner assignment use verified
-//! retailOS addresses on target and narrow host seams. The alternate
-//! constructor uses its Rust port. The port returns after assignment rather
-//! than reproducing the stack-local owner object.
+//! The classifier and first constructor use verified retailOS addresses on
+//! target and narrow host seams. The alternate constructor and owner assignment
+//! use their Rust ports. The port returns after assignment rather than
+//! reproducing the stack-local owner object.
 
 use crate::heap::veneers::operator_new;
 use crate::cxx::alternate_error_object_construct::alternate_error_object_construct;
+use crate::cxx::error_object_assign::error_object_assign;
 
 pub type StreamStatusClassify = unsafe extern "C" fn(*mut u8) -> u32;
 pub type ErrorObjectConstruct = unsafe extern "C" fn(*mut u8, *mut u8, u32) -> *mut u8;
-pub type ErrorObjectAssign = unsafe extern "C" fn(*mut *mut u8, *mut u8);
 pub type ErrorObjectAllocate = unsafe extern "C" fn(usize) -> *mut u8;
 
 #[cfg(not(target_os = "none"))]
 unsafe extern "C" fn missing_classify(_: *mut u8) -> u32 { 0 }
 #[cfg(not(target_os = "none"))]
 unsafe extern "C" fn missing_construct(object: *mut u8, _: *mut u8, _: u32) -> *mut u8 { object }
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_assign(slot: *mut *mut u8, object: *mut u8) { slot.write(object) }
 #[cfg(not(target_os = "none"))]
 unsafe extern "C" fn host_operator_new(size: usize) -> *mut u8 { operator_new(size) }
 
@@ -46,8 +44,6 @@ pub static mut STREAM_STATUS_CLASSIFY: StreamStatusClassify = missing_classify;
 #[cfg(not(target_os = "none"))]
 pub static mut ERROR_OBJECT_CONSTRUCT: ErrorObjectConstruct = missing_construct;
 #[cfg(not(target_os = "none"))]
-pub static mut ERROR_OBJECT_ASSIGN: ErrorObjectAssign = missing_assign;
-#[cfg(not(target_os = "none"))]
 pub static mut ERROR_OBJECT_ALLOCATE: ErrorObjectAllocate = host_operator_new;
 
 #[cfg(target_os = "none")]
@@ -56,9 +52,6 @@ unsafe fn stream_status_classify() -> StreamStatusClassify { core::mem::transmut
 #[cfg(target_os = "none")]
 #[inline(always)]
 unsafe fn error_object_construct() -> ErrorObjectConstruct { core::mem::transmute(0x0815_faecusize) }
-#[cfg(target_os = "none")]
-#[inline(always)]
-unsafe fn error_object_assign() -> ErrorObjectAssign { core::mem::transmute(0x083e_74f0usize) }
 
 /// Classifies a stream parse condition, constructs its owned error object, and
 /// returns that object after storing the status through `status_out`.
@@ -93,10 +86,7 @@ pub unsafe extern "C" fn stream_parse_error_result(stream: *mut u8, status_out: 
     };
 
     let mut result = core::ptr::null_mut();
-    #[cfg(target_os = "none")]
-    unsafe { error_object_assign()(&mut result, object) };
-    #[cfg(not(target_os = "none"))]
-    unsafe { ERROR_OBJECT_ASSIGN(&mut result, object) };
+    unsafe { error_object_assign(&mut result, object) };
     result
 }
 
@@ -110,14 +100,7 @@ mod tests {
     static mut STATUS: u32 = 0;
     static mut ALLOCATION_SIZE: usize = 0;
     static mut CONSTRUCT_ARGS: (*mut u8, *mut u8, u32) = (core::ptr::null_mut(), core::ptr::null_mut(), 0);
-    static mut ASSIGNED: *mut u8 = core::ptr::null_mut();
     static mut OBJECT: [u32; 5] = [0; 5];
-    unsafe extern "C" fn assign(slot: *mut *mut u8, object: *mut u8) {
-        unsafe {
-            slot.write(object);
-            ASSIGNED = object;
-        }
-    }
 
     unsafe extern "C" fn classify(_: *mut u8) -> u32 { unsafe { STATUS } }
     unsafe extern "C" fn allocate(size: usize) -> *mut u8 { unsafe { ALLOCATION_SIZE = size; OBJECT.as_mut_ptr().cast() } }
@@ -133,7 +116,6 @@ mod tests {
             STREAM_STATUS_CLASSIFY = classify;
             ERROR_OBJECT_ALLOCATE = allocate;
             ERROR_OBJECT_CONSTRUCT = construct;
-            ERROR_OBJECT_ASSIGN = assign;
             for (status, mode) in [(4, 0), (5, 1)] {
                 STATUS = status;
                 ALLOCATION_SIZE = 0;
@@ -144,7 +126,6 @@ mod tests {
                 assert_eq!(out, status);
                 assert_eq!(ALLOCATION_SIZE, 20);
                 assert_eq!(CONSTRUCT_ARGS, (OBJECT.as_mut_ptr().cast(), stream, mode));
-                assert_eq!(ASSIGNED, OBJECT.as_mut_ptr().cast());
             }
         }
     }
@@ -155,7 +136,6 @@ mod tests {
         unsafe {
             STREAM_STATUS_CLASSIFY = classify;
             ERROR_OBJECT_ALLOCATE = allocate;
-            ERROR_OBJECT_ASSIGN = assign;
             STATUS = 10;
             ALLOCATION_SIZE = 0;
             let mut out = 0;
@@ -165,7 +145,6 @@ mod tests {
             assert_eq!(ALLOCATION_SIZE, 16);
             assert_eq!(OBJECT, [crate::cxx::alternate_error_object_construct::ALTERNATE_ERROR_OBJECT_VTABLE,
                 0, 0, 0x5678, 0]);
-            assert_eq!(ASSIGNED, OBJECT.as_mut_ptr().cast());
         }
     }
 }
