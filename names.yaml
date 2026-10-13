@@ -252499,3 +252499,35 @@ functions:
       ARM release build succeeds. Standalone host smoke executes the actual
       Rust veneer and mirror with a writable service request. No device
       execution was performed.
+
+  - address: 0x08037e38
+    ghidra: thunk_EXT_FUN_22003d00
+    name: task_record_register
+    size: 8
+    sig: "void task_record_register(u32 task_id, TaskRecord *record)"
+    module: kernel/task_record_register
+    status: ported
+    vars:
+      r0: task_id_then_request
+      r1: record
+      DAT_08037e3c: iram_task_registration_entry
+    notes: >-
+      Raw words e51ff004/22003d00 establish an eight-byte literal veneer,
+      ending at the next entry 0x08037e40. Full-image aligned ARM decoding
+      finds two plain BL calls at 0x08056430 and 0x08056644, zero predicated
+      BL calls. IRAM target 0x22003d00 mirrors osos 0x08003d00, not mask ROM.
+      Its 40-byte instruction body builds service 41 with task id at request
+      word 2 and record at word 7, leaving other words uninitialized. Neither
+      caller uses a return value, and the body never reloads a result.
+      Rust reuses message_dispatch_veneer and replaces the task layer's default
+      no-op registration hook. Deliberate deviation: Rust calls replace the
+      literal transfer and mirrored stack builder; pointer wire values remain
+      32-bit. Host tests cover current-task record replacement, NULL removal,
+      explicit-task isolation, and high-bit record words.
+      Verification: host suite passes 15834 tests; ARM release build passes.
+      Standalone smoke executes the port and existing dispatcher seam for a
+      current-task NULL registration. match.py exits 1: original literal
+      veneer is one instruction versus 12 Rust instructions. Rust folds the
+      mirrored builder into the veneer: stores selector 41 and both inputs
+      at the correct relative request offsets, calls dispatch, and returns
+      without reading request output. The veneer remains a real BL target.

@@ -2687,7 +2687,7 @@ pub static ROM_THUNKS: [RomThunk; 158] = [
     RomThunk { thunk_addr: 0x08037e20, rom_target: 0x22001edc, name: None },
     RomThunk { thunk_addr: 0x08037e28, rom_target: 0x22003b6c, name: None },
     RomThunk { thunk_addr: 0x08037e30, rom_target: 0x22003c98, name: None },
-    RomThunk { thunk_addr: 0x08037e38, rom_target: 0x22003d00, name: None },
+    RomThunk { thunk_addr: 0x08037e38, rom_target: 0x22003d00, name: Some("task_record_register") },
     RomThunk { thunk_addr: 0x08037e40, rom_target: 0x22003dc8, name: Some("kernel_op_dispatch") },
     RomThunk { thunk_addr: 0x08037e48, rom_target: 0x22003ea0, name: Some("task_lock") },
     RomThunk { thunk_addr: 0x08037e50, rom_target: 0x2200408c, name: Some("task_unlock") },

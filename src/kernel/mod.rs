@@ -45,6 +45,7 @@ pub mod semaphore_wait;
 pub mod sync_sem;
 pub mod pending_state_take;
 pub mod task;
+pub mod task_record_register;
 pub mod task_queue_callback_find;
 pub mod signal_object_51;
 pub mod signal_object_53;

@@ -169,7 +169,7 @@ pub static THUNK_CATALOG: [(u32, u32, &str); WRAPPER_COUNT] = [
     (0x08037e20, 0x22001edc, "kernel_ticks"),
     (0x08037e28, 0x22003b6c, "rom_svc_22003b6c"),
     (0x08037e30, 0x22003c98, "rom_svc_22003c98"),
-    (0x08037e38, 0x22003d00, "rom_svc_22003d00"),
+    (0x08037e38, 0x22003d00, "task_record_register"),
     (0x08037e40, 0x22003dc8, "kernel_op_dispatch"),
     (0x08037e48, 0x22003ea0, "task_lock"),
     (0x08037e50, 0x2200408c, "task_unlock"),
@@ -218,8 +218,6 @@ pub struct RomThunkOps {
         a3: usize,
         a4: usize,
     ) -> usize,
-    /// ROM gateway service 41 @ 0x22003d00.
-    pub rom_svc_22003d00: unsafe extern "C" fn(a0: usize, a1: usize) -> usize,
     /// Object-op dispatcher @ 0x22003dc8: (class opcode, slot).
     pub kernel_op_dispatch: unsafe extern "C" fn(op: usize, arg: usize) -> usize,
     /// Kernel-id -> object lookup @ 0x22003ea0 (see module header).
@@ -306,7 +304,6 @@ pub static mut ROM_KERNEL: RomThunkOps = RomThunkOps {
     kernel_ticks: missing0,
     rom_svc_22003b6c: missing0,
     rom_svc_22003c98: missing5,
-    rom_svc_22003d00: missing2,
     kernel_op_dispatch: missing2,
     task_lock: missing1,
     rom_svc_22003ec4: missing1,
@@ -631,12 +628,6 @@ pub unsafe extern "C" fn rom_svc_22003c98(
     (hook!(rom_svc_22003c98))(a0, a1, a2, a3, a4)
 }
 
-/// rom_svc_22003d00 — original: thunk @ 0x08037e38 -> ROM gateway stub,
-/// service 41, (a0, a1). Object registration on the create path.
-#[cfg_attr(target_os = "none", no_mangle)]
-pub unsafe extern "C" fn rom_svc_22003d00(a0: usize, a1: usize) -> usize {
-    (hook!(rom_svc_22003d00))(a0, a1)
-}
 
 /// kernel_op_dispatch — original: `thunk_EXT_FUN_22003dc8` @ `0x08037e40`.
 /// Ghidra reports 4 bytes; raw words establish its full **8-byte** extent:
@@ -1052,7 +1043,6 @@ pub(crate) mod tests {
     mock0!(m04, 4); // kernel_ticks
     mock0!(m05, 5); // rom_svc_22003b6c
     mock5!(m06, 6); // rom_svc_22003c98
-    mock2!(m07, 7); // rom_svc_22003d00
     mock2!(m08, 8); // kernel_op_dispatch
     mock1!(m09, 9); // task_lock
     mock1!(m11, 11); // rom_svc_22003ec4
@@ -1081,7 +1071,6 @@ pub(crate) mod tests {
         kernel_ticks: m04,
         rom_svc_22003b6c: m05,
         rom_svc_22003c98: m06,
-        rom_svc_22003d00: m07,
         kernel_op_dispatch: m08,
         task_lock: m09,
         rom_svc_22003ec4: m11,
@@ -1408,7 +1397,6 @@ pub(crate) mod tests {
             check(4, kernel_ticks(), &[]);
             check(5, rom_svc_22003b6c(), &[]);
             check(6, rom_svc_22003c98(1, 2, 3, 4, 5), &[1, 2, 3, 4, 5]);
-            check(7, rom_svc_22003d00(6, 0x4000), &[6, 0x4000]);
             check(8, kernel_op_dispatch(1, 0x5000), &[1, 0x5000]);
             check(9, task_lock(0x27), &[0x27]);
             check(11, rom_svc_22003ec4(0), &[0]);

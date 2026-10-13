@@ -29,8 +29,8 @@
 //!   `FUN_080e4348` (0->0x7e .. 8->8, default = identity); gateway task
 //!   init (thunk 0x08037e30 -> ROM 0x22003c98: id, mapped priority,
 //!   stack, stack_size, and the opaque literal 0x0809c5c8 as the 5th
-//!   argument); gateway register (thunk 0x08037e38 -> ROM 0x22003d00,
-//!   service 41: id, rec); name-table insert `FUN_0806331c` (0x50-entry
+//!   argument); gateway register (`task_record_register`, thunk 0x08037e38
+//!   -> IRAM 0x22003d00, service 41: id, rec); name-table insert `FUN_0806331c` (0x50-entry
 //!   {id, name} table @ *0x08063358, result discarded); then
 //!   `task_start(...)` and return the record. Neither os_malloc result is
 //!   NULL-checked (faithful).
@@ -467,7 +467,6 @@ unsafe extern "C" fn missing_task_init(
 ) {
 }
 
-unsafe extern "C" fn missing_task_register(_id: u32, _rec: *mut TaskRecord) {}
 
 /// Capacity of the task-name table (`cmp r2, #0x50`).
 pub const TASK_NAME_TABLE_CAP: usize = 0x50;
@@ -568,7 +567,7 @@ pub const DEFAULT_TASK_HOOKS: TaskHooks = TaskHooks {
     task_id_alloc: missing_id_alloc,
     map_priority: task_priority_map,
     task_init: missing_task_init,
-    task_register: missing_task_register,
+    task_register: crate::kernel::task_record_register::task_record_register,
     name_register: task_name_table_insert,
     rom_task_start: missing_rom_task_op,
     rom_task_delete: missing_rom_task_op,
