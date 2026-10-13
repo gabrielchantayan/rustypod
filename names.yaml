@@ -16,6 +16,34 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08003610
+    ghidra: FUN_08003610
+    name: shared_context_boot_veneer
+    size: 8
+    sig: "u8 *shared_context_boot_veneer(void)"
+    module: ui/object_state
+    status: ported
+    renames:
+      DAT_08003614: relocated_shared_context_getter
+      return/r0: shared_context_base
+    notes: >-
+      Raw words e51ff004 0835ed14 are ldr pc,[pc,#-4] and its target
+      literal. True extent is [0x08003610,0x08003618), ending at the
+      next independent veneer. Independent aligned ARM decoding finds
+      two plain BL callers (0x08003a50 and 0x0800455c), zero predicated
+      BL callers, and no outgoing BL. Startup relocation subtracts
+      0xaed8 from the main image: runtime 0x0835ed14 resolves to raw
+      0x08369bec, the already-ported shared_context getter. Verified raw
+      instructions publish default 0x08a11cd8 into slot 0x089ca574 only
+      when zero, then reload and return the slot. Both boot callers use
+      context memory size/base at +0xe0/+0xe4. Reuses ui/object_state
+      shared_context with no new stock-call seam. Deliberate deviation:
+      LLVM emits a balanced fp/LR frame and tail branch instead of the
+      literal PC load. Host regression exercises publication, retention
+      after default replacement, live slot replacement, and untouched
+      context bytes. Host tests and ARM release build pass. match.py
+      exits 1 with the expected literal-load versus frame/tail-branch
+      structural diff; the veneer remains an exported symbol.
   - address: 0x080036a8
     ghidra: FUN_080036a8
     name: rendering_loop_midbody_tail_veneer
