@@ -28957,6 +28957,36 @@ functions:
       It zero-initializes a three-word vector, allocates max(source length,
       32) words, conditionally copies source words after a failed allocation,
       then stores the end and capacity pointers derived from the source length.
+  - address: 0x083e7c14
+    ghidra: FUN_083e7c14
+    name: red_black_tree_range_count_083e7c14
+    size: 156
+    sig: "u32 red_black_tree_range_count_083e7c14(const u32 *first, const u32 *last, u32 *count)"
+    module: cxx/red_black_tree_range_count_083e7c14
+    status: ported
+    renames:
+      param_1/r0: first
+      param_2/r1: last
+      param_3/r2: count
+      local_1c: current
+      iVar2: next
+    notes: >-
+      Raw osos.dec establishes the 156-byte extent 0x083e7c14..0x083e7caf,
+      with return at 0x083e7cac and next real function at 0x083e7cb0.
+      Full-image aligned A32 decoding verifies one unconditional inbound BL
+      at 0x083d7328, zero predicated inbound BLs, and no outbound BLs.
+      Accumulates the in-order iterator distance in a wrapping u32 counter,
+      descending right-child left spines or climbing parents with the header
+      sentinel comparison preserved. Leaves both iterators unchanged and
+      reloads last after every increment, including when count aliases last.
+      Raw r0 returns 1, contrary to Ghidra's void signature; the caller uses
+      the accumulated counter. Byte-identical to 0x083e7cb0, with no new
+      callee seams or semantic deviations. ARM nm confirms LLVM folds both
+      exports to the same object and address. match.py cannot extract the alias
+      label; comparison using red_black_tree_range_count verifies the shared
+      33-instruction body preserves traversal, wrapping increments, sentinel
+      handling, and return 1. Host tests cover empty and skewed-tree subranges,
+      wrapping counters, preserved cursors, and count aliasing last.
   - address: 0x083e7cb0
     ghidra: FUN_083e7cb0
     name: red_black_tree_range_count
