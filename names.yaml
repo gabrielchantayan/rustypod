@@ -254341,3 +254341,38 @@ functions:
       No callee identity, signature, size, or replacement behavior
       invented. No Rust implementation, host tests, ARM build,
       match.py result, emulator execution, or device execution claimed.
+
+  - address: 0x088386f0
+    ghidra: FUN_088386f0
+    name: unresolved_data_candidate_088386f0
+    status: identified
+    notes: >-
+      Deferred: raw bytes do not establish an executable function, ABI,
+      algorithm, or true extent. Four words at 0x088386f0 through
+      0x088386fc are 00000000. A32 decodes these as ANDEQ r0,r0,r0;
+      Thumb decodes them as MOVS r0,r0. Neither is a return or veneer.
+      Ghidra reports one byte and the next function at 0x088386f2,
+      inside the same zero word; this is not a verified real boundary.
+      Surrounding words include 696d6167 at 0x088386dc (ASCII gami),
+      00000064, 0000002e, then 00000008 at 0x08838700 and ffffff9c
+      at 0x08838704, undefined as an A32 instruction and as the
+      Thumb pair ff9c/ffff. These support a data interpretation,
+      not an empty destructor or identity function.
+      Whole-image aligned A32 immediate BL scan finds zero plain
+      inbound calls and one predicated candidate at 0x08675ad0:
+      0b070b06 (BLEQ), arithmetically targeting this address.
+      Adjacent words 013d013d, 0b050b04, 02110ac9, and 01550597
+      do not establish an executable caller. Whole-image halfword
+      aligned ARMv5 Thumb BL scan finds zero inbound candidates;
+      Ghidra's assembly has no direct BL reference to this address.
+      No outgoing BL occurs in the reported one-byte extent or
+      the sixteen zero bytes examined at the assigned address.
+      Decompiled C invents indirect calls from uninitialized LR,
+      r5, and r7 and extends across neighboring data-like bytes;
+      it cannot supply a reliable calling contract. Full names.yaml
+      has no prior entry for this address; no callee seam introduced.
+      Faithful implementation requires verified executable mapping,
+      instruction state, caller ABI, and real function boundaries.
+      No signature, true size, or replacement behavior invented.
+      No Rust implementation, host tests, ARM build, match.py result,
+      emulator execution, or device execution claimed.
