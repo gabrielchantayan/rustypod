@@ -153,6 +153,94 @@ pub unsafe extern "C" fn stream_buffer_request_flags_update(enable: u32, mask: u
     cpsr_restore_irq_fiq(saved_if_mask);
 }
 
+/// stream_buffer_level_decrement — original: `FUN_08004518` @ `0x08004518`.
+///
+/// True extent is 28 bytes up to the next entry at `0x08004534`: 24 bytes
+/// of instructions followed by the RAM-address literal at `0x08004530`.
+/// Independent raw ARM decoding finds two plain inbound BLs (`0x08002974`,
+/// `0x080044f0`), no predicated inbound BLs, and no outgoing BLs.
+/// Read the shared level at `0x2200ad14`; zero returns zero without a
+/// transition, otherwise tail-enter `0x0800284c` with level minus one.
+/// That target applies the level under an IRQ/FIQ guard, sequencing table
+/// fields and hardware updates before restoring the interrupt state.
+///
+/// Deliberate deviations: LLVM chooses the call/return encoding rather
+/// than retaining the predicated tail branch. The unported level-apply
+/// body remains at its verified retail address; host builds use the
+/// existing level cell and a callback. The observable r0 result is retained,
+/// although both raw callers discard it. No extra level clamp is imposed.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn stream_buffer_level_decrement() -> u32 {
+    #[cfg(target_arch = "arm")]
+    let level_ptr = 0x2200_ad14 as *const u32;
+    #[cfg(not(target_arch = "arm"))]
+    let level_ptr = core::ptr::addr_of!(STREAM_BUFFER_REFILL_LEVEL);
+    let level = core::ptr::read_volatile(level_ptr);
+    if level == 0 {
+        return 0;
+    }
+    #[cfg(target_arch = "arm")]
+    let apply: unsafe extern "C" fn(u32) -> u32 = core::mem::transmute(0x0800_284cusize);
+    #[cfg(not(target_arch = "arm"))]
+    let apply = core::ptr::read_volatile(core::ptr::addr_of!(STREAM_BUFFER_LEVEL_APPLY));
+    apply(level - 1)
+}
+
+#[cfg(not(target_arch = "arm"))]
+unsafe extern "C" fn missing_level_apply(_: u32) -> u32 {
+    panic!("retail stream-buffer level apply is not installed")
+}
+
+/// Host replacement for the verified level-apply entry at `0x0800284c`.
+#[cfg(not(target_arch = "arm"))]
+pub static mut STREAM_BUFFER_LEVEL_APPLY: unsafe extern "C" fn(u32) -> u32 = missing_level_apply;
+
+#[cfg(test)]
+mod decrement_tests {
+    use super::*;
+
+    unsafe extern "C" fn apply_level(level: u32) -> u32 {
+        // Model the real target's publication of the new level.
+        STREAM_BUFFER_REFILL_LEVEL = level;
+        0xc0
+    }
+
+    struct Reset;
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            unsafe {
+                STREAM_BUFFER_REFILL_LEVEL = 0;
+                STREAM_BUFFER_LEVEL_APPLY = missing_level_apply;
+            }
+        }
+    }
+
+    #[test]
+    fn zero_bypasses_transition_and_positive_levels_step_without_clamping() {
+        let _lock = match STREAM_BUFFER_REQUEST_TEST_LOCK.lock() {
+            Ok(guard) => guard,
+            Err(error) => error.into_inner(),
+        };
+        let _reset = Reset;
+        unsafe {
+            STREAM_BUFFER_REFILL_LEVEL = 0;
+            STREAM_BUFFER_LEVEL_APPLY = missing_level_apply;
+            assert_eq!(stream_buffer_level_decrement(), 0);
+            STREAM_BUFFER_LEVEL_APPLY = apply_level;
+            for level in [1, 2, 3, 4, 0x8000_0000, u32::MAX] {
+                STREAM_BUFFER_REFILL_LEVEL = level;
+                assert_eq!(stream_buffer_level_decrement(), 0xc0);
+                let observed = core::ptr::read_volatile(
+                    core::ptr::addr_of!(STREAM_BUFFER_REFILL_LEVEL),
+                );
+                assert_eq!(observed, level - 1);
+            }
+            assert_eq!(stream_buffer_level_decrement(), 0xc0);
+        }
+    }
+}
+
 #[cfg(test)]
 extern crate std;
 
