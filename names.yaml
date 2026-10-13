@@ -254945,3 +254945,38 @@ functions:
       Deliberate deviation: no Rust port. Raw branch scans and A32/Thumb
       objdump probes executed; no host behavior tests, ARM build, match.py
       or device behavior verification claimed.
+  - address: 0x087f5408
+    ghidra: FUN_087f5408
+    name: structured_data_record_00ce_trailer
+    size: 4
+    sig: "data word; executable ABI unverified"
+    status: identified
+    notes: >-
+      Deferred: raw osos.dec identifies a structured-data trailer, not a
+      verified function. Size 4 describes the assigned word, not an
+      executable extent; Ghidra's reported 27-byte extent is unsupported.
+      Raw [0x087f53f0,0x087f540c) contains 00000014, 00000000,
+      000000ce, 0dad01a4, 0dad01a5, ffff000e, 0200ffff. The assigned
+      word is the final 0200ffff, followed by 00000004 at 0x087f540c.
+      Records at 0x087f5410 and 0x087f542c contain identifiers cf and d0,
+      paired 0dad values, ffffffff sentinels and the same 0200ffff trailer.
+      A32 decodes the assigned word as ANDEQ pc, r0, #1020, not a call;
+      its ffff/0200 halfwords are not an ARMv5 Thumb BL pair.
+      Ghidra's assembly falsely reports BL #0xffe; its C invents
+      LR-relative indirect calls across these data records.
+      Independent whole-image aligned raw A32 BL decoding finds zero
+      plain incoming candidates and one predicated candidate: 0b030b03
+      at 0x087327f4 decodes as BLEQ 0x087f5408. Raw surrounding words
+      [0x087327d0,0x08732830) repeat 03/0b byte pairs with 04/0b,
+      05/0b and 06/0b pairs, indicating table-like data rather than a
+      verified executable caller. Whole-image halfword-aligned ARMv5
+      Thumb BL decoding finds zero incoming candidates. Raw candidate
+      window [0x087f5408,0x087f5424) contains zero plain or predicated
+      A32 BL instructions and zero ARMv5 Thumb BL pairs.
+      No true executable extent, next real function boundary, caller ABI
+      or callee identity can be established. Full names.yaml had no
+      existing entry for this address. Faithful porting requires verified
+      executable mapping and boundaries; no Rust seam or undecrypted-region
+      dependency is invented. Deliberate deviation: no Rust port.
+      Raw branch scans and A32/Thumb objdump probes executed; no host
+      behavior tests, ARM build, match.py or device verification claimed.
