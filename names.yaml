@@ -16,6 +16,38 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083eaab0
+    ghidra: FUN_083eaab0
+    name: visit_word_range_return_callback
+    size: 48
+    module: util/visit_word_range_return_callback
+    status: ported
+    sig: "WordVisitor visit_word_range_return_callback(const u32 *begin, const u32 *end, WordVisitor callback)"
+    renames:
+      param_1/r0/r4: begin
+      param_2/r1/r5: end
+      param_3/r2/r6: callback
+    notes: >-
+      Raw A32 extent [0x083eaab0,0x083eaae0) ends with pop {r4,r5,r6,pc};
+      the next real entry begins with push {r3,lr}. Whole-image aligned
+      decoding finds one incoming plain BL at 0x08168544, zero predicated
+      BLs, and one tail B at 0x08168688. Body has no direct BL and one
+      indirect BLX r6. Snapshots bounds and callback, visits aligned u32
+      values in forward order until pointer equality, then returns the
+      original callback even for empty ranges. No callee identity or seam
+      is invented. Void callback signature models the ignored return.
+      Requires ABI-conforming callbacks; the separately identified
+      stack-dependent interior literal 0x0815d7c4 remains deferred.
+      Host tests cover every subrange, duplicates, high-bit words,
+      excluded end, empty unreadable bounds, callback identity, and
+      callback mutation of a future word. Standalone smoke confirms
+      visitation sum 19, callback preservation, and null empty bounds.
+      Host suite: 15922 passed; ARM release build passed. match.py exits 1
+      with 12 original versus 13 Rust instructions. Reviewed codegen retains
+      the empty-range check, aligned load loop, indirect BLX, equality stop,
+      and callback return; LLVM uses a postincrement load and extra frame
+      registers. Cursor advances before BLX rather than after, without
+      changing observable behavior for ABI-conforming callbacks.
   - address: 0x083ed078
     ghidra: thunk_FUN_08032d70
     name: printf_decimal_float
