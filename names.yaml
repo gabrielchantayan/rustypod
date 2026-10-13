@@ -252640,3 +252640,32 @@ functions:
       comparison, conditional auxiliary selection, word stores and byte clear.
       LLVM selects the value before one word store instead of two predicated
       stores, and uses a frame pointer to load the fifth ABI argument.
+
+  - address: 0x0802e1f4
+    ghidra: FUN_0802e1f4
+    name: block_inv_shift_rows
+    size: 100
+    sig: "void block_inv_shift_rows(u8 *state)"
+    module: crypto/block_inv_shift_rows
+    status: ported
+    vars:
+      param_1/r0: state
+      uVar1/r1: saved_row_byte
+      r2: next_row_byte
+    notes: >-
+      Raw A32 extent [0x0802e1f4, 0x0802e258) comprises 25 instructions,
+      ending in BX LR before the next function's PUSH. Full-image aligned
+      decoding verifies two incoming plain BLs at 0x0802e6d4 and 0x0802e70c,
+      zero incoming predicated BLs, and zero outgoing BLs. The decrypt-block
+      caller transposes a 16-byte state into contiguous rows; this helper
+      leaves row zero unchanged and rotates rows one through three right
+      by their row index. Byte accesses accept any alignment. No semantic
+      or ABI deviations; LLVM may reorder ordinary RAM accesses. Migrated
+      the existing misplaced printf implementation to crypto without a shim.
+      Host tests cover all byte values, byte alignments, isolated lanes,
+      unchanged row zero, and surrounding canaries.
+      Full host cargo test and ARM build-std release build pass. Executable
+      smoke maps 0..15 to [0,1,2,3,7,4,5,6,10,11,8,9,13,14,15,12].
+      match.py exits 1: 25 stock versus 27 Rust instructions; the distinct
+      exported symbol retains all twelve byte loads and twelve byte stores,
+      with LLVM register scheduling and a frame-pointer prologue/epilogue.
