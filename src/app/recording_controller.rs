@@ -178,6 +178,24 @@ pub unsafe extern "C" fn recording_controller_get() -> *mut u8 {
     object
 }
 
+/// Recording-controller accessor veneer — `FUN_08003938` @ `0x08003938`.
+///
+/// True extent: 8 bytes (`e51ff004 0827280c`), ending at the next veneer
+/// at `0x08003940`. Whole-image aligned A32 decoding verifies two plain
+/// inbound BLs (`0x080077dc`, `0x080077ec`), zero predicated inbound BLs,
+/// and zero outgoing BLs. Startup copies file +0xaed8 to runtime
+/// `0x08000000`, so the literal resolves to file `0x0827d6e4`, the existing
+/// recording-controller getter. Returns its lazily initialized singleton.
+///
+/// Deliberate deviations: replace the absolute literal jump with a Rust
+/// call to the existing port, retaining that port's documented state and
+/// constructor/setup deviations. LLVM may use a direct tail branch.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn recording_controller_get_veneer() -> *mut u8 {
+    recording_controller_get()
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -256,12 +274,30 @@ mod tests {
     }
 
     #[test]
+    fn veneer_preserves_recording_flags_when_controller_is_already_ready() {
+        let lock = reset();
+        unsafe {
+            RECORDING_CONTROLLER_STATE.guard = 1;
+            RECORDING_CONTROLLER_STATE.ready = 1;
+            for flags in [[0, 0], [1, 0], [1, 1], [0xff, 0x80]] {
+                storage().write(flags[0]);
+                storage().add(1).write(flags[1]);
+                let controller = recording_controller_get_veneer();
+                assert_eq!(controller, storage());
+                assert_eq!([controller.read(), controller.add(1).read()], flags);
+                assert!(shutdown_chain_head().read().is_null());
+            }
+        }
+        restore(lock);
+    }
+
+    #[test]
     fn first_call_constructs_registers_sets_up_and_returns_fixed_storage() {
         let lock = reset();
         unsafe {
             RECORDING_CONTROLLER_CTOR = recording_constructor;
             RECORDING_CONTROLLER_SETUP = recording_setup;
-            assert_eq!(recording_controller_get(), storage());
+            assert_eq!(recording_controller_get_veneer(), storage());
             assert_eq!(*ptr::addr_of!(CTOR_CALLS), std::vec![storage()]);
             assert_eq!(*ptr::addr_of!(SETUP_CALLS), std::vec![storage()]);
             assert_eq!(RECORDING_CONTROLLER_STATE.guard, 1, "acquire publishes the guard");
@@ -282,9 +318,9 @@ mod tests {
         unsafe {
             RECORDING_CONTROLLER_CTOR = recording_constructor;
             RECORDING_CONTROLLER_SETUP = recording_setup;
-            recording_controller_get();
+            recording_controller_get_veneer();
             storage().add(0x464).write(0x31);
-            assert_eq!(recording_controller_get(), storage());
+            assert_eq!(recording_controller_get_veneer(), storage());
             assert_eq!((*ptr::addr_of!(CTOR_CALLS)).len(), 1);
             assert_eq!((*ptr::addr_of!(SETUP_CALLS)).len(), 1);
             assert_eq!(storage().add(0x464).read(), 0x31);
@@ -300,7 +336,7 @@ mod tests {
             RECORDING_CONTROLLER_CTOR = recording_constructor;
             RECORDING_CONTROLLER_SETUP = recording_setup;
             RECORDING_CONTROLLER_STATE.guard = 3;
-            assert_eq!(recording_controller_get(), storage());
+            assert_eq!(recording_controller_get_veneer(), storage());
             assert!((*ptr::addr_of!(CTOR_CALLS)).is_empty());
             assert_eq!(*ptr::addr_of!(SETUP_CALLS), std::vec![storage()]);
             assert_eq!(RECORDING_CONTROLLER_STATE.ready, 1);
@@ -309,7 +345,7 @@ mod tests {
             RECORDING_CONTROLLER_STATE.guard = 2;
             RECORDING_CONTROLLER_STATE.ready = 0;
             (*ptr::addr_of_mut!(SETUP_CALLS)).clear();
-            recording_controller_get();
+            recording_controller_get_veneer();
             assert!((*ptr::addr_of!(CTOR_CALLS)).is_empty(), "acquire rejects every nonzero guard");
             assert_eq!(RECORDING_CONTROLLER_STATE.guard, 2);
             assert_eq!(*ptr::addr_of!(SETUP_CALLS), std::vec![storage()]);

@@ -16,6 +16,31 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08003938
+    ghidra: FUN_08003938
+    name: recording_controller_get_veneer
+    size: 8
+    sig: "u8 *recording_controller_get_veneer(void)"
+    module: app/recording_controller
+    status: ported
+    vars:
+      DAT_0800393c: relocated_recording_controller_get
+      return/r0: recording_controller
+    notes: >-
+      Raw words e51ff004 0827280c establish the eight-byte literal
+      veneer extent [0x08003938,0x08003940); the next veneer begins
+      at 0x08003940. Whole-image aligned A32 decoding finds two plain
+      inbound BLs at 0x080077dc and 0x080077ec, zero predicated inbound
+      BLs and zero outgoing BLs. Startup relocation from file +0xaed8
+      maps runtime 0x0827280c to file 0x0827d6e4, already named and
+      ported as recording_controller_get. Reuses that port without a
+      new callee seam, including its documented state and setup deviations.
+      Caller reads recording flags at returned bytes zero and one.
+      Host tests cover cold initialization, repeat access, nonzero guards
+      and preservation of recording flag combinations. Runtime smoke
+      verifies cold zero flags and persistence of [1,128] on repeat access.
+      ARM release build passes. match.py exits 1: literal jump replaced
+      by balanced frame save/restore and a direct getter tail branch.
   - address: 0x08003968
     ghidra: thunk_FUN_081175e8
     name: event_handler_source_child_disable
