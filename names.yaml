@@ -255332,3 +255332,41 @@ functions:
       aligned u32 lengths at data-4, rejects unequal lengths before payload
       access, compares binary bytes and returns exactly 0 or 1. Deliberate
       deviation: omit redundant minimum-length temporaries and post-compare
+
+  - address: 0x083ea698
+    ghidra: FUN_083ea698
+    name: string_pair_range_fill
+    size: 60
+    sig: "void string_pair_range_fill(StringObjectPair *first, StringObjectPair *end, const StringObjectPair *source)"
+    module: cxx/string_pair_range_fill
+    status: ported
+    renames:
+      param_1: first
+      param_2: end
+      param_3: source
+      FUN_082774a8: string_object_assign
+    notes: >-
+      Raw A32 words establish the extent 0x083ea698..0x083ea6d4
+      exclusive; the next independent routine begins at 0x083ea6d4.
+      Two plain outgoing BLs at 0x083ea6b4 and 0x083ea6c0 target the
+      already-ported string_object_assign at 0x082774a8; zero predicated
+      outgoing BLs. Whole-image aligned raw-word scan finds one plain
+      incoming BL at 0x083e3994 and zero predicated incoming BLs.
+      Fill the half-open range of 16-byte StringObjectPairs by assigning
+      the first member from source+0 then the second from source+8,
+      advancing destination by 16. Source remains fixed and is not
+      snapshotted; empty ranges do not access it. Caller 0x083e38c8
+      uses this to fill the existing portion of a vector insertion.
+      Reuse StringObjectPair and the existing assignment implementation;
+      no new callee seam. Deliberate deviation: repr(C) pointer fields
+      scale on hosts, preserving the exact +8/+16 layout on ARM.
+      Allocation and clear behavior inherit the existing string port's
+      virtual-operation boundaries. Host cases cover empty range,
+      aliased source, excluded end, allocation failure continuation,
+      and null/NUL-only clearing.
+      All 15928 host tests passed; release ARM build succeeded.
+      match.py reports 19 Rust instructions versus 15 stock, with an
+      early empty-range return and frame-pointer prologue; the two-call
+      loop retains second-member +8 and destination stride +16.
+      Standalone host smoke copied artist/title through the real fill
+      and assignment bodies with local allocation/libc boundaries.
