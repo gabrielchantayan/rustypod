@@ -254023,3 +254023,32 @@ functions:
       Need verified runtime veneer retargeting or the actual foreign
       entry ABI before a faithful port; no callee identity is invented.
       No Rust implementation, host tests, ARM build, or match claimed.
+  - address: 0x080037c8
+    ghidra: thunk_FUN_080eade0
+    name: renderer_phase_two_entry_veneer
+    size: 8
+    status: identified
+    notes: >-
+      Raw extent [0x080037c8,0x080037d0) contains e51ff004 (LDR PC,
+      [PC,#-4]) and literal 080eade0; the next real veneer starts at
+      0x080037d0. Ghidra's four-byte size excludes the target literal.
+      Independent whole-image aligned ARM BL decoding finds two plain
+      callers at 0x080056b8 and 0x08005850, zero predicated callers,
+      and zero outgoing BL instructions in the assigned veneer.
+      Algorithm: transfer to 0x080eade0 without changing LR, SP, flags,
+      or general-purpose registers. The name describes its renderer
+      startup caller role, not a verified standalone callee identity.
+      Blocked on the literal target's entry contract: raw 0x080eade0
+      is e1810c20 (ORR r0,r1,r0,LSR #24), followed by e5850000
+      (STR r0,[r5]) and ea000012 (B 0x080eae38). That continuation
+      reads SP+0xbc and SP+0x60, advances r5/r6, and branches backward
+      to 0x080eaa34; it also consumes r7 and SP+0x68. Preceding words
+      at 0x080eadd0..0x080eaddc construct the value reaching this block.
+      This is not a verified ordinary C ABI entry. Caller 0x080056b0
+      saves only r4/LR and invokes 0x080037a0 before this veneer.
+      No full-registry address entry exists for this veneer or its target;
+      src/ui/startup_sequence.rs retains a zero-argument retail seam,
+      which does not establish the target's register/stack contract.
+      Need verified runtime retargeting or the actual target entry ABI
+      before a faithful Rust port. No Rust implementation, host tests,
+      ARM build, match result, or device execution claimed.
