@@ -1,4 +1,5 @@
 //! retailOS-native utility functions (CRC, itoa, byte swaps, ...).
+pub mod arena_backed_object_destroy;
 pub mod stream_read_format_record;
 pub mod counted_wstr_append;
 pub use counted_wstr_append::*;
