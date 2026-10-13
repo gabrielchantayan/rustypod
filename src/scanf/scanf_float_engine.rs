@@ -80,11 +80,9 @@
 //!   (-3 = "no literal") unchanged and the engine ALWAYS falls through
 //!   to the decimal paths. `inf`/`nan` input is therefore a plain -2
 //!   matching failure and `0x10` scans as `0.0` leaving `x10`. The
-//!   inf/nan dispatch calls [`super::scanf_special_literal::scanf_special_literal`];
-//!   the hex dispatch remains a comment. The original also maintained a
-//!   leading-zero counter (sp+0x14) solely to gate the hex veneer (`0x`
-//!   valid only after exactly one zero); with the veneer stubbed it has
-//!   no observable effect and is not ported.
+//!   dispatches call [`super::scanf_special_literal::scanf_special_literal`]
+//!   and [`super::scanf_hex_literal::scanf_hex_literal`]. A leading-zero
+//!   counter gates the hex matcher (`0x` valid only after exactly one zero).
 //! - The decimal point character is read from the ADS runtime locale:
 //!   `FUN_0803204c` returns the locale block (in DRAM, runtime-
 //!   initialized), and the engine loads `lc_numeric.decimal_point[0]`
@@ -256,12 +254,17 @@ pub unsafe extern "C" fn scanf_float_engine(
             }
         }
 
-        // Leading zeros (consumed, not stored) and the `0x` hex dispatch
-        // (bl 0x083ed1bc — likewise a null veneer, so `0x` is never
-        // hex); the original's leading-zero counter existed only to gate
-        // that stubbed call and is not ported.
+        // Leading zeros are consumed, not stored. Only one zero permits
+        // dispatch to the retail hex matcher, which preserves -3.
+        let mut leading_zeros = 0i32;
         loop {
             if c != b'0' as i32 {
+                if matches!(c, 0x78 | 0x58) && leading_zeros == 1 {
+                    let result = super::scanf_hex_literal::scanf_hex_literal(-3);
+                    if result != -3 {
+                        return result;
+                    }
+                }
                 break;
             }
             consumed = consumed.wrapping_add(1);
@@ -269,6 +272,7 @@ pub unsafe extern "C" fn scanf_float_engine(
             width = width.wrapping_sub(1);
             flags |= FLAG_DIGITS_SEEN;
             *consumed_out = consumed;
+            leading_zeros = leading_zeros.wrapping_add(1);
             if width <= 0 {
                 break;
             }
