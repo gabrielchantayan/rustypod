@@ -39,6 +39,8 @@ extern crate std;
 /// six files. Each region is at most 0x0100_0000 wide, so neighbours cannot
 /// overlap.
 pub mod hints {
+    // Dedicated target-width iterator-range fixture; mappings never unmap.
+    pub const RED_BLACK_TREE_RANGE_COUNT: usize = 0x86a0_0000;
     pub const KERNEL_POOL_NODE_TAKE: usize = 0x9df0_0000;
     pub const ARENA_BACKED_OBJECT_DESTROY: usize = 0x7224_0000;
     pub const STREAM_READ_FORMAT_RECORD: usize = 0x7223_0000;
