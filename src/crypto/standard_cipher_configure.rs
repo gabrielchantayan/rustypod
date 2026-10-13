@@ -21,7 +21,7 @@ use super::standard_cipher_initialize::standard_cipher_initialize;
 /// ABI shared by the unported validation helper at `0x08027950`.
 pub type RetailStandardCipherValidate = unsafe extern "C" fn(u32, u32, u32, u32, u32, u32) -> u32;
 /// ABI shared by the unported key-schedule helper at `0x0802dec0`.
-pub type RetailStandardCipherExpandKey = unsafe extern "C" fn(u32, u32, u32, u32);
+pub type RetailStandardCipherExpandKey = unsafe extern "C" fn(*const u8, u32, u32, *mut u8);
 
 #[cfg(not(target_os = "none"))]
 unsafe extern "C" fn missing_retail_standard_cipher_validate(
@@ -34,7 +34,7 @@ unsafe extern "C" fn missing_retail_standard_cipher_validate(
 ) -> u32 { 0 }
 #[cfg(not(target_os = "none"))]
 unsafe extern "C" fn missing_retail_standard_cipher_expand_key(
-    _key_schedule: u32, _key_mode: u32, _round_count: u32, _cipher_context: u32,
+    _key_schedule: *const u8, _key_mode: u32, _round_count: u32, _cipher_context: *mut u8,
 ) {}
 
 #[cfg(not(target_os = "none"))]
@@ -43,6 +43,11 @@ pub static mut RETAIL_STANDARD_CIPHER_VALIDATE: RetailStandardCipherValidate =
 #[cfg(not(target_os = "none"))]
 pub static mut RETAIL_STANDARD_CIPHER_EXPAND_KEY: RetailStandardCipherExpandKey =
     missing_retail_standard_cipher_expand_key;
+
+#[cfg(test)]
+pub(super) static EXPANSION_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+#[cfg(test)]
+extern crate std;
 
 #[cfg(not(target_os = "none"))]
 #[inline(never)]
@@ -56,8 +61,8 @@ unsafe fn retail_standard_cipher_validate(
 }
 #[cfg(not(target_os = "none"))]
 #[inline(never)]
-unsafe fn retail_standard_cipher_expand_key(
-    key_schedule: u32, key_mode: u32, round_count: u32, cipher_context: u32,
+pub(super) unsafe fn retail_standard_cipher_expand_key(
+    key_schedule: *const u8, key_mode: u32, round_count: u32, cipher_context: *mut u8,
 ) {
     unsafe { core::ptr::read_volatile(core::ptr::addr_of!(RETAIL_STANDARD_CIPHER_EXPAND_KEY))(
         key_schedule, key_mode, round_count, cipher_context,
@@ -70,8 +75,8 @@ unsafe extern "C" {
         cipher_context: u32, cipher_name: u32, round_count: u32, key_mode: u32,
         configuration: u32, auxiliary: u32,
     ) -> u32;
-    fn retail_standard_cipher_expand_key(
-        key_schedule: u32, key_mode: u32, round_count: u32, cipher_context: u32,
+    pub(super) fn retail_standard_cipher_expand_key(
+        key_schedule: *const u8, key_mode: u32, round_count: u32, cipher_context: *mut u8,
     );
 }
 #[cfg(target_os = "none")]
@@ -106,7 +111,8 @@ pub unsafe extern "C" fn standard_cipher_configure(
     };
     if status != 0 { return status; }
     unsafe {
-        retail_standard_cipher_expand_key(key_schedule, key_mode, round_count, cipher_context);
+        retail_standard_cipher_expand_key(key_schedule as *const u8, key_mode, round_count,
+            cipher_context as *mut u8);
         standard_cipher_initialize(cipher_context as *mut u32, 8, round_count,
             configuration as *const u8, auxiliary);
     }
@@ -119,11 +125,9 @@ mod tests {
         RETAIL_STANDARD_CIPHER_EXPAND_KEY, RETAIL_STANDARD_CIPHER_VALIDATE,
         standard_cipher_configure};
     extern crate std;
-    use std::sync::Mutex;
 
-    static TEST_LOCK: Mutex<()> = Mutex::new(());
     unsafe extern "C" fn reject(_: u32, _: u32, _: u32, _: u32, _: u32, _: u32) -> u32 { 11 }
-    unsafe extern "C" fn unexpected_expansion(_: u32, _: u32, _: u32, _: u32) {
+    unsafe extern "C" fn unexpected_expansion(_: *const u8, _: u32, _: u32, _: *mut u8) {
         panic!("rejected configuration must not expand the key");
     }
     struct Restore(RetailStandardCipherValidate, RetailStandardCipherExpandKey);
@@ -136,7 +140,7 @@ mod tests {
 
     #[test]
     fn validation_failure_returns_status_without_accessing_cipher_state() {
-        let _lock = TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let _lock = super::EXPANSION_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
         let _restore = unsafe {
             let restore = Restore(RETAIL_STANDARD_CIPHER_VALIDATE, RETAIL_STANDARD_CIPHER_EXPAND_KEY);
             RETAIL_STANDARD_CIPHER_VALIDATE = reject;
