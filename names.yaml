@@ -254756,3 +254756,32 @@ functions:
       Deliberate deviation: no Rust port. Whole-image raw branch scans
       and A32/Thumb objdump probes executed; no host behavior tests,
       ARM build, match.py or device execution claimed.
+  - address: 0x087f5a48
+    ghidra: FUN_087f5a48
+    name: structured_data_record_0105_first_value
+    size: 4
+    sig: "data word; executable ABI unverified"
+    status: identified
+    notes: >-
+      Deferred: raw firmware identifies structured data, not a verified
+      function. Size 4 describes the assigned word, not an executable
+      extent; Ghidra's reported 1-byte extent is invalid. Record
+      [0x087f5a3c,0x087f5a58) contains 00000014, 00000000, 00000105,
+      0dad01a4, 0dad01a5, 000cffff, 0200ffff. The next record starts
+      at 0x087f5a58 with identifier 0x106 and values 0dad064d/0dad065c.
+      A32 decodes the assigned word as STCEQ p1, c0, [sp, #656]!;
+      Thumb decodes its halves as LSLS r4, r4, #6 and LSRS r5, r5,
+      #22. Neighboring ffff halfwords are not valid ARMv5 Thumb BL
+      pairs; Ghidra's C invents LR-relative indirect calls across records.
+      Independent whole-image aligned A32 BL decoding finds zero plain
+      incoming candidates and one predicated candidate: 0b0b0b21 at
+      0x08532dbc decodes as BLEQ 0x087f5a48. Surrounding sequential
+      1d/1e/1f/20 and 22/23/24/25 bytes interspersed with repeated
+      0b bytes identify table-like data, not a verified executable caller.
+      Halfword-aligned ARMv5 Thumb BL decoding finds zero incoming
+      candidates. The assigned word contains zero plain or predicated
+      A32 BL instructions. True outgoing calls and the next real function
+      boundary cannot be established for this data address. Full
+      names.yaml had no existing entry for the assigned address.
+      Faithful porting requires verified executable mapping, instruction
+      state, caller ABI and function boundaries. Deliberate deviation:
