@@ -41,7 +41,7 @@
 //!   a local cursor; state offsets 0x28/0x2c stay zero. `sgetc` is
 //!   therefore not ported.
 //! - `%e/%E/%f/%F/%g/%G`: routed through the [`FLOAT_CONVERTER`] hook,
-//!   whose default is `convert_fe` (original @ 0x08032d70).
+//!   whose default is the decimal veneer at 0x083ed078 to `convert_fe`.
 //!   `%a/%A` consume the same 8-aligned double argument but emit nothing,
 //!   through the verified disabled converter @ 0x083ed07c.
 //! - `%llx/%llX/%llp/%llo`: the committed hex/octal converters are
@@ -115,14 +115,14 @@ const FLAG_TABLE: [u8; 17] = [
 
 /// Float conversion hook, called for `%e/%E/%f/%F/%g/%G` with the
 /// conversion character and a pointer to the 8 argument bytes (the u64
-/// bit pattern of the soft-float double). Original target: the float
-/// wrapper `convert_fe` @ 0x08032d70 (printf_float.rs).
+/// bit pattern of the soft-float double). Original target: the decimal
+/// veneer @ 0x083ed078 to `convert_fe` @ 0x08032d70 (printf_float.rs).
 pub type FloatConverterFn = unsafe extern "C" fn(state: *mut PrintfState, spec: u8, bits: *const u64);
 
 /// Installed float converter; see [`FloatConverterFn`]. Defaults to the
-/// real float wrapper port [`crate::printf_float::convert_fe`]; host
+/// decimal veneer port [`crate::printf_float::printf_decimal_float`]; host
 /// tests swap in recorders.
-pub static mut FLOAT_CONVERTER: FloatConverterFn = crate::printf_float::convert_fe;
+pub static mut FLOAT_CONVERTER: FloatConverterFn = crate::printf_float::printf_decimal_float;
 
 /// Fetch one 32-bit varargs word (original: `ldr rX, [r4], #4`).
 #[inline(always)]
