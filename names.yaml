@@ -16,6 +16,40 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08037ff8
+    ghidra: thunk_EXT_FUN_220083c4
+    name: i2s_transfer_setup_iram
+    size: 8
+    sig: "u32 i2s_transfer_setup_iram(u32 source_endpoint, u32 source_width, u32 source_burst, u32 destination_endpoint, u32 destination_width, u32 destination_burst, u8 *controller, i8 *channel)"
+    module: drivers/i2s_transfer_setup_iram
+    status: ported
+    vars:
+      param_1/r0: source_endpoint
+      param_2/r1: source_width
+      param_3/r2: source_burst
+      param_4/r3: destination_endpoint
+      param_5/stack0: destination_width
+      param_6/stack1: destination_burst
+      param_7/stack2: controller
+      param_8/stack3: channel
+      DAT_08037ffc: iram_transfer_setup_target
+    notes: >-
+      Raw e51ff004/220083c4 establishes [0x08037ff8,0x08038000),
+      eight bytes including the literal, not Ghidra's four-byte extent.
+      Whole-image aligned A32 decoding finds two plain inbound BLs at
+      0x080f7d3c and 0x0836b02c, no predicated inbound BLs, no outgoing BLs.
+      Target is the IRAM mirror of unported 0x080083c4, installed by
+      0x080046e0, not mask ROM. Six configuration words and two byte pointers
+      reach the setup body unchanged; it locks resource 20, selects and
+      configures a controller/channel, unlocks, and returns zero or 19.
+      Its true extent includes literals through the next entry at 0x080084dc.
+      Deliberate deviation: typed indirect call replaces ADS literal PC load;
+      LLVM emits balanced frame setup, four stack-word load/store pairs,
+      restores FP/LR, and tail-transfers with BX to exact literal 0x220083c4.
+      Host guard-page test covers byte outputs, signed channel and unchanged
+      error state. Host suite and ARM release build pass. match.py exits 1
+      with one original instruction versus 14 Rust lines including the literal.
+      Executable ARM ABI smoke verifies all eight arguments and SP/LR/FP.
   - address: 0x08038000
     ghidra: thunk_EXT_FUN_220086c4
     name: i2s_transfer_slot_wait_timeout

@@ -91,6 +91,7 @@ pub mod i2c;
 pub mod interrupts;
 pub mod i2s_object_enable;
 pub mod i2s_object_transfer;
+pub mod i2s_transfer_setup_iram;
 pub mod lcd_write_register;
 pub mod lcd_wait_transaction_idle;
 pub mod mailbox_controller_reset;
