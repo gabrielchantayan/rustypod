@@ -28957,6 +28957,34 @@ functions:
       It zero-initializes a three-word vector, allocates max(source length,
       32) words, conditionally copies source words after a failed allocation,
       then stores the end and capacity pointers derived from the source length.
+  - address: 0x083e7a40
+    ghidra: FUN_083e7a40
+    name: red_black_tree_range_count_083e7a40
+    size: 156
+    sig: "u32 red_black_tree_range_count_083e7a40(const u32 *first, const u32 *last, u32 *count)"
+    module: cxx/red_black_tree_range_count_083e7a40
+    status: ported
+    renames:
+      param_1/r0: first
+      param_2/r1: last
+      param_3/r2: count
+      local_1c: current
+      iVar2: next
+    notes: >-
+      Raw osos.dec establishes the 156-byte extent 0x083e7a40..0x083e7adb,
+      through return at 0x083e7ad8; the next real function is 0x083e7adc.
+      Full-image aligned A32 decoding verifies one plain inbound BL at
+      0x083d71c8, zero predicated inbound BLs, and no outbound BLs.
+      Accumulates in-order iterator distance into a wrapping u32 counter,
+      descending right-child left spines or climbing parents with the header
+      sentinel comparison preserved. Neither iterator changes; last is reloaded
+      each iteration, including when count aliases last. Raw r0 returns 1,
+      contrary to Ghidra's void signature. Caller 0x083d7178 initializes count
+      to zero and returns its accumulated value. Byte-identical to 0x083e7adc;
+      reuses the established target-width node layout without new callee seams.
+      No deliberate semantic deviations. Host tests cover balanced-tree
+      subranges, wrapping, sentinel termination, unchanged iterators, aliased
+      end/counter, and an empty range with null count.
   - address: 0x083e7adc
     ghidra: FUN_083e7adc
     name: red_black_tree_range_count_083e7adc
