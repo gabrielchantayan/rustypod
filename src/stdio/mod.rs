@@ -10,6 +10,7 @@ pub mod getc_core;
 pub mod linebuf_putc;
 pub mod seek_core;
 pub mod record_preamble;
+pub mod record_assemble;
 pub mod scan_stream_setup;
 pub mod semihost;
 pub mod scan_float_conversion_veneer;
