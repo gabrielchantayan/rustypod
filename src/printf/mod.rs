@@ -18,6 +18,7 @@ pub mod printf_s;
 pub mod printf_wide;
 pub mod printf_x;
 pub mod printf_float;
+pub mod printf_hex_float;
 pub mod power_of_ten;
 pub mod printf_float_dtoa;
 pub mod printf_decimal_digit;

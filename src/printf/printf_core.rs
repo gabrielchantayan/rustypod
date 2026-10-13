@@ -40,15 +40,10 @@
 //!   port takes `fmt` directly (fixed port signature) and walks it with
 //!   a local cursor; state offsets 0x28/0x2c stay zero. `sgetc` is
 //!   therefore not ported.
-//! - `%e/%E/%f/%F/%g/%G` (and `%a/%A`): routed through the
-//!   [`FLOAT_CONVERTER`] hook, whose default is the real float wrapper
-//!   port `convert_fe` (printf_float.rs, original @ 0x08032d70) — the
-//!   firmware build links the original call graph. (`%a/%A` in the
-//!   original bl's a veneer @ 0x083ed07c that is a bare `mov pc, lr` —
-//!   dead in this build — so routing them to the wrapper too only
-//!   affects conversions that never print in the original.) The
-//!   argument is fetched as an 8-aligned u64 bit pattern, exactly like
-//!   the original.
+//! - `%e/%E/%f/%F/%g/%G`: routed through the [`FLOAT_CONVERTER`] hook,
+//!   whose default is `convert_fe` (original @ 0x08032d70).
+//!   `%a/%A` consume the same 8-aligned double argument but emit nothing,
+//!   through the verified disabled converter @ 0x083ed07c.
 //! - `%llx/%llX/%llp/%llo`: the committed hex/octal converters are
 //!   u32-only, so the high word of the fetched pair is dropped and only
 //!   the low 32 bits print (the original's converters walk all 64 bits
@@ -118,11 +113,10 @@ const FLAG_TABLE: [u8; 17] = [
     0x10, // '0'  -> zero pad
 ];
 
-/// Float conversion hook, called for `%e/%E/%f/%F/%g/%G/%a/%A` with the
+/// Float conversion hook, called for `%e/%E/%f/%F/%g/%G` with the
 /// conversion character and a pointer to the 8 argument bytes (the u64
 /// bit pattern of the soft-float double). Original target: the float
-/// wrapper `convert_fe` @ 0x08032d70 (printf_float.rs); `%a/%A` went to
-/// the dead veneer @ 0x083ed07c.
+/// wrapper `convert_fe` @ 0x08032d70 (printf_float.rs).
 pub type FloatConverterFn = unsafe extern "C" fn(state: *mut PrintfState, spec: u8, bits: *const u64);
 
 /// Installed float converter; see [`FloatConverterFn`]. Defaults to the
@@ -327,7 +321,11 @@ pub unsafe extern "C" fn _printf(state: *mut PrintfState, fmt: *const u8, args: 
         match c {
             // "%<NUL>": the scan ends silently.
             0 => return st.count,
-            b'e' | b'E' | b'f' | b'F' | b'g' | b'G' | b'a' | b'A' => {
+            b'a' | b'A' => {
+                let _bits = fetch_pair(&mut args);
+                super::printf_hex_float::printf_hex_float(state);
+            }
+            b'e' | b'E' | b'f' | b'F' | b'g' | b'G' => {
                 let bits = fetch_pair(&mut args);
                 float_converter()(state, c, &bits);
             }
@@ -796,35 +794,12 @@ mod tests {
     }
 
     #[test]
-    fn float_routes_through_converter_hook() {
-        static mut SEEN: Option<(u8, u64)> = None;
-        unsafe extern "C" fn record(_state: *mut PrintfState, spec: u8, bits: *const u64) {
-            unsafe {
-                *core::ptr::addr_of_mut!(SEEN) = Some((spec, *bits));
-            }
-        }
-        unsafe {
-            *core::ptr::addr_of_mut!(FLOAT_CONVERTER) = record;
-        }
-        // The hook receives the spec char and the raw double bits; this
-        // recorder emits nothing.
-        let (out, _) = run(b"%f\0", &Args::new().long(0x3ff0000000000000));
-        assert_eq!(out, "");
-        assert_eq!(
-            unsafe { *core::ptr::addr_of!(SEEN) },
-            Some((b'f', 0x3ff0000000000000))
-        );
-        // %a goes through the same hook; the pair fetch stays 8-aligned
-        // after a 32-bit arg.
-        let _ = run(b"%d|%a\0", &Args::new().int(1).long(0x4000000000000000));
-        assert_eq!(
-            unsafe { *core::ptr::addr_of!(SEEN) },
-            Some((b'a', 0x4000000000000000))
-        );
-        // Restore the shipped default (the real convert_fe port).
-        unsafe {
-            *core::ptr::addr_of_mut!(FLOAT_CONVERTER) = crate::printf_float::convert_fe;
-        }
+    fn hex_float_emits_nothing_and_consumes_aligned_arguments() {
+        let args = Args::new().int(7).long(0x3ff0000000000000)
+            .int(9).long(0x7ff8000000000000).int(11);
+        let (out, count) = run(b"%d|%#20.8a|%d|%A|%d\0", &args);
+        assert_eq!(out, "7||9||11");
+        assert_eq!(count, 8);
     }
 
     #[test]

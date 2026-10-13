@@ -16,6 +16,29 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083ed07c
+    ghidra: FUN_083ed07c
+    name: printf_hex_float
+    size: 4
+    module: printf/printf_hex_float
+    status: ported
+    sig: "PrintfState *printf_hex_float(PrintfState *state)"
+    vars: {r0: state, r1: unused_conversion_character, r2: unused_double_pointer}
+    notes: >-
+      Raw e1a0f00e is mov pc, lr. True size is four bytes through the
+      next function at 0x083ed080 (trap decoder: and r3, ip, #15).
+      Whole-image raw A32 decoding verifies one incoming plain BL at
+      0x080347e8, zero predicated BLs, zero outgoing calls and no literal
+      DATA references. The printf caller consumes an 8-aligned double
+      for a/A, passes state in r0, character in r1 and double pointer in r2.
+      This disabled hexadecimal float converter emits nothing, touches
+      no memory and preserves r0; it is neither veneer nor destructor.
+      Deviation: unused r1/r2 arguments are omitted. Naked ARM export
+      retains the exact return word. Migrated printf_core a/A dispatch
+      away from the decimal float hook. Host tests cover NULL, dangling
+      and unaligned pointers, untouched storage, consumed arguments and
+      suppressed padding. Host suite and ARM build pass. match.py reports
+      EXACT MATCH. Actual-library smoke preserves 100000 state words.
   - address: 0x083ed1bc
     ghidra: FUN_083ed1bc
     name: scanf_hex_literal
