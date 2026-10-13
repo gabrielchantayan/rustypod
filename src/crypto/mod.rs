@@ -156,3 +156,4 @@ pub mod conf_section_find;
 pub mod store_entry_find;
 pub mod asn1_string_print;
 pub mod asn1_string_compare;
+pub mod asn1_object_new;

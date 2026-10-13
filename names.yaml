@@ -16,6 +16,35 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0803a1dc
+    ghidra: FUN_0803a1dc
+    name: asn1_object_new
+    size: 96
+    sig: "Asn1Object *asn1_object_new(void)"
+    module: crypto/asn1_object_new
+    status: ported
+    vars: {puVar1: object}
+    renames: {FUN_08043c18: traced_alloc, FUN_08049a84: diag_ring_record}
+    notes: >-
+      Raw words establish [0x0803a1dc,0x0803a23c), 96 bytes, ending
+      before the independent comparator branch veneer. Exactly two plain
+      outbound BLs at 0x0803a1ec and 0x0803a20c, no predicated BLs.
+      ASN1_OBJECT_new allocates 24 bytes with zero tags, returns NULL after
+      ERR_LIB_ASN1=13, ASN1_F_ASN1_OBJECT_NEW=123, malloc failure=65 with
+      both diagnostic data words zero. Success clears length, data, nid,
+      sn, ln in that order and sets ASN1_OBJECT_FLAG_DYNAMIC=1. Callers
+      0x0805ec68 and 0x082be338 copy or decode object identifier storage
+      using this six-word layout. Reuses Asn1Object and both ported callees;
+      Ghidra's extra allocator arguments are not part of the existing ABI.
+      No target behavioral deviations; host allocation uses native repr(C)
+      size for wider pointers. Host tests cover dirty allocation clearing,
+      exact dynamic flag, no success diagnostic, and allocation failure's
+      diagnostic and preservation of the preceding live object. Host suite
+      and ARM release build pass. match.py reports a structural diff:
+      unchanged allocation size, two calls, NULL branch, six ordered stores
+      and error tuple; LLVM reverses block placement and adds a frame.
+      Existing allocator and diagnostic seams are unchanged.
+
   - address: 0x0803a24c
     ghidra: FUN_0803a24c
     name: owned_buffer_descriptor_value
