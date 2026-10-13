@@ -1179,6 +1179,41 @@ pub unsafe extern "C" fn deque_iter_init_elem4_alias_9ff8(
     iter
 }
 
+/// deque_front_elem4 — original: `FUN_083dff40` @ **0x083dff40**.
+/// True extent: 24 bytes, `0x083dff40..0x083dff58`; the next function
+/// starts with its own `push {r0,r1,r2,r3,lr}` at 0x083dff58.
+///
+/// Copies the four aligned begin-iterator words to a stack temporary through
+/// [`crate::util::copy_four_words::copy_four_words_forward_alias_a2e0`],
+/// then returns the copied cursor. It neither dereferences the cursor nor
+/// checks the count or segment bounds. Whole-image ARM-word decoding finds
+/// one inbound plain BL (0x08261914), no predicated inbound BLs; the body
+/// has one plain BL to 0x083da2e0 and no predicated BLs.
+///
+/// Deliberate deviations: host builds copy the native-width iterator fields
+/// instead of four target words, preserving 64-bit pointers. Only r0 is the
+/// return value; Ghidra's duplicated u64 result is incidental r1 restoration.
+///
+/// # Safety
+/// `deque` must have a readable, aligned begin iterator. The cursor and the
+/// other stored pointers need not be dereferenceable; no element is read.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn deque_front_elem4(deque: *const BlockDeque) -> *mut u8 {
+    #[cfg(target_os = "none")]
+    {
+        let mut begin = [0u32; 4];
+        crate::util::copy_four_words::copy_four_words_forward_alias_a2e0(
+            begin.as_mut_ptr(), deque.cast::<u32>(),
+        );
+        begin[0] as usize as *mut u8
+    }
+    #[cfg(not(target_os = "none"))]
+    {
+        core::ptr::addr_of!((*deque).begin).read().cur
+    }
+}
+
 /// deque_pop_front_elem4 — original: `FUN_083dfdec` @ 0x083dfdec
 /// (204 bytes; raw extent 0x083dfdec..0x083dfeb8).
 ///
@@ -7566,6 +7601,57 @@ mod tests {
     extern crate std;
     use super::*;
     use crate::cxx::string::StringRep;
+
+    #[test]
+    fn deque_front_returns_cursor_without_reading_element_or_other_pointers() {
+        let mut elements = [0x11223344u32, 0xaabbccdd];
+        let mut deque = BlockDeque {
+            begin: DequeIter {
+                cur: elements.as_mut_ptr().cast(),
+                seg_base: 1usize as *mut u8,
+                seg_end: 3usize as *mut u8,
+                seg_slot: 5usize as *mut *mut u8,
+            },
+            end: DequeIter::NULL,
+            count: 0,
+            map: core::ptr::null_mut(),
+            map_cap: 0,
+        };
+        for cursor in [
+            elements.as_mut_ptr().cast(),
+            unsafe { elements.as_mut_ptr().add(1).cast() },
+            unsafe { elements.as_mut_ptr().add(2).cast() },
+            1usize as *mut u8,
+            core::ptr::null_mut(),
+        ] {
+            deque.begin.cur = cursor;
+            assert_eq!(unsafe { deque_front_elem4(&deque) }, cursor);
+        }
+        assert_eq!(elements, [0x11223344, 0xaabbccdd]);
+        assert_eq!(deque.begin.seg_base as usize, 1);
+        assert_eq!(deque.begin.seg_end as usize, 3);
+        assert_eq!(deque.begin.seg_slot as usize, 5);
+        assert_eq!(deque.count, 0);
+    }
+
+    #[test]
+    fn deque_front_uses_begin_not_end_or_count() {
+        let mut elements = [7u32, 9];
+        let begin = elements.as_mut_ptr().cast();
+        let end = unsafe { elements.as_mut_ptr().add(1).cast() };
+        let mut deque = BlockDeque {
+            begin: DequeIter { cur: begin, ..DequeIter::NULL },
+            end: DequeIter { cur: end, ..DequeIter::NULL },
+            count: u32::MAX,
+            map: core::ptr::null_mut(),
+            map_cap: 0,
+        };
+        assert_eq!(unsafe { deque_front_elem4(&deque) }, begin);
+        deque.begin.cur = core::ptr::null_mut();
+        assert!(unsafe { deque_front_elem4(&deque) }.is_null());
+        assert_eq!(deque.end.cur, end);
+        assert_eq!(deque.count, u32::MAX);
+    }
     use crate::cxx::string_object::{
         StringObjectAssignCstrOps, StringObjectOps, STRING_OBJECT_ASSIGN_CSTR_OPS,
         STRING_OBJECT_OPS, STRING_OBJECT_VTABLE,

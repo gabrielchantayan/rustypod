@@ -97199,12 +97199,34 @@ functions:
       a pre-test loop calls the count-zero predicate at 0x083d7630 and pops
       the front four-byte deque element at 0x083dfdec until empty, returning
       the original deque pointer. The next independently linked function
-      begins with push {r4,r5,r6,lr} at 0x083dff40. Whole-image decoding
+      begins with push {r0,r1,r2,r3,lr} at 0x083dff40. Whole-image decoding
       finds three plain inbound bl calls (0x081a739c, 0x082e7e14, and
       0x082e7f14), no predicated inbound calls; the body has two plain bl
       calls and no predicated call. Rust uses the existing deque-pop logic's
       callback internally so host tests can verify multi-segment draining and
       deallocation while target behavior remains identical.
+  - address: 0x083dff40
+    ghidra: FUN_083dff40
+    name: deque_front_elem4
+    size: 24
+    sig: "u8 *deque_front_elem4(const BlockDeque *deque)"
+    module: cxx/templates
+    status: ported
+    vars: {param_1: deque, local_14: begin}
+    renames:
+      param_1/r0: deque
+      local_14: begin
+      FUN_083da2e0: copy_four_words_forward_alias_a2e0
+    notes: >-
+      Raw words establish the 24-byte extent 0x083dff40..0x083dff58,
+      bounded by the next independent push {r0,r1,r2,r3,lr}. Copies the
+      four aligned begin-iterator words to the stack through the existing
+      copy_four_words_forward_alias_a2e0 port, then returns the cursor
+      without dereferencing it or checking count. Whole-image ARM decoding
+      finds one inbound plain bl at 0x08261914, zero predicated inbound bl;
+      the body has one plain bl to 0x083da2e0 and no predicated bl. Ghidra's
+      duplicated u64 result is incidental restoration of r1, not the return
+      ABI. Host builds copy native-width iterator fields to retain pointers.
   - address: 0x083cf650
     ghidra: FUN_083cf650
     name: equal_deref_f650_copy
@@ -130220,8 +130242,8 @@ functions:
       otherwise it dispatches the tagged context at +0x1c until dispatch
       reports a nonzero status or the deque becomes nonempty. It returns the
       front word and removes it, or NULL if still empty, then always unlocks.
-      The front helper at 0x083dff40 is unported but its raw behavior is
-      iterator dereference, so Rust reads the deque begin cursor directly.
+      The front helper at 0x083dff40 is ported and returns the begin cursor;
+      Rust retains its existing cursor result rather than retail's word load.
       Target calls use existing lock, dispatch, empty, and pop ports; host
       tests install operation seams for those boundaries.
   - address: 0x082628f4

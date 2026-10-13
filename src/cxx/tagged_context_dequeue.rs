@@ -12,9 +12,9 @@
 //! only inspect the deque once. If an element is available, return its front
 //! word and pop it; otherwise return NULL. Unlock in every path.
 //!
-//! Deliberate deviations: the retail deque front member is an unported
-//! iterator-dereference helper; its verified effect is the begin cursor word,
-//! read directly here. Host builds use an operation seam for the lock,
+//! Deliberate deviations: returns the begin cursor as before, rather than the
+//! word at that cursor loaded by the retail caller. The front accessor now
+//! uses the established port. Host builds use an operation seam for the lock,
 //! dispatch, deque, and unlock boundaries; target builds call the established
 //! ports directly.
 
@@ -23,7 +23,7 @@ use core::ptr;
 use crate::cxx::tagged_context_dispatch::{
     dispatch_tagged_context_with_selector, validate_and_dispatch_tagged_context,
 };
-use crate::cxx::templates::{container_is_empty, deque_pop_front_elem4};
+use crate::cxx::templates::{container_is_empty, deque_front_elem4, deque_pop_front_elem4};
 use crate::heap::block_deque::BlockDeque;
 use crate::kernel::posix_mutex::{posix_mutex_lock, posix_mutex_unlock, PosixMutex};
 
@@ -131,7 +131,7 @@ pub unsafe extern "C" fn tagged_context_dequeue(
     }
 
     let result = if unsafe { is_empty(deque) } == 0 {
-        let front = unsafe { (deque as *mut *mut u8).read() };
+        let front = unsafe { deque_front_elem4(deque.cast::<BlockDeque>()) };
         unsafe { pop_front(deque) };
         front
     } else {
