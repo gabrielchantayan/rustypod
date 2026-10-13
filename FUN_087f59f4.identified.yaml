@@ -1,0 +1,43 @@
+# Identification record; no executable ABI or Rust seam established.
+# Canonical insertion blocked: names.yaml reads lack the required edit snapshot tag.
+address: 0x087f59f4
+ghidra: FUN_087f59f4
+name: structured_data_record_0102_second_value
+size: null
+sig: "data word; executable ABI unverified"
+module: null
+status: identified
+notes: >-
+  Deferred: the assigned address is structured data, not a verified function.
+  Raw osos.dec at file offset 0x007f59f4 contains word 0x0dad01a5.
+  Record [0x087f59e4,0x087f5a00) contains 00000014, 00000000,
+  00000102, 0dad01a4, 0dad01a5, 000cffff, 0200ffff. The assigned
+  word is its second paired value. The next record begins at 0x087f5a00
+  with identifier 0x103 and values 0dad064d/0dad065c. Further records
+  repeat the same structure with increasing identifiers. These are
+  record boundaries, not verified function boundaries. Ghidra reports
+  27 bytes at both 0x087f59f4 and 0x087f5a10; neither establishes a
+  true executable extent or next real function boundary. GNU ARM
+  objdump decodes the assigned word as STCEQ p1, c0, [sp, #660]!;
+  Thumb decodes its halves as LSLS r5,r4,#6 and LSRS r5,r5,#22.
+  The following ffff/000c and ffff/0200 halfword pairs are not ARMv5
+  Thumb BL encodings. Ghidra's assembly calls them BL #0xffe and
+  its C invents indirect calls through incoming LR across records.
+  Independent whole-image aligned A32 BL decoding finds zero plain
+  incoming candidates and one predicated candidate at 0x08532dc0:
+  word 0x0b0b0b0b encodes BLEQ 0x087f59f4. Surrounding bytes include
+  ascending 19/1a/1b/1c/1d/1e/1f/20 and 25/26/27/28/29/2a/2b/2c
+  runs plus repeated 0b bytes, identifying table-like data rather than
+  an established caller. Independent whole-image halfword-aligned
+  ARMv5 Thumb BL decoding finds zero incoming candidates. The aligned
+  28-byte window at the assigned address contains zero plain or
+  predicated A32 BL instructions. True outgoing call count is unresolved
+  without executable boundaries. Full names.yaml scan finds no entry
+  for the assigned address. No callee identity, Rust seam or dependency
+  on the undecrypted region is invented. Faithful porting requires
+  verified executable mapping, instruction state, ABI and boundaries.
+  Deliberate deviation: no Rust port, host behavior tests, ARM build or
+  match.py run; raw scans and ARM/Thumb objdump probes were executed.
+  Evidence is stored separately because suffix and explicit narrow
+  names.yaml reads omit the mandatory edit snapshot tag, preventing
+  safe canonical insertion. The tool failure was reported.
