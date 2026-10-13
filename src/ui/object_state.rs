@@ -683,6 +683,27 @@ pub unsafe extern "C" fn shared_context() -> *mut u8 {
     slot.read_volatile()
 }
 
+/// shared_context_boot_veneer — original: `FUN_08003610` @ `0x08003610`
+/// (8 bytes including the target literal; next veneer at `0x08003618`).
+///
+/// Raw words `e51ff004 0835ed14` tail-transfer without changing arguments
+/// or LR. Independent ARM decoding finds two plain BL callers at
+/// `0x08003a50` and `0x0800455c`, zero predicated BL callers, and no
+/// outgoing BL. Startup relocation subtracts `0xaed8` from the main image:
+/// runtime `0x0835ed14` is raw `0x08369bec`, the lazy shared-context getter.
+/// Publishes the default context only when the slot is zero, then returns
+/// the current pointer. Deliberate deviation: call the existing Rust getter
+/// instead of loading PC from the stock literal; host storage is shared.
+///
+/// # Safety
+///
+/// The fixed shared-context slot must satisfy [`shared_context`]'s contract.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn shared_context_boot_veneer() -> *mut u8 {
+    shared_context()
+}
+
 /// shared_context_memory_bounds — original: `FUN_082bc848` @ `0x082bc848`
 /// (52 bytes; next real function at `0x082bc87c`; four verified direct `bl`
 /// call sites, all unconditional).
@@ -3021,6 +3042,29 @@ mod tests {
             existing_context.as_mut_ptr(),
             "the existing context is never overwritten"
         );
+    }
+
+    #[test]
+    fn boot_veneer_publishes_once_and_observes_replaced_context() {
+        let mut default_context = [0xa5u8; 0xe8];
+        let mut replacement_context = [0x5au8; 0xe8];
+        let _guard = install_shared_context(default_context.as_mut_ptr(), core::ptr::null_mut());
+        let _reset = VersionTextReset;
+        unsafe {
+            assert_eq!(shared_context_boot_veneer(), default_context.as_mut_ptr());
+            assert_eq!(
+                core::ptr::addr_of!(HOST_SHARED_CONTEXT_SLOT).read(),
+                default_context.as_mut_ptr(),
+            );
+            core::ptr::addr_of_mut!(HOST_DEFAULT_SHARED_CONTEXT)
+                .write(replacement_context.as_mut_ptr());
+            assert_eq!(shared_context_boot_veneer(), default_context.as_mut_ptr());
+            core::ptr::addr_of_mut!(HOST_SHARED_CONTEXT_SLOT)
+                .write(replacement_context.as_mut_ptr());
+            assert_eq!(shared_context_boot_veneer(), replacement_context.as_mut_ptr());
+            assert_eq!(default_context, [0xa5; 0xe8]);
+            assert_eq!(replacement_context, [0x5a; 0xe8]);
+        }
     }
 
     #[test]
