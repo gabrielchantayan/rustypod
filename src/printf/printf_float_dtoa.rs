@@ -129,8 +129,8 @@
 //! @ 0x0891ee4c / 0x0891ef4c and are embedded verbatim below (their content
 //! looks like obfuscated ASCII, not the standard AES S-box — the exact
 //! cipher is out of scope). 0x0802e190/0x0802e1f4 rotate the three row
-//! quartets of the column-major state. They are ported here because the
-//! batch assigned them.
+//! quartets of the transposed state. The inverse row permutation now lives
+//! in [`crate::crypto::block_inv_shift_rows`]; the other helpers remain here.
 
 use crate::ll_udiv10::ll_udiv10_full;
 
@@ -972,33 +972,6 @@ pub unsafe extern "C" fn block_shift_rows(state: *mut u8) {
     s(13).write(b12);
 }
 
-/// InvShiftRows: the inverse row rotations. Original: `FUN_0802e1f4` @
-/// 0x0802e1f4 (100 bytes).
-#[cfg_attr(target_os = "none", no_mangle)]
-pub unsafe extern "C" fn block_inv_shift_rows(state: *mut u8) {
-    let s = |i: usize| state.add(i);
-    // Row 1 right by one: [4] <- [7], [7] <- [6], [6] <- [5], [5] <- [4].
-    let b4 = s(4).read();
-    s(4).write(s(7).read());
-    let b6 = s(6).read();
-    s(7).write(b6);
-    s(6).write(s(5).read());
-    s(5).write(b4);
-    // Row 2 (self-inverse): swap [8]<->[10], [9]<->[11].
-    let b8 = s(8).read();
-    s(8).write(s(10).read());
-    s(10).write(b8);
-    let b9 = s(9).read();
-    s(9).write(s(11).read());
-    s(11).write(b9);
-    // Row 3 right by three: [12] <- [13] <- [14] <- [15] <- [12].
-    let b12 = s(12).read();
-    s(12).write(s(13).read());
-    s(13).write(s(14).read());
-    s(14).write(s(15).read());
-    s(15).write(b12);
-}
-
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -1617,12 +1590,12 @@ mod tests {
             [0, 1, 2, 3, 5, 6, 7, 4, 10, 11, 8, 9, 15, 12, 13, 14]
         );
         // inv(forward) must be the identity
-        unsafe { block_inv_shift_rows(s.as_mut_ptr()) };
+        unsafe { crate::crypto::block_inv_shift_rows::block_inv_shift_rows(s.as_mut_ptr()) };
         assert_eq!(s, state);
         // and forward(inverse) too
         let mut t = state;
         unsafe {
-            block_inv_shift_rows(t.as_mut_ptr());
+            crate::crypto::block_inv_shift_rows::block_inv_shift_rows(t.as_mut_ptr());
             block_shift_rows(t.as_mut_ptr());
         }
         assert_eq!(t, state);
