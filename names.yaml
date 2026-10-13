@@ -252952,3 +252952,31 @@ functions:
       match.py exits 1, one stock BX LR versus PUSH/MOV/POP in Rust.
       Host suite passes 15858 tests; ARM release build passes. Actual-source
       executable smoke verifies pointer identity and unchanged live storage.
+
+  - address: 0x080284dc
+    ghidra: FUN_080284dc
+    name: output_word_cleanup_noop
+    size: 36
+    sig: "u32 output_word_cleanup_noop(u32 word)"
+    module: util/output_word_cleanup_noop
+    status: ported
+    vars:
+      param_1/r0: word
+    notes: >-
+      Raw e12fff1e is BX LR, preserving incoming r0 without memory access.
+      True extent to next independently called entry 0x08028500 is 36 bytes;
+      only four bytes execute. Eight subsequent BX LR words are unreachable
+      from this entry, not claimed as part of its executed algorithm.
+      Whole-image aligned raw A32 decoding finds two plain incoming BLs at
+      0x082ea264 and 0x082ea444, zero predicated BLs, zero outgoing calls,
+      and no aligned DATA words equal to this address. Both callers in
+      0x082e9b54 load stack +0x158 into r0 during output cleanup and discard
+      the result. Concrete output type and ownership are unknown; no
+      destructor or virtual-dispatch identity is asserted. No callee seams.
+      Deviations: expose preserved r0 as u32 instead of Ghidra void and omit
+      unreachable words. Naked ARM body preserves the register-transparent
+      original; host implementation returns the word unchanged.
+      Host suite and ARM release build pass. Standalone actual-source smoke
+      preserves 100000 generated output words. Requested match.py comparison
+      finds the exported symbol and reports an exact one-instruction match
+      against the reachable original BX LR. No device execution claimed.
