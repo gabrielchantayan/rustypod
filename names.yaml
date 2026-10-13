@@ -256144,3 +256144,34 @@ functions:
       match.py exits 1: five original versus seven Rust instructions;
       the same zero and three stores remain, with LLVM frame setup and
       pop return replacing bx lr. No device execution.
+
+  - address: 0x083e2a1c
+    ghidra: FUN_083e2a1c
+    name: polymorphic_owner_range_destroy
+    size: 40
+    sig: "void polymorphic_owner_range_destroy(void *context, PolymorphicOwner *first, PolymorphicOwner *last)"
+    module: cxx/polymorphic_owner_range_destroy
+    status: ported
+    renames:
+      param_1/r0: unused_context
+      param_2/r1/r4: first
+      param_3/r2/r5: last
+      FUN_081fd554: polymorphic_owner_destroy
+    notes: >-
+      Raw A32 words establish the exact 40-byte extent
+      0x083e2a1c..0x083e2a44, ending with pop at 0x083e2a40 before the
+      next independently entered push. One outgoing unconditional BL at
+      0x083e2a30 targets the registered polymorphic_owner_destroy at
+      0x081fd554; zero outgoing predicated BLs. Whole-image aligned branch
+      decoding finds one inbound plain BL at 0x083e2bd4 and zero predicated
+      inbound BLs. Caller loads first and last from its vector's first two
+      words; r0 context is unused but retained for register-compatible ABI.
+      Destroy owners in ascending order over the half-open range, advancing
+      four target bytes after each call. Reuse the existing repr(C) owner
+      model; native host pointers widen the host stride deliberately.
+      Tests cover empty null endpoints, singleton, mixed null/non-null
+      owners, call order, excluded endpoints, and unchanged slots. Host
+      suite passes all 15975 tests; ARM release build and runtime smoke pass.
+      match.py shows 12 Rust instructions versus 10 original: LLVM adds an
+      early empty-range return and frame pointer, and reuses the callee's
+      preserved owner return for iteration. The BL and four-byte loop remain.
