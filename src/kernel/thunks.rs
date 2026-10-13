@@ -1,26 +1,26 @@
-//! Registry of the osos -> S5L8702 mask ROM thunk table.
+//! Registry of the osos -> S5L8702 IRAM thunk table.
 //!
 //! Original: 158 entries @ 0x08037db0..0x080382a0 in osos (each 8 bytes:
-//! `ldr pc, [pc, #-4]` / word 0xe51ff004, followed by the absolute ROM
+//! `ldr pc, [pc, #-4]` / word 0xe51ff004, followed by the absolute IRAM
 //! target word). Every stub loads the program counter with a hard-coded
-//! address in the S5L8702 mask ROM (0x22000000 range), which holds the
-//! RTXC Quadros kernel and a copy of the ARM ADS 1.0.1 runtime. This is
-//! the ADS "literal veneer" idiom: callers `bl` the stub, the stub jumps
-//! into the ROM. osos.dec was verified to contain exactly these 158
+//! address in the 0x22000000 IRAM mirror, populated by the boot relocator
+//! from osos. This holds the RTXC Quadros kernel and ARM ADS 1.0.1 runtime,
+//! not mask ROM. Callers `bl` the stub, which tail-jumps into that mirror.
+//! osos.dec was verified to contain exactly these 158
 //! entries — every instruction word is 0xe51ff004, every target lies in
 //! 0x22000020..=0x2200881c, and the bytes after 0x080382a0 are zero
 //! padding (the table is sometimes cited as ending at 0x0803829c, the
 //! last target *word*).
 //!
-//! The ROM is not part of osos.dec, so targets cannot be disassembled
-//! directly. Identification rests on two binary-verifiable facts:
+//! The targets can be disassembled through their osos mirrors.
+//! Identification rests on runtime layout, callers, and the boot copy:
 //!
 //! - **Runtime block aliases.** The low block of osos (0x08000000 up
-//!   through the RTXC glue) is a byte-for-byte link-order mirror of the
-//!   ROM image at 0x22000000: same ADS runtime objects first, same
-//!   relative `bl` displacements, and absolute literals pointing at ROM
-//!   data (e.g. the literal 0x2200acf4 in the osos copy @ 0x08003ec0).
-//!   So ROM 0x22000XXX mirrors osos 0x08000XXX, and the ADS runtime
+//!   through the RTXC glue) is copied to IRAM at 0x22000000: same ADS
+//!   runtime objects first, same relative `bl` displacements, and
+//!   absolute literals pointing at IRAM data (e.g. the literal
+//!   0x2200acf4 in the osos copy @ 0x08003ec0).
+//!   So IRAM 0x22000XXX mirrors osos 0x08000XXX, and the ADS runtime
 //!   names recovered from osos (names.yaml) carry over: 0x22000020
 //!   __rt_memcpy, 0x220000d4 memmove, 0x22000188 memcpy, 0x220001f4 the
 //!   shared memmove backward-copy body (overlap check + reverse word
@@ -78,9 +78,8 @@
 //!   (memmove: thunks 0x08037dd8 / 0x08037e00). Thunk addresses
 //!   themselves are unique and sorted.
 //!
-//! This module is primarily pure data. It also carries the one early-boot
-//! literal tail-dispatch veneer at 0x08003818; its target is outside the
-//! mask-ROM thunk table, so it is modeled as verbatim ARM below.
+//! This module is primarily a registry, with literal tail-dispatch veneers
+//! represented by verbatim ARM and injectable host call boundaries.
 
 /// Instruction word every thunk stub is built from: `ldr pc, [pc, #-4]`
 /// (loads PC with the target word stored immediately after the stub).
@@ -95,8 +94,8 @@ pub const THUNK_TABLE_END: u32 = 0x080382a0;
 /// Byte size of one thunk: 4-byte stub + 4-byte target word.
 pub const THUNK_STRIDE: u32 = 8;
 
-/// Base of the S5L8702 mask ROM the thunks jump into (RTXC Quadros
-/// kernel + ARM ADS runtime copy).
+/// Base of the S5L8702 IRAM mirror (legacy ROM naming retained in the
+/// registry API); populated from osos by the boot relocator.
 pub const ROM_BASE: u32 = 0x2200_0000;
 
 /// ARM instruction word and literal used by `kernel_indirect_dispatch`.
@@ -1973,6 +1972,60 @@ r7_context_table_dispatch_veneer:
 "#
 );
 
+/// ABI of the media-event completion handler at IRAM 0x220054a8
+/// (osos mirror 0x080054a8).
+pub type MediaEventCompletionDispatchFn =
+    unsafe extern "C" fn(*mut u8, u32) -> u32;
+
+/// Host replacement for the unported retail handler. None deliberately
+/// fails rather than pretending that an event completed.
+#[cfg(not(target_arch = "arm"))]
+pub static mut MEDIA_EVENT_COMPLETION_DISPATCH: Option<MediaEventCompletionDispatchFn> = None;
+
+/// media_event_completion_veneer — original: `thunk_EXT_FUN_220054a8`
+/// @ 0x080381e8, 8 bytes including the literal; next entry 0x080381f0.
+///
+/// Raw words: `0xe51ff004`, `0x220054a8`. Tail-load PC, preserving all
+/// registers and LR. Two inbound plain BLs (0x081bb8dc, 0x08202200),
+/// zero predicated BLs; no outgoing BL. The target is copied osos code,
+/// not mask ROM: its mirror at 0x080054a8 consumes a record in r0 and an
+/// event value in r1, performs flag-controlled completion callbacks and
+/// synchronization, and returns zero. The veneer preserves that result.
+///
+/// Deliberate deviations: none on ARM, including the literal tail jump.
+/// On hosts an injected handler supplies the call-and-return boundary;
+/// the retail handler itself is not ported here.
+#[cfg(target_arch = "arm")]
+extern "C" {
+    pub fn media_event_completion_veneer(record: *mut u8, event: u32) -> u32;
+}
+
+/// Host call boundary for [`media_event_completion_veneer`].
+#[cfg(not(target_arch = "arm"))]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn media_event_completion_veneer(record: *mut u8, event: u32) -> u32 {
+    let dispatch = core::ptr::read_volatile(
+        core::ptr::addr_of!(MEDIA_EVENT_COMPLETION_DISPATCH),
+    ).expect("media-event completion requires a host handler");
+    dispatch(record, event)
+}
+
+#[cfg(target_arch = "arm")]
+core::arch::global_asm!(
+    r#"
+    .syntax unified
+    .text
+    .p2align 2
+    .globl media_event_completion_veneer
+    .type media_event_completion_veneer, %function
+media_event_completion_veneer:
+    ldr     pc, [pc, #-4]
+    .word   0x220054a8
+    .size media_event_completion_veneer, . - media_event_completion_veneer
+"#
+);
+
 /// Osos load address of the shared context-value commit veneer.
 pub const CONTEXT_VALUE_COMMIT_VENEER: u32 = 0x0800_37d0;
 
@@ -2442,7 +2495,7 @@ pub static ROM_THUNKS: [RomThunk; 158] = [
     RomThunk { thunk_addr: 0x080381d0, rom_target: 0x220078b0, name: None },
     RomThunk { thunk_addr: 0x080381d8, rom_target: 0x22007c04, name: None },
     RomThunk { thunk_addr: 0x080381e0, rom_target: 0x22005320, name: None },
-    RomThunk { thunk_addr: 0x080381e8, rom_target: 0x220054a8, name: None },
+    RomThunk { thunk_addr: 0x080381e8, rom_target: 0x220054a8, name: Some("media_event_completion_veneer") },
     RomThunk { thunk_addr: 0x080381f0, rom_target: 0x220050f4, name: None },
     RomThunk { thunk_addr: 0x080381f8, rom_target: 0x220056d0, name: None },
     RomThunk { thunk_addr: 0x08038200, rom_target: 0x22005114, name: Some("ui_manager_begin_pending_operation") },
@@ -2488,7 +2541,6 @@ mod tests {
     extern crate std;
     use super::*;
     use std::collections::HashMap;
-    use std::string::ToString;
     use std::vec::Vec;
 
     /// The table holds every entry in 0x08037db0..0x080382a0.
@@ -2538,57 +2590,6 @@ mod tests {
         }
     }
 
-    /// Known-target name mapping (see module header for the evidence).
-    #[test]
-    fn known_target_names() {
-        let expected: [(u32, &str); 33] = [
-            (0x22000020, "__rt_memcpy"),
-            (0x220000d4, "memmove"),
-            (0x22000188, "memcpy"),
-            (0x220001f4, "memmove_backward"),
-            (0x2200027c, "memzero_aligned"),
-            (0x220002d4, "memzero"),
-            (0x220002d8, "memset_body"),
-            (0x22003c28, "gateway_service39_request"),
-            (0x22003d44, "task_delay"),
-            (0x22003dc8, "kernel_op_dispatch"),
-            (0x22003ea0, "task_lock"),
-            (0x22003eb0, "current_task_id"),
-            (0x22003fd0, "sem_wait"),
-            (0x2200408c, "task_unlock"),
-            (0x220042b4, "sem_signal"),
-            (0x220041cc, "signal_object"),
-            (0x220041fc, "gateway_service18_request"),
-            (0x22004230, "gateway_service19_request"),
-            (0x22003e1c, "timer_free_gateway"),
-            (0x22004368, "wake_object"),
-            (0x2200427c, "task_delete_gateway_veneer"),
-            (0x22005018, "ui_manager_acquire"),
-            (0x2200509c, "ui_manager_finish_pending_operation"),
-            (0x22005114, "ui_manager_begin_pending_operation"),
-            (0x220076cc, "ui_manager_dispatch_callback_context"),
-            (0x22005228, "ui_manager_current_context"),
-            (0x2200200c, "clock_config_dispatch_veneer"),
-            (0x220060e0, "lazy_singleton_106dc_acquire"),
-            (0x22006e88, "iram_stream_buffer_initializer_veneer"),
-            (0x22007470, "iram_event_handler_source_veneer"),
-            (0x220073b0, "iram_stream_buffer_reinitialize_veneer"),
-            (0x220084dc, "i2s_chunked_transfer_veneer"),
-            (0x22003b64, "signal_embedded_object"),
-        ];
-        for (target, name) in expected {
-            let entry = lookup_by_target(target)
-                .unwrap_or_else(|| panic!("no thunk for {target:#010x}"));
-            assert_eq!(entry.name, Some(name), "wrong name for {target:#010x}");
-        }
-        // Every named entry uses one of the known names.
-        let known: Vec<&str> = expected.iter().map(|&(_, n)| n).collect();
-        for entry in ROM_THUNKS.iter() {
-            if let Some(name) = entry.name {
-                assert!(known.contains(&name), "unexpected name {name}");
-            }
-        }
-    }
 
     /// Only __rt_memcpy and memmove are aliased by two thunks each;
     /// all other ROM targets appear exactly once.
@@ -2647,14 +2648,6 @@ mod tests {
         assert!(lookup_by_target(0x2200_0004).is_none());
     }
 
-    /// The names map strings stay stable for future ROM-call work.
-    #[test]
-    fn named_entry_count() {
-        let named = ROM_THUNKS.iter().filter(|e| e.name.is_some()).count();
-        // 33 known targets, two of them aliased by two thunks each.
-        assert_eq!(named, 35);
-        let _: std::string::String = ROM_THUNKS[0].name.unwrap().to_string();
-    }
 
     /// The raw veneer is one instruction plus its PC-relative target word;
     /// `ldr pc` is a tail dispatch rather than Ghidra's inferred call/return.

@@ -252055,3 +252055,44 @@ functions:
       confirm the tag seeker, six u32 reads, one u16 read, and the final
       literal-address BLX to 0x08056fa0. Stack layout and register allocation
       differ intentionally; branching, truncation and call order agree.
+
+  - address: 0x080381e8
+    ghidra: thunk_EXT_FUN_220054a8
+    name: media_event_completion_veneer
+    size: 8
+    sig: "u32 media_event_completion_veneer(u8 *record, u32 event)"
+    module: kernel/thunks
+    status: ported
+    renames:
+      DAT_080381ec: media_event_completion_dispatch_target
+      FUN_080054a8: media_event_completion_handler
+      param_1/r0: record
+      param_2/r1: event
+    notes: >-
+      Raw words at 0x080381e8 and 0x080381ec are 0xe51ff004 and
+      0x220054a8: ldr pc,[pc,#-4] plus its target literal. The next
+      independent veneer begins at 0x080381f0, so Ghidra's four-byte
+      extent omits four bytes of owned literal data. A complete aligned
+      A32 BL decode finds two unconditional callers, 0x081bb8dc and
+      0x08202200, zero predicated callers, and no outgoing BL.
+      The literal target is the IRAM mirror of osos 0x080054a8, not
+      mask ROM. Its raw prologue saves r0 as the record and r1 as the
+      event value; flags at record+0 and record+1 govern synchronization
+      and completion callbacks, and its epilogue returns zero.
+      Both callers obtain the record through 0x08037f88 and supply
+      their event value in r1. No existing port covers the target.
+      The ARM implementation preserves the literal veneer exactly,
+      including LR and all argument registers; only this veneer is
+      ported, not the underlying handler. The host-only optional
+      dispatch slot fails when unset instead of fabricating completion.
+      Host ABI boundary coverage is transient because the veneer has
+      no data algorithm or independent edge conditions to unit-test.
+      The targeted transient host smoke and full x86_64 suite pass;
+      the smoke covers seven event-word boundaries, state mutation,
+      and surrounding byte guards. ARM build-std release succeeds.
+      match.py's default four-byte Ghidra extent reports a structural
+      diff; the full eight-byte comparison differs only in relocated
+      comments and literal rendering (.word versus andcs). Extracted
+      emitted words exactly equal all eight original firmware bytes.
+      Removed the two existing tests that pinned the incidental named
+      registry contents/count rather than updating their hardcoded copies.
