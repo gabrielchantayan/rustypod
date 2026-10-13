@@ -16,6 +16,35 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08027610
+    ghidra: FUN_08027610
+    name: obfuscated_state_word_identity
+    size: 8
+    sig: "u32 obfuscated_state_word_identity(u32 ignored_word, u32 state_word)"
+    module: app/obfuscated_second_word
+    status: ported
+    vars:
+      param_1/r0: ignored_word
+      param_2/r1: state_word
+      return/r0: state_word
+    notes: >-
+      Raw e1a00001 e12fff1e is MOV r0,r1; BX LR. True extent
+      [0x08027610,0x08027618) is eight bytes; the next real entry
+      has independent BLs at 0x08343770 and 0x08348664. Whole-image
+      aligned A32 decoding verifies two plain inbound BLs at 0x082fac60
+      and 0x08312f2c, zero predicated inbound BLs, and no outgoing calls.
+      Callers FUN_082fa514 and FUN_08312b70 supply byte-masked arithmetic
+      in r1 and an opaque word in r0, then multiply and mask the return.
+      Preserve all 32 bits of r1, ignore r0, and access no memory.
+      Concrete input types remain opaque; no callee seams or behavioral
+      deviations. Existing module is registered. Dedicated text section
+      and inline-never retain a distinct independently patchable symbol.
+      Host edge tests and full host suite pass; ARM release build passes.
+      Optimized actual-source executable smoke verifies 65536 full-width
+      calls. match.py exits 1: stock MOV r0,r1; BX LR versus balanced
+      PUSH {fp,lr}, MOV fp,sp, MOV r0,r1, POP {fp,pc}; return semantics
+      are preserved. No narrowing or dereferencing is introduced.
+
   - address: 0x08027618
     ghidra: FUN_08027618
     name: obfuscated_six_word_zero
