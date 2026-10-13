@@ -254885,3 +254885,37 @@ functions:
       Deliberate deviation: no Rust port. Raw branch scans and A32/Thumb
       objdump probes executed; no host behavior tests, ARM build, match.py
       or device behavior verification claimed.
+  - address: 0x087f5428
+    ghidra: FUN_087f5428
+    name: structured_data_record_00cf_trailer
+    size: 4
+    sig: "data word; executable ABI unverified"
+    status: identified
+    notes: >-
+      Deferred: raw firmware identifies a structured-data trailer, not a
+      verified function. Size 4 describes the assigned word, not an
+      executable extent; Ghidra's reported 25-byte extent is unsupported.
+      Raw record [0x087f5410,0x087f542c) contains 00000014, 00000000,
+      000000cf, 0dad016d, 0dad0174, ffffffff, 0200ffff. The assigned
+      word is the final 0200ffff. The next record starts at 0x087f542c
+      with 00000014, 00000000, identifier 000000d0 and values
+      0dad017e/0dad0183; subsequent records begin at 0x087f5448 and
+      0x087f5464 with identifiers d1 and d2. A32 decodes the assigned
+      word as ANDEQ pc, r0, #1020, not a call. Its ffff/0200 halfwords
+      are not an ARMv5 Thumb BL pair. Ghidra's assembly falsely reports
+      BL #0xffe; its C invents LR-relative indirect calls across records.
+      Independent whole-image aligned A32 BL decoding finds zero plain
+      incoming candidates and one predicated candidate: 0b030b03 at
+      0x08732814 decodes as BLEQ 0x087f5428. Surrounding repeated
+      03/0b byte pairs with 05/0b and 06/0b pairs identify table-like
+      data, not a verified executable caller. Whole-image halfword-aligned
+      ARMv5 Thumb BL decoding finds zero incoming candidates. Raw window
+      [0x087f5428,0x087f5444) contains zero plain or predicated A32 BL
+      instructions and zero ARMv5 Thumb BL pairs. No true executable
+      extent, next real function boundary, caller ABI or callee identity
+      can be established. Full names.yaml had no entry for this address.
+      Faithful porting requires verified executable mapping and boundaries;
+      no Rust seam or undecrypted-region dependency is invented.
+      Deliberate deviation: no Rust port. Raw branch scans and A32/Thumb
+      objdump probes executed; no host behavior tests, ARM build, match.py
+      or device behavior verification claimed.
