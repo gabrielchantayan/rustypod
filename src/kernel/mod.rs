@@ -29,6 +29,7 @@ pub mod irq_binding;
 pub mod kobj;
 pub mod mailbox_send_gateway_mode1;
 pub mod kernel_slot_create;
+pub mod kernel_pool_node_take;
 pub mod lazy_singleton_106dc;
 pub mod mqueue;
 pub mod os_heap;

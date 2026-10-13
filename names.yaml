@@ -16,6 +16,32 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080034c8
+    ghidra: thunk_FUN_082c5b18
+    name: kernel_pool_node_take
+    size: 8
+    sig: "u32 *kernel_pool_node_take(void)"
+    module: kernel/kernel_pool_node_take
+    status: ported
+    vars:
+      DAT_080034cc: relocated_pool_pop_target
+      r0: removed_node
+      r1: kernel_control_block
+      r2: next_node
+    notes: >-
+      Raw e51ff004/082c5b18 owns [0x080034c8,0x080034d0), ending at
+      the next independent veneer. Whole-image A32 decoding finds two
+      plain inbound BLs (0x08000c78,0x08000cbc), zero predicated inbound
+      BLs and zero outgoing BLs. Startup 0x080046e0 relocates by 0xaed8:
+      runtime 0x082c5b18 resolves to raw 0x082d09f0, not Ghidra's body.
+      Resolved body owns 36 bytes through its 22008a50 literal; the next
+      prologue is 0x082d0a14. Pop KCB+0x14, replace head with node[0],
+      clear node[5], return removed node; NULL leaves head unchanged.
+      Both callers store the result at object+0x14; the neighboring release
+      path returns nodes to this list. No foreign callee seam. Deviations:
+      implement reached algorithm; host-only head storage; volatile words.
+      Host edge tests and ARM build pass. match.py exits 1: literal jump
+      versus resolved load/test/conditional stores and balanced frame.
   - address: 0x08003508
     ghidra: FUN_08003508
     name: encode_clkcon1_divider_ratio
