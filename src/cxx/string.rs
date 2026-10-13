@@ -859,6 +859,92 @@ unsafe fn cxx_string_pair_vector_owner_destroy_with(
     }
 }
 
+/// Destroy a half-open range of twenty-byte string-pair vector owners.
+///
+/// Original: `FUN_083e15ec` @ `0x083e15ec`, 40 bytes through the pop at
+/// 0x083e1610; the next real function begins at 0x083e1614. Whole-image
+/// aligned A32 decoding finds one inbound plain BL at 0x083e17e4 and one
+/// outbound plain BL at 0x083e1600 to [`cxx_string_pair_vector_owner_destroy`]
+/// @ 0x081df500, with no predicated BLs in either direction.
+///
+/// Ignore r0, compare the current and end iterators before touching storage,
+/// destroy each owner, then advance twenty bytes until iterator equality.
+/// Caller 0x083e1614 uses this before freeing old vector storage during
+/// reallocation. Deliberate deviations: none; repr(C) u32 fields retain the
+/// target stride on hosts, and the existing destructor remains a real call.
+///
+/// # Safety
+/// `first..last` must delimit contiguous initialized owners whose embedded
+/// vector allocations and string-pair entries are valid for destruction.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn cxx_string_pair_vector_owner_range_destroy(
+    _unused: *mut u8,
+    mut first: *mut CxxStringPairVectorOwner,
+    last: *mut CxxStringPairVectorOwner,
+) {
+    while first != last {
+        cxx_string_pair_vector_owner_destroy(first);
+        first = first.add(1);
+    }
+}
+
+#[cfg(test)]
+mod cxx_string_pair_vector_owner_range_destroy_tests {
+    use super::*;
+    use crate::heap::veneers::tests::{mock_heap, free_log};
+
+
+    #[test]
+    fn destroys_exact_subrange_preserving_descriptor_words_and_guards() {
+        for start in 0..=4 {
+            for end in start..=4 {
+                let _heap = mock_heap();
+                let mut owners: [CxxStringPairVectorOwner; 4] = core::array::from_fn(|i| {
+                    let storage = 0x1000 + i as u32 * 0x100;
+                    CxxStringPairVectorOwner {
+                        tag: 0x1234_0000 + i as u32,
+                        reserved: 0xabcd_0000 + i as u32,
+                        begin: storage, end: storage, capacity: storage + 24,
+                    }
+                });
+                assert_eq!(core::mem::size_of::<CxxStringPairVectorOwner>(), 20);
+                unsafe {
+                    let first = owners.as_mut_ptr();
+                    cxx_string_pair_vector_owner_range_destroy(
+                        1usize as *mut u8, first.add(start), first.add(end),
+                    );
+                }
+                for (i, owner) in owners.iter().enumerate() {
+                    assert_eq!(owner.tag, if (start..end).contains(&i) {
+                        CXX_STRING_PAIR_VECTOR_OWNER_TAG
+                    } else { 0x1234_0000 + i as u32 });
+                    assert_eq!(owner.reserved, 0xabcd_0000 + i as u32);
+                    assert_eq!(owner.begin, 0x1000 + i as u32 * 0x100);
+                    assert_eq!(owner.end, owner.begin);
+                    assert_eq!(owner.capacity, owner.begin + 24);
+                }
+                assert_eq!(free_log().0, end - start);
+                if start != end {
+                    assert_eq!(free_log().1 as usize, 0x1000 + (end - 1) * 0x100);
+                    assert_eq!(free_log().2, 2);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn null_empty_bounds_never_touch_storage() {
+        let _heap = mock_heap();
+        unsafe {
+            cxx_string_pair_vector_owner_range_destroy(
+                1usize as *mut u8, core::ptr::null_mut(), core::ptr::null_mut(),
+            );
+        }
+        assert_eq!(free_log().0, 0);
+    }
+}
+
 #[cfg(test)]
 mod cxx_string_pair_vector_owner_destroy_tests {
     use super::*;
