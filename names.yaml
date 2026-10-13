@@ -16,6 +16,33 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080036a8
+    ghidra: FUN_080036a8
+    name: rendering_loop_midbody_tail_veneer
+    size: 8
+    sig: "tail transfer to 0x080cfe5c; ABI unresolved"
+    module: null
+    status: identified
+    renames:
+      DAT_080036ac: rendering_loop_midbody_target
+    notes: >-
+      Raw osos.dec words are e51ff004 at 0x080036a8 and 080cfe5c at
+      0x080036ac: ldr pc,[pc,#-4] followed by its target literal. True
+      extent is 0x080036a8..0x080036b0, where the next distinct literal
+      veneer starts. Independent aligned ARM branch decoding finds two
+      plain unconditional BL sites, 0x080046a0 and 0x080047c0, zero
+      predicated BL sites, and zero direct B sites. The literal target
+      starts with and r8,r10,r0,lsr #8; orr r7,r7,r8; orr r0,r7,r0,lsr
+      #24; str r0,[r6]. It then reads [sp] and [sp,#4], updates r6/r5,
+      decrements r2, and branches to 0x080cfd04 when r2 remains positive.
+      Its exit at 0x080cfe88 adds 48 to sp and at 0x080cfe8c pops
+      r4-r11 and pc. This is a rendering-loop mid-body entry, not a
+      normal callable byte-swap helper. Both recovered callers only load
+      r0 (0x22008cb4 or 0x22008cb0); their saved frames contain only
+      r4/lr or r4-r6/lr, not the frame the target consumes. No names.yaml
+      entry or Rust implementation establishes the literal target ABI.
+      A runtime relocation/overlay explanation is required before a
+      faithful Rust port can be made. Deliberate deviation: no Rust port.
   - address: 0x08003710
     ghidra: thunk_FUN_081b09b4
     name: ui_manager_pending_operation_process_veneer
