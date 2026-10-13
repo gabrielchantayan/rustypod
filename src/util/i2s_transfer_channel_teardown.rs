@@ -63,13 +63,31 @@ pub unsafe extern "C" fn i2s_transfer_channel_teardown(slot: i32, controller: i3
     0
 }
 
+/// I2S teardown veneer — `thunk_EXT_FUN_220085fc` @ 0x08037ff0.
+///
+/// True extent: eight bytes through 0x08037ff8, including literal 0x220085fc.
+/// Raw words are e51ff004/220085fc (`ldr pc,[pc,#-4]` plus target).
+/// Whole-image A32 decoding verifies two incoming plain BLs at 0x080f7d04
+/// and 0x0836b0d4, zero predicated BLs, and no outgoing BLs.
+/// Tail dispatches slot/controller teardown to mirrored osos 0x080085fc:
+/// invalid sentinels do nothing; otherwise release, deactivate, clear active.
+/// Deliberate deviation: reuse the existing Rust body instead of IRAM code.
+///
+/// # Safety
+/// The tables and deactivate callback must satisfy the body port's contract.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn i2s_transfer_channel_teardown_veneer(slot: i32, controller: i32) -> u32 {
+    i2s_transfer_channel_teardown(slot, controller)
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
 
     use crate::util::i2s_transfer_slot::{I2S_TRANSFER_CLEANUP, I2S_TRANSFER_SLOT_TABLE_BASE};
     use super::{
-        i2s_transfer_channel_teardown, I2S_TRANSFER_CHANNEL_ACTIVE_TABLE,
+        i2s_transfer_channel_teardown_veneer, I2S_TRANSFER_CHANNEL_ACTIVE_TABLE,
         I2S_TRANSFER_CHANNEL_DEACTIVATE,
     };
     use core::sync::atomic::{AtomicBool, Ordering};
@@ -143,11 +161,14 @@ mod tests {
         let mut slots = [0u32; 32];
         let (_lock, _reset) = fresh(active.as_mut_ptr().wrapping_add(8), unsafe { slots.as_mut_ptr().add(8) });
 
-        assert_eq!(unsafe { i2s_transfer_channel_teardown(0, 2) }, 0);
-        assert_eq!(unsafe { i2s_transfer_channel_teardown(1, -1) }, 0);
+        for (slot, controller) in [(0, 2), (0, i32::MIN), (0, i32::MAX),
+                                   (1, -1), (i32::MIN, -1), (i32::MAX, -1)] {
+            assert_eq!(unsafe { i2s_transfer_channel_teardown_veneer(slot, controller) }, 0);
+        }
 
         assert_eq!(unsafe { CALL_COUNT }, 0);
         assert_eq!(active, [0xa5; 32]);
+        assert_eq!(slots, [0; 32]);
     }
 
     #[test]
@@ -157,12 +178,16 @@ mod tests {
         let base = unsafe { active.as_mut_ptr().add(8) };
         let (_lock, _reset) = fresh(base, unsafe { slots.as_mut_ptr().add(8) });
         active[8 + 2 * 8 + 3 - 8] = 0x7f;
+        slots[19] = 0x1234;
 
-        assert_eq!(unsafe { i2s_transfer_channel_teardown(2, 3) }, 0);
+        assert_eq!(unsafe { i2s_transfer_channel_teardown_veneer(2, 3) }, 0);
 
         assert_eq!(unsafe { CALL_COUNT }, 1);
         assert_eq!(unsafe { SEEN_SLOT }, 2);
         assert_eq!(unsafe { SEEN_CONTROLLER }, 3);
-        assert_eq!(active[19], 0);
+        let mut expected = [0xa5; 48];
+        expected[19] = 0;
+        assert_eq!(active, expected);
+        assert_eq!(slots, [0; 32]);
     }
 }

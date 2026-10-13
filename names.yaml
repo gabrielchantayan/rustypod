@@ -252340,3 +252340,33 @@ functions:
       succeeds. Default match.py exits one only for relocated operand
       comments and inclusion of the literal omitted by Ghidra size four.
       No device execution was performed.
+  - address: 0x08037ff0
+    ghidra: thunk_EXT_FUN_220085fc
+    name: i2s_transfer_channel_teardown_veneer
+    size: 8
+    sig: "u32 i2s_transfer_channel_teardown_veneer(i32 slot, i32 controller)"
+    module: util/i2s_transfer_channel_teardown
+    status: ported
+    renames:
+      r0: slot
+      r1: controller
+      DAT_08037ff4: i2s_transfer_channel_teardown_iram_target
+    notes: >-
+      Raw words e51ff004/220085fc encode ldr pc,[pc,#-4] and the target
+      literal; the next real veneer starts at 0x08037ff8, proving eight
+      bytes rather than Ghidra's four. Whole-image aligned A32 decoding
+      finds two incoming plain BLs at 0x080f7d04 and 0x0836b0d4, zero
+      predicated BLs, and no outgoing BLs. Target 0x220085fc is the IRAM
+      mirror of osos 0x080085fc, already ported as
+      i2s_transfer_channel_teardown. Its verified body skips slot zero or
+      controller -1; otherwise releases the transfer handle, deactivates
+      the channel, and clears the active byte, returning zero. Deliberate
+      deviation: the Rust veneer calls the existing Rust body rather than
+      the original IRAM address. Behavioral tests exercise sentinel
+      extremes and exact active-byte mutation through the veneer.
+      Host smoke confirms nonzero handle release, deactivation, sentinel
+      state preservation and guarded active-byte clearing. ARM release
+      build succeeds. match.py exits one: Ghidra compares only four bytes,
+      and LLVM emits a framed call to the Rust body plus constant-zero
+      return rather than the original literal tail jump. This structural
+      deviation is intentional; no device execution was performed.
