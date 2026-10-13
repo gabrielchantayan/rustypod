@@ -8,6 +8,7 @@ pub mod diag_ring_block_get_or_create;
 pub mod diag_ring_strings;
 pub mod clock_snapshot_trace;
 pub mod event_handler_source;
+pub mod event_handler_child_acquire_iram;
 pub mod event_handler_source_child_stop;
 pub mod event_handler_source_child_enable;
 pub mod gateway_request;
