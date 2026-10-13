@@ -255479,3 +255479,46 @@ functions:
       loop retains second-member +8 and destination stride +16.
       Standalone host smoke copied artist/title through the real fill
       and assignment bodies with local allocation/libc boundaries.
+  - address: 0x083e8378
+    ghidra: FUN_083e8378
+    name: word_insertion_sort
+    size: 120
+    sig: "void word_insertion_sort(u32 *first, u32 *last, WordOrder comparator)"
+    module: cxx/word_insertion_sort
+    status: ported
+    renames:
+      param_1/r0/r5: first
+      param_2/r1/r7: last
+      param_3/r2/r8: comparator
+      r4: current
+      r6: value
+      FUN_083e9aec: word_insertion_sort_insert
+    notes: >-
+      Raw A32 extent [0x083e8378,0x083e83f0) is 120 bytes: POP at
+      0x083e83ec ends the function and the next independent PUSH starts
+      at 0x083e83f0. Whole-image aligned raw-word decoding finds one
+      incoming unconditional BL at 0x083ea748 and zero predicated BLs.
+      Body has one unconditional BL at 0x083e83dc to 0x083e9aec,
+      zero predicated BLs, and one comparator BLX at 0x083e83a4.
+      Stable insertion-sort of aligned words in [first,last): compare each
+      held value with the first word, shift the whole prefix when nonzero,
+      otherwise insert through the existing word_insertion_sort_insert
+      port using the first word as sentinel. Empty and singleton ranges
+      never compare. The callee already has a ported names entry; no seam
+      is introduced. introsort_u32_range now calls both real insertion
+      ports on host and target; only partitioning retains its retail seam.
+      This supersedes the older wrapper note that all helpers were
+      unrecovered. Deliberate implementation deviation: volatile prefix
+      reads/writes prevent LLVM's memmove substitution; no behavioral
+      deviation for ordinary array memory. Host reference tests enumerate
+      all sequences of up to six words over zero, one, high-bit and maximum
+      values in ascending and descending order, with range guards, plus
+      stable equal-key ordering and null empty bounds.
+      All 15938 host tests pass; ARM release build passes. Actual-source
+      standalone smoke sorts a guarded subrange with duplicate and high-bit
+      words and accepts null empty bounds. match.py exits 1 with a reviewed
+      structural diff: 37 Rust instructions versus 30 stock, retaining
+      the comparator BLX, backward word shift and insertion-helper call.
+      Archive relocation confirms R_ARM_CALL word_insertion_sort_insert;
+      the apparent self-call in match.py is an unresolved archive relocation.
+      LLVM adds a frame and moves the empty check ahead of its prologue.

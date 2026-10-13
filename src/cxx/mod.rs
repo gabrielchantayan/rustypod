@@ -229,6 +229,7 @@ pub mod array_element_at;
 pub mod embedded_array_word_at;
 pub mod sorted_pointer_array_insert;
 pub mod word_insertion_sort_insert;
+pub mod word_insertion_sort;
 pub mod array_index_stride20;
 pub mod strided_array_find_index;
 pub mod active_slot_count;
