@@ -254474,3 +254474,36 @@ functions:
       instruction state, caller ABI, and real function boundaries.
       No Rust implementation, behavioral tests, ARM build, match.py
       comparison, emulator execution, or device execution claimed.
+
+  - address: 0x08808818
+    ghidra: FUN_08808818
+    name: unresolved_tlmt_data_candidate_08808818
+    status: identified
+    notes: >-
+      Honest deferral: raw firmware does not establish an executable
+      function, ABI, algorithm, or true extent. Ghidra reports one byte.
+      Words at 0x08808818 and 0x0880881c are 00000000, decoding as A32
+      ANDEQ r0,r0,r0 or Thumb MOVS r0,r0, not a return or veneer.
+      Following words are 00000001, 000000ac, 544d4c54 (ASCII TLMT at
+      0x08808828), 03000000, 000c0001, ffff000c, ffffffff, ffff0000.
+      TLMT markers at 0x08808770, 0x08808828, and 0x088088e0 repeat
+      with stride 0xb8, supporting a data-record interpretation rather
+      than a real next function boundary.
+      Whole-image aligned A32 immediate BL decoding finds zero plain
+      incoming candidates and one predicated candidate: 0x08909994
+      contains 8bfbfb9f (BLLT 0x08808818). Preceding words are 10c2a40f,
+      b9df8bfb, b4e80001, 820f5afb; following words are 0000c3da,
+      00000000, 00000000. This byte sequence does not establish an
+      executable ARM caller. Whole-image halfword-aligned ARMv5 Thumb
+      BL decoding finds zero incoming candidates. Ghidra assembly has
+      no direct BL reference; the only decompiled C reference is the
+      assigned definition. That C relies on uninitialized incoming r5
+      and LR and invents indirect calls across neighboring records.
+      No outgoing BL occurs in the eight zero entry bytes; no call count
+      for a real function can be asserted without verified boundaries.
+      Full names.yaml had no prior entry at this address. No callee seam,
+      signature, replacement behavior, or undecrypted-region dependency
+      invented. Faithful porting requires verified executable mapping,
+      instruction state, caller ABI, and real function boundaries.
+      No Rust implementation, behavioral tests, ARM build, match.py
+      comparison, emulator execution, or device execution claimed.
