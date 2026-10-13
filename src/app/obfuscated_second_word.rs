@@ -39,9 +39,42 @@ pub extern "C" fn obfuscated_status_word_identity(_ignored_word: u32, status_wor
     status_word
 }
 
+/// Obfuscated arithmetic-word identity — `FUN_08027630` @ 0x08027630.
+///
+/// True size: 8 bytes, [0x08027630,0x08027638). Raw e1a00001 e12fff1e
+/// is MOV r0,r1; BX LR. The next real entry has an independent BL at
+/// 0x082fc3bc. Whole-image aligned A32 decoding verifies two plain inbound
+/// BLs (0x082f8f64, 0x08332b54), zero predicated BLs, and no outgoing calls.
+/// Return the second word unchanged, ignore the first, and access no memory.
+/// Both callers supply byte-masked arithmetic results and then multiply and
+/// mask the return; the helper itself preserves all 32 bits. No behavioral
+/// deviations or callee seams. A dedicated section retains a distinct BL
+/// target from the neighboring identical identities.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.obfuscated_arithmetic_word_identity")]
+#[inline(never)]
+pub extern "C" fn obfuscated_arithmetic_word_identity(_ignored_word: u32, arithmetic_word: u32) -> u32 {
+    arithmetic_word
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn arithmetic_identity_does_not_narrow_or_use_first_word() {
+        for ignored in [0, 1, 0x0800_0001, 0x8000_0000, u32::MAX] {
+            for word in [0, 1, 0xff, 0x100, 0x7fff_ffff, 0x8000_0000,
+                         u32::MAX, 0xaaaa_aaaa, 0x5555_5555] {
+                assert_eq!(obfuscated_arithmetic_word_identity(ignored, word), word);
+            }
+            for bit in 0..32 {
+                let word = 1u32 << bit;
+                assert_eq!(obfuscated_arithmetic_word_identity(ignored, word), word);
+                assert_eq!(obfuscated_arithmetic_word_identity(ignored, !word), !word);
+            }
+        }
+    }
 
     #[test]
     fn ignores_first_word_and_preserves_full_width_second_word() {
