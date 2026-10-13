@@ -256081,3 +256081,36 @@ functions:
       the allocation call, predicated constructor call, 16-byte loop advance,
       begin reload and capacity-before-end stores; max/shift folds and stack
       scratch disappears. No new runtime seams; no device execution.
+
+  - address: 0x083e3a94
+    ghidra: FUN_083e3a94
+    name: string_object_pair_vector_construct
+    size: 20
+    sig: "StringObjectPairVector *string_object_pair_vector_construct(StringObjectPairVector *vector)"
+    module: cxx/string_object_pair_vector_construct
+    status: ported
+    renames:
+      param_1/r0: vector
+      param_2: unused_allocator_argument
+      r1: zero
+      return/r0: vector
+    notes: >-
+      Raw words e3a01000 e5801000 e5801004 e5801008 e12fff1e establish
+      the complete 20-byte extent [0x083e3a94,0x083e3aa8); the next
+      function starts with e92d4010. Whole-image aligned A32 decoding
+      finds one incoming plain BL at 0x08100a68 and zero incoming
+      predicated BLs; the body contains zero plain or predicated BLs.
+      Sets begin, end, capacity to NULL without allocation, retaining r0.
+      Caller 0x08100968 constructs a 12-byte stack vector, passes it to
+      metadata processing, and destroys it through 0x083e3aa8. Reuses
+      the existing StringObjectPairVector type; no new callee seams.
+      Deliberate deviations: omit the unused caller argument and widen
+      native pointer fields on hosts, retaining target offsets 0,4,8.
+      Host tests cover nonempty bounds, unchanged backing and neighbors,
+      return identity, uninitialized storage and repeated construction.
+      Host suite passed 15970 tests; ARM release build passed.
+      Isolated public-entry smoke verified empty bounds, return identity
+      and untouched backing using the production header layout.
+      match.py exits 1: five original versus seven Rust instructions;
+      the same zero and three stores remain, with LLVM frame setup and
+      pop return replacing bx lr. No device execution.
