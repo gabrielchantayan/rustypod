@@ -254785,3 +254785,36 @@ functions:
       names.yaml had no existing entry for the assigned address.
       Faithful porting requires verified executable mapping, instruction
       state, caller ABI and function boundaries. Deliberate deviation:
+  - address: 0x087f5a2c
+    ghidra: FUN_087f5a2c
+    name: structured_data_record_0104_first_value
+    size: 4
+    sig: "data word; executable ABI unverified"
+    status: identified
+    notes: >-
+      Deferred: assigned address is structured data, not a verified
+      function. Size 4 describes the assigned word, not a function
+      extent; Ghidra's reported 27-byte extent is unsupported. Raw
+      record [0x087f5a20,0x087f5a3c) contains 00000014, 00000000,
+      00000104, 0dad01d8, 0dad01d9, ffffffff, 0200ffff. Following
+      28-byte records start at 0x087f5a3c and 0x087f5a58 with identifiers
+      0x105 and 0x106. The assigned word is record 0x104's first value.
+      A32 decodes it as STCEQ p1, c0, [sp, #864]!; Thumb decodes its
+      halves as LSLS r0, r3, #7 and LSRS r5, r5, #22. The ffff
+      halfwords at 0x087f5a34 are undefined on ARMv5, not valid Thumb
+      BL pairs; Ghidra invents LR-relative indirect calls across records.
+      Independent whole-image aligned A32 BL decoding finds zero plain
+      incoming candidates and one predicated candidate: 0b0b0b0b at
+      0x08532df8 decodes as BLEQ 0x087f5a2c. Surrounding sequential
+      38/39/3a/3b/3c/3d/3e/3f/40/41/42 bytes and repeated 0b bytes
+      identify table-like data, not a verified executable caller.
+      Whole-image halfword-aligned ARMv5 Thumb BL decoding finds zero
+      incoming candidates. Raw [0x087f5a2c,0x087f5a48) contains zero
+      plain or predicated A32 BL instructions and zero Thumb BL pairs.
+      No true executable extent, next real function boundary, caller ABI
+      or callee identity can be established. Full names.yaml had no
+      existing entry for this address. Faithful porting requires verified
+      executable mapping and boundaries; no Rust seam is invented.
+      Deliberate deviation: no Rust port. Raw branch scans and A32/Thumb
+      objdump probes executed; no host tests, ARM build, match.py or
+      device behavior verification claimed.
