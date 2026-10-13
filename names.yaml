@@ -252096,3 +252096,38 @@ functions:
       emitted words exactly equal all eight original firmware bytes.
       Removed the two existing tests that pinned the incidental named
       registry contents/count rather than updating their hardcoded copies.
+
+  - address: 0x08038120
+    ghidra: thunk_EXT_FUN_220055f8
+    name: ui_manager_reset_sequence_veneer
+    size: 8
+    sig: "u32 ui_manager_reset_sequence_veneer(u8 *record, u32 mode)"
+    module: kernel/thunks
+    status: ported
+    renames:
+      DAT_08038124: ui_manager_reset_sequence_target
+      param_1/r0: record
+      param_2/r1: mode
+    notes: >-
+      Raw words 0xe51ff004 and 0x220055f8 encode ldr pc,[pc,#-4]
+      plus its literal. Next independent veneer starts at 0x08038128,
+      proving eight bytes rather than Ghidra four. Whole-image aligned
+      A32 decoding finds two incoming plain BLs at 0x081b0bc8 and
+      0x081b0f5c, zero predicated BLs, and no outgoing BL. The target
+      is the IRAM mirror of osos 0x080055f8, not mask ROM. Its code
+      ends at 0x0800568c, followed by a literal and the next prologue
+      at 0x08005690. It dispatches event zero, synchronizes and resets
+      stream state, configures the shared UI manager, conditionally
+      processes record byte zero, clears record bytes zero and one
+      when mode is zero, and returns zero. Callers obtain the record
+      through ui_manager_acquire and pass modes one and zero. Neither
+      this address nor its target had an existing names.yaml entry.
+      Only the veneer is ported: ARM assembly preserves all original
+      registers, LR and literal tail dispatch exactly. The host optional
+      handler boundary fails when unset rather than simulating retailOS.
+      Host boundary edge coverage is transient: this veneer has no
+      independent data algorithm warranting permanent forwarding tests.
+      Full x86_64 host suite passes (15824 tests including transient
+      boundary smoke covering six mode boundaries and adjacent guards).
+      ARM build-std release succeeds. Default match.py reports the omitted
+      literal and relocated operand comment, not a changed dispatch.

@@ -1972,6 +1972,61 @@ r7_context_table_dispatch_veneer:
 "#
 );
 
+/// ABI of the UI reset sequence at IRAM 0x220055f8 (osos 0x080055f8).
+pub type UiManagerResetSequenceFn = unsafe extern "C" fn(*mut u8, u32) -> u32;
+
+/// Host replacement for the unported reset sequence; unset is an error.
+#[cfg(not(target_arch = "arm"))]
+pub static mut UI_MANAGER_RESET_SEQUENCE_DISPATCH: Option<UiManagerResetSequenceFn> = None;
+
+/// ui_manager_reset_sequence_veneer — original: `thunk_EXT_FUN_220055f8`
+/// @ 0x08038120, 8 bytes including its literal; next veneer @ 0x08038128.
+///
+/// Raw words `0xe51ff004`, `0x220055f8` tail-load PC without modifying
+/// argument registers or LR. Whole-image A32 decoding finds two incoming
+/// plain BLs (0x081b0bc8, 0x081b0f5c), zero predicated BLs and no outgoing
+/// BL. The target is relocated osos code, not ROM. Its mirror @ 0x080055f8
+/// dispatches event zero, performs synchronization and stream reset calls,
+/// configures the shared UI manager, conditionally processes record byte 0,
+/// clears record bytes 0 and 1 when mode is zero, and returns zero.
+/// Both callers obtain the record through ui_manager_acquire and pass mode
+/// 1 or 0 respectively. The target body ends at 0x0800568c, with an owned
+/// literal through 0x08005690, where the next real function starts.
+///
+/// Deliberate deviations: none on ARM; preserve the literal tail dispatch
+/// and all registers exactly. Hosts require an injected handler rather than
+/// simulating the unported sequence. Only this veneer is ported.
+#[cfg(target_arch = "arm")]
+extern "C" {
+    pub fn ui_manager_reset_sequence_veneer(record: *mut u8, mode: u32) -> u32;
+}
+
+/// Host call boundary for [`ui_manager_reset_sequence_veneer`].
+#[cfg(not(target_arch = "arm"))]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn ui_manager_reset_sequence_veneer(record: *mut u8, mode: u32) -> u32 {
+    let dispatch = core::ptr::read_volatile(
+        core::ptr::addr_of!(UI_MANAGER_RESET_SEQUENCE_DISPATCH),
+    ).expect("UI reset sequence requires a host handler");
+    dispatch(record, mode)
+}
+
+#[cfg(target_arch = "arm")]
+core::arch::global_asm!(
+    r#"
+    .syntax unified
+    .text
+    .p2align 2
+    .globl ui_manager_reset_sequence_veneer
+    .type ui_manager_reset_sequence_veneer, %function
+ui_manager_reset_sequence_veneer:
+    ldr     pc, [pc, #-4]
+    .word   0x220055f8
+    .size ui_manager_reset_sequence_veneer, . - ui_manager_reset_sequence_veneer
+"#
+);
+
 /// ABI of the media-event completion handler at IRAM 0x220054a8
 /// (osos mirror 0x080054a8).
 pub type MediaEventCompletionDispatchFn =
@@ -2470,7 +2525,7 @@ pub static ROM_THUNKS: [RomThunk; 158] = [
     RomThunk { thunk_addr: 0x08038108, rom_target: 0x22007c74, name: None },
     RomThunk { thunk_addr: 0x08038110, rom_target: 0x2200508c, name: None },
     RomThunk { thunk_addr: 0x08038118, rom_target: 0x22007530, name: None },
-    RomThunk { thunk_addr: 0x08038120, rom_target: 0x220055f8, name: None },
+    RomThunk { thunk_addr: 0x08038120, rom_target: 0x220055f8, name: Some("ui_manager_reset_sequence_veneer") },
     RomThunk { thunk_addr: 0x08038128, rom_target: 0x220052ec, name: None },
     RomThunk { thunk_addr: 0x08038130, rom_target: 0x2200509c, name: Some("ui_manager_finish_pending_operation") },
     RomThunk { thunk_addr: 0x08038138, rom_target: 0x22007f88, name: None },
@@ -3869,3 +3924,4 @@ mod tests {
         assert_eq!(context, [0x1122_3344, 0, 0x5566_7788]);
     }
 }
+
