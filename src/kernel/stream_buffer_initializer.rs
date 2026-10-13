@@ -130,7 +130,7 @@ static mut HOST_STREAM_BUFFER_STATE: HostStreamBufferState = HostStreamBufferSta
     stream_buffer: [0; STREAM_BUFFER_SIZE],
 };
 
-unsafe fn stream_buffer_state() -> (*mut u32, *mut u8, *mut u8) {
+pub(super) unsafe fn stream_buffer_state() -> (*mut u32, *mut u8, *mut u8) {
     #[cfg(target_os = "none")]
     {
         (
@@ -157,7 +157,7 @@ fn stream_buffer_ctor() -> StreamBufferCtor {
 }
 
 #[inline(always)]
-fn stream_buffer_page_initialize() -> StreamBufferPageInitialize {
+pub(super) fn stream_buffer_page_initialize() -> StreamBufferPageInitialize {
     unsafe { core::ptr::read_volatile(core::ptr::addr_of!(STREAM_BUFFER_PAGE_INITIALIZE)) }
 }
 

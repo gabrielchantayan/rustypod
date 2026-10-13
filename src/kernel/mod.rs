@@ -59,6 +59,7 @@ pub mod stream_buffer_reset_page_state;
 pub mod current_page_context;
 pub mod stream_buffer_dispatch_mode_zero;
 pub mod stream_buffer_initializer;
+pub mod stream_buffer_set_sample_rate;
 pub mod stream_buffer_reinitialize;
 pub mod task_message;
 pub mod thunks;
