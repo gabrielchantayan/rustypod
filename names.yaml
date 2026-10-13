@@ -16,6 +16,40 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08003968
+    ghidra: thunk_FUN_081175e8
+    name: event_handler_source_child_disable
+    size: 8
+    sig: "void event_handler_source_child_disable(u8 *child)"
+    module: kernel/event_handler_source_child_enable
+    status: ported
+    vars:
+      param_1/r0: child
+      DAT_0800396c: relocated_disable_target
+    notes: >-
+      Raw e51ff004/081175e8 establishes [0x08003968,0x08003970),
+      including the literal; the next real veneer begins at 0x08003970.
+      Whole-image aligned A32 decoding finds two plain inbound BLs at
+      0x08007954 and 0x080079f4, zero predicated inbound BLs and zero
+      outgoing BLs. Startup relocation copies the main image from file
+      +0xaed8 to 0x08000000: literal 0x081175e8 resolves to file load
+      address 0x081224c0, not the destructor continuation at the same
+      unrelocated address. The real target spans 40 bytes through its
+      0x7fff literal, ending at the next entry 0x081224e8. It clears
+      halfword child+0x68, acquires the source with one plain BL through
+      runtime 0x0802d188 (file 0x08038060), and tail-publishes 0x7fff
+      through runtime 0x0802d190 (file 0x08038068), whose literal is
+      0x22007a68. Reuses the existing source getter and exact publish
+      seam of the child-enable port; no new callee identity. Deliberate
+      deviations: Rust replaces the literal dispatch and may call/return
+      instead of tail-branching. Tests cover previous enable states,
+      adjacent-halfword preservation, clearing before acquisition and
+      no dereference of an invalid bound node.
+      Host suite and ARM release build pass. Optimized actual-source smoke
+      confirms clearing before acquisition and publishing 0x7fff without
+      reading the node. match.py exits 1: one literal jump versus 15 Rust
+      instructions; Rust clears +0x68, calls the source getter and tail
+      dispatches with r1=child, r2=0x7fff and exact 0x22007a68 target.
   - address: 0x080039a0
     ghidra: FUN_080039a0
     name: event_handler_source_child_busy
