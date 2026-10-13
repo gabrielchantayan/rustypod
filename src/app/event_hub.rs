@@ -239,11 +239,10 @@ pub unsafe extern "C" fn event_hub_instance_get() -> *mut u8 {
 /// It returns 0 when already subscribed and 1 after delegating insertion.
 /// There are no NULL, `kind`, or capacity guards before the raw accesses.
 ///
-/// Deliberate deviation: the original calls the four-byte
-/// `thunk_FUN_083ea6dc` veneer to perform the pointer scan; this port inlines
-/// that verified scan. The grow path still calls its actual unported target
-/// `FUN_083e52dc` at 0x083e52dc on device through a volatile seam, while host
-/// tests install a concrete model.
+/// The target calls the ported word-range search. Host listener fixtures use
+/// native eight-byte pointers, so hosts retain an equivalent pointer scan.
+/// The grow path still calls `FUN_083e52dc` at 0x083e52dc on device through
+/// a volatile seam, while host tests install a concrete model.
 #[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn event_hub_subscribe(
@@ -253,8 +252,18 @@ pub unsafe extern "C" fn event_hub_subscribe(
 ) -> u32 {
     let list = unsafe { (*hub).listener_lists.as_mut_ptr().add(kind as usize) };
     let end = unsafe { (*list).end.cast::<*mut u8>() };
-    let mut current = unsafe { (*list).begin.cast::<*mut u8>() };
+    let listener_slot = listener;
+    #[cfg(target_os = "none")]
+    if unsafe {
+        crate::util::find_word_range((*list).begin.cast(), end.cast(),
+            (&listener_slot as *const *mut u8).cast())
+    } != end.cast() {
+        return 0;
+    }
 
+    #[cfg(not(target_os = "none"))]
+    let mut current = unsafe { (*list).begin.cast::<*mut u8>() };
+    #[cfg(not(target_os = "none"))]
     while current != end {
         if unsafe { current.read() } == listener {
             return 0;
@@ -262,7 +271,6 @@ pub unsafe extern "C" fn event_hub_subscribe(
         current = unsafe { current.add(1) };
     }
 
-    let listener_slot = listener;
     unsafe { (listener_list_ops().insert)(list, end, &listener_slot) };
     1
 }

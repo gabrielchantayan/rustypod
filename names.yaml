@@ -16,6 +16,45 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083ea6d4
+    ghidra: thunk_FUN_083ea6dc
+    name: find_word_range
+    size: 32
+    module: util/find_word_range
+    status: ported
+    sig: "const u32 *find_word_range(const u32 *begin, const u32 *end, const u32 *key)"
+    renames:
+      param_1/r0: begin (returned cursor)
+      param_2/r1: end
+      param_3/r2: key
+      param_4/r3: current_word (scratch, not an argument)
+      in_r12: key_word
+    notes: >-
+      Raw entry ea000000 branches to 0x083ea6dc, skipping the increment
+      at 0x083ea6d8. Reachable extent is 32 bytes through BX LR at
+      0x083ea6f0; next real entry 0x083ea6f4 starts PUSH {r4-r8,lr}.
+      Ghidra's four-byte extent describes only the entry branch and its
+      void return and fourth argument are incorrect. Whole-image aligned
+      A32 decoding finds one incoming plain BL at 0x08257b00, zero
+      predicated BLs and zero outgoing BLs. Compare aligned words in
+      [begin,end) with *key and return first match or end in r0.
+      Empty bounds load neither cursor nor key. No callee seam is created;
+      neither this address nor 0x083ea6dc has a prior names entry.
+      Deliberate deviation: one Rust function implements the branch and
+      shared loop without exporting the interior entry. LLVM hoists the
+      key load after the empty check, valid for ordinary readable memory
+      without concurrent mutation, and adds a balanced fp/LR frame.
+      event_hub_subscribe now calls this port on target; hosts retain the
+      native-pointer scan because their listener pointers are eight bytes.
+      Host tests compare all subranges with a reference, including first
+      duplicates, high-bit words, misses, excluded end, aliasing key and
+      unreadable empty bounds. Full host suite and ARM release build pass.
+      Standalone actual-source smoke verifies first duplicate index 1,
+      miss returning end and null empty bounds. Required match.py exits 1
+      (one entry branch versus twelve Rust instructions); --size 32
+      compares all eight reachable original instructions and confirms
+      the empty check, aligned comparison loop, four-byte advance,
+      equality termination and returned cursor.
   - address: 0x083eaab0
     ghidra: FUN_083eaab0
     name: visit_word_range_return_callback
@@ -134050,14 +134089,13 @@ functions:
       returns 0 if present. On absence it passes the vector, its original
       end pointer, and a stack copy of listener to FUN_083e52dc, then returns
       1. It has no NULL, kind-range, or capacity guard before its raw reads.
-      Deliberate deviation: the port inlines the verified pointer-equality
-      scan instead of calling the unported veneer; its target build retains
+      The target now calls the ported find_word_range; hosts retain the
+      native-pointer scan for eight-byte listener fixtures. The target retains
       the real insertion/reallocation call at 0x083e52dc through a volatile
       seam, while host tests install a concrete insertion model. Host tests
       prove duplicate suppression, selected-list/end-pointer forwarding,
       append placement, return values, and NULL-listener forwarding from an
-      empty list. match.py structural review is expected to differ in the
-      inlined scan and indirect seam call.
+      empty list. Codegen differs in the Rust search and indirect seam call.
 
   - address: 0x08257b60
     ghidra: FUN_08257b60
