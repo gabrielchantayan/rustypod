@@ -16,6 +16,41 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08003710
+    ghidra: thunk_FUN_081b09b4
+    name: ui_manager_pending_operation_process_veneer
+    size: 8
+    sig: "u32 ui_manager_pending_operation_process_veneer(u8 *operation)"
+    module: ui/manager_pending_operation
+    status: identified
+    vars:
+      r0: operation
+      DAT_08003714: relocated_pending_operation_process
+      return/r0: zero
+    notes: >-
+      Raw words e51ff004 081b09b4 own [0x08003710,0x08003718);
+      the next independent literal veneer starts at 0x08003718.
+      Complete aligned A32 BL decoding finds two plain callers at
+      0x080050d8 and 0x080055c4, zero predicated callers, and zero
+      outgoing BL instructions in this veneer. Both pass manager+0x28.
+      Startup 0x080046e0 copies the first 0xaed8 bytes to IRAM and
+      then copies the following 0xa0fc88 bytes down to 0x08000000:
+      runtime target 0x081b09b4 therefore resolves to raw 0x081bb88c,
+      not the conditional pop at raw 0x081b09b4. The real target saves
+      its own r4/r5/r6/LR frame, examines bytes operation+0x10, +0x0c,
+      +0x0f and +0x0d, processes a pending operation or signals
+      completion, and returns zero. Executable body ends at 0x081bb92c;
+      two owned literals extend to the next function at 0x081bb934.
+      Blocked faithful cutover: the existing ui/manager_pending_operation
+      port instead constructs a foreign register frame and enters runtime
+      0x081b09b4 under the mistaken raw mid-function interpretation,
+      with a host seam describing that mistaken interpretation.
+      Registering an ordinary Rust forwarding veneer without migrating
+      that bridge would preserve two incompatible contracts for the same
+      target. Correcting that already-ported caller is outside this
+      one-function assignment. No Rust implementation, host behavioral
+      proof, ARM build or match.py result is claimed for this entry.
+
   - address: 0x08003850
     ghidra: FUN_08003850
     name: channel_slot_acquire_veneer
