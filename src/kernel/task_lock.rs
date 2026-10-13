@@ -86,9 +86,8 @@
 //!   `task_sleep`'s nonzero-tick path. The veneer itself has no guard.
 //! - 0x08037e90 -> 0x220043f4 — gateway stub, service 28 sub 13, returns a
 //!   result word. 0 callers.
-//! - 0x08037e98 -> 0x22004260 — gateway stub, service 25, r0 arg (0 at the
-//!   single call site @ 0x08393acc, after stashing SP for the ROM).
-//!   1 caller.
+//! - 0x08037e98 -> 0x22004260 is ported in gateway_service25; one plain
+//!   BL and one BLNE, plus kernel_yield's tail branch.
 //! - 0x08037ea0 -> 0x220043c0 — gateway stub, service 1 sub 0, (r0, r1).
 //!   5 callers, r0 = pointer, r1 = flag (0/1).
 //! - 0x08037ea8 -> 0x22004368 — gateway stub, service 1 frame {1, 0, r0, 0}.
@@ -182,7 +181,7 @@ pub static THUNK_CATALOG: [(u32, u32, &str); WRAPPER_COUNT] = [
     (0x08037e80, 0x22001cbc, "rom_svc_22001cbc"),
     (0x08037e88, 0x22003d44, "rom_task_delay"),
     (0x08037e90, 0x220043f4, "rom_svc_220043f4"),
-    (0x08037e98, 0x22004260, "rom_svc_22004260"),
+    (0x08037e98, 0x22004260, "gateway_service25_request"),
     (0x08037ea0, 0x220043c0, "rom_svc_220043c0"),
     (0x08037ea8, 0x22004368, "rom_svc_22004368"),
     (0x08037eb0, 0x22003c28, "rom_svc_22003c28"),
@@ -244,8 +243,6 @@ pub struct RomThunkOps {
     pub rom_task_delay: unsafe extern "C" fn(task: usize, ticks: usize) -> usize,
     /// ROM gateway service 28 sub 13 @ 0x220043f4.
     pub rom_svc_220043f4: unsafe extern "C" fn() -> usize,
-    /// ROM gateway service 25 @ 0x22004260.
-    pub rom_svc_22004260: unsafe extern "C" fn(a0: usize) -> usize,
     /// ROM gateway service 1 sub 0 @ 0x220043c0.
     pub rom_svc_220043c0: unsafe extern "C" fn(a0: usize, a1: usize) -> usize,
     /// ROM gateway service 1 @ 0x22004368.
@@ -319,7 +316,6 @@ pub static mut ROM_KERNEL: RomThunkOps = RomThunkOps {
     rom_svc_22001cbc: missing1,
     rom_task_delay: missing2,
     rom_svc_220043f4: missing0,
-    rom_svc_22004260: missing1,
     rom_svc_220043c0: missing2,
     rom_svc_22004368: missing1,
     rom_svc_22003c28: missing2,
@@ -867,12 +863,6 @@ pub unsafe extern "C" fn rom_svc_220043f4() -> usize {
     (hook!(rom_svc_220043f4))()
 }
 
-/// rom_svc_22004260 — original: thunk @ 0x08037e98 -> ROM gateway stub,
-/// service 25. Single call site (r0 = 0) stashes SP for the ROM first.
-#[cfg_attr(target_os = "none", no_mangle)]
-pub unsafe extern "C" fn rom_svc_22004260(a0: usize) -> usize {
-    (hook!(rom_svc_22004260))(a0)
-}
 
 /// rom_svc_220043c0 — original: thunk @ 0x08037ea0 -> ROM gateway stub,
 /// service 1 sub 0, (a0, a1): pointer + flag at call sites.
@@ -1072,7 +1062,6 @@ pub(crate) mod tests {
     mock1!(m16, 16); // rom_svc_22001cbc
     mock2!(m17, 17); // rom_task_delay
     mock0!(m18, 18); // rom_svc_220043f4
-    mock1!(m19, 19); // rom_svc_22004260
     mock2!(m20, 20); // rom_svc_220043c0
     mock1!(m21, 21); // rom_svc_22004368
     mock2!(m22, 22); // rom_svc_22003c28
@@ -1102,7 +1091,6 @@ pub(crate) mod tests {
         rom_svc_22001cbc: m16,
         rom_task_delay: m17,
         rom_svc_220043f4: m18,
-        rom_svc_22004260: m19,
         rom_svc_220043c0: m20,
         rom_svc_22004368: m21,
         rom_svc_22003c28: m22,
@@ -1430,7 +1418,6 @@ pub(crate) mod tests {
             check(16, rom_svc_22001cbc(0), &[0]);
             check(17, rom_task_delay(0, 100), &[0, 100]);
             check(18, rom_svc_220043f4(), &[]);
-            check(19, rom_svc_22004260(0), &[0]);
             check(20, rom_svc_220043c0(0x7000, 1), &[0x7000, 1]);
             check(21, rom_svc_22004368(0x3c), &[0x3c]);
             check(22, rom_svc_22003c28(3, 1), &[3, 1]);

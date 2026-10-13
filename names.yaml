@@ -16,6 +16,35 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08037e98
+    ghidra: thunk_EXT_FUN_22004260
+    name: gateway_service25_request
+    size: 8
+    sig: "u32 gateway_service25_request(u32 argument, u32 incoming_r1, u32 ignored_r2, u32 incoming_r3)"
+    module: kernel/gateway_service25
+    status: ported
+    vars:
+      r0: argument_then_request_then_rewritten_selector
+      r1: incoming_r1
+      r2: ignored_r2_overwritten_in_saved_frame
+      r3: incoming_r3
+      DAT_08037e9c: iram_service25_target
+    notes: >-
+      Raw e51ff004/22004260 establishes an eight-byte literal veneer ending
+      at the next real entry 0x08037ea0, not Ghidra's four-byte extent.
+      Full-image aligned ARM decoding finds one plain BL at 0x08393acc and
+      one BLNE at 0x08393e90; kernel_yield tail-branches at 0x08056900.
+      Target is the IRAM mirror of 0x08004260, copied by 0x080046e0,
+      not mask ROM. The 28-byte mirrored body ends at 0x0800427c and builds
+      request {25, incoming_r1, argument, incoming_r3}, dispatches through
+      the established 0x08003660 message_dispatch_veneer seam, and returns
+      the rewritten selector word. Exact higher-level operation unidentified.
+      Deliberate deviations: Rust call replaces the literal tail transfer;
+      saved r4/LR trailer is unspecified and callee-saved registers use the
+      Rust ABI, not dispatcher-written saved-register words. Host boundary
+      tests and standalone executable smoke verify the return-word channel.
+      Host suite passes 15832 tests; ARM release build passes. match.py exits
+      1: one original veneer instruction versus 13 Rust instructions; the
   - address: 0x08037ff8
     ghidra: thunk_EXT_FUN_220083c4
     name: i2s_transfer_setup_iram
