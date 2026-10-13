@@ -252770,3 +252770,50 @@ functions:
       round count. match.py exits 1: 27 stock versus 25 Rust instructions;
       mode selection, stack serialization, and both call sites remain,
       with different register allocation and a frame-pointer prologue.
+  - address: 0x0802997c
+    ghidra: FUN_0802997c
+    name: buffered_record_decode
+    size: 156
+    sig: "u32 buffered_record_decode(i32 input_limit, i32 version, i32 length, u32 mode, const u8 **cursor, i32 *consumed, u8 *scratch, u32 *output)"
+    module: util/buffered_record_decode
+    status: ported
+    vars:
+      param_1/r0: input_limit
+      param_2/r1: version
+      param_3/r2: length
+      param_4/r3: mode
+      param_5: cursor
+      param_6: consumed
+      param_7: scratch
+      param_8: output
+      iVar2/r4: source
+      iVar3/r12: byte_index
+    notes: >-
+      Raw A32 extent [0x0802997c, 0x08029a18) is 156 bytes; the next
+      instruction is a distinct PUSH prologue. Full-image aligned word
+      decoding finds incoming plain BLs at 0x08029d20 and 0x0802a094,
+      no incoming predicated BLs; body decoding finds outgoing plain BLs
+      at 0x080299f0 to 0x08029630 and 0x08029a08 to 0x0802974c,
+      no outgoing predicated BLs. Compare wrapping consumed+length with
+      signed input_limit; reject with 4 without mutation if greater.
+      Copy positive lengths forward bytewise, reload consumed, then store
+      consumed+length and source+length. Versions 1/2 select the legacy
+      record decoder, signed versions >=3 the extended decoder; otherwise
+      return 4 after consuming. Both decoder addresses lack registry entries
+      and remain explicit fixed-address firmware seams, not additional ports.
+      Caller 0x08029fa0 allocates scratch length and output length+4;
+      decoder 0x08029630 stores the version and constructs a STANDARD
+      record header; 0x0802974c stores version and transforms record fields
+      through the existing mode-controlled word helper at 0x0802b504.
+      Deliberate deviations: host cursor uses native pointer width, target
+      remains four bytes; volatile memory preserves forward overlap and
+      slot load/store order and prevents memcpy substitution. Host decoder
+      seams panic unless installed. Host suite and ARM release build pass.
+      Four edge tests cover unchanged rejected state, exact limits, invalid
+      signed versions, unaligned bytes, zero/negative lengths, wrapping
+      signed arithmetic, and forward overlap. Standalone dispatch smoke
+      exercises versions 1, 2, 3, and i32::MAX with explicit host seams.
+      match.py exits 1: 39 stock versus 41 Rust instructions; signed bound,
+      byte loop, ordered cursor commits and version dispatch remain intact.
+      LLVM shares decoder dispatch and tail-branches via BX to a literal
+      0x08029630 or that address plus 0x11c (0x0802974c), rather than BL.
