@@ -74432,13 +74432,13 @@ functions:
       scans the half-open range as 8-byte records, and returns exactly 1
       after writing the first match to *out; a miss returns 0 without
       storing. The 4-byte prefix is not read. The only callee,
-      FUN_083eac08 @ 0x083eac08, is the unported COW
+      cxx_string_equal @ 0x083eac08, is the ported COW
       basic_string::operator==: it reads both _Rep lengths from data-4,
       rejects unequal lengths, then calls the ported memcmp @ 0x08030f64
       over the common length and maps a zero result to 1. Its redundant
       post-compare length ordering cannot change the result after the
-      equality gate, so cxx_vector_find_equal represents it exactly with
-      the established memcmp seam rather than a comparator stub. Callers
+      equality gate; cxx_vector_find_equal now calls the exported
+      cxx_string_equal seam rather than a private helper. Callers
       in 0x0815aeac, 0x0815b31c, and 0x0815b478 construct a one-word COW
       string needle, release it after the call, and consume the found
       record's +4 string word, independently identifying the record and
@@ -255243,3 +255243,22 @@ functions:
       Raw-byte probe, ARM objdump and independent branch scans executed;
       no host behavior tests, ARM build, match.py or device verification
       claimed.
+
+  - address: 0x083eac08
+    ghidra: FUN_083eac08
+    name: cxx_string_equal
+    size: 152
+    sig: "int cxx_string_equal(char *const *left, char *const *right)"
+    module: cxx/templates
+    status: ported
+    vars: {param_1/r0: left, param_2/r1: right, local_14: left_length, local_18: right_length}
+    renames: {FUN_08030f64: memcmp}
+    notes: >-
+      Raw ARM spans 0x083eac08-0x083eac9c inclusive; the next real
+      prologue is at 0x083eaca0. One plain outgoing BL at 0x083eac5c
+      targets the registered memcmp at 0x08030f64; zero predicated BLs.
+      Independent raw-word scan finds one plain incoming BL at 0x0825c2e0
+      and zero predicated incoming BLs. COW basic_string equality reads
+      aligned u32 lengths at data-4, rejects unequal lengths before payload
+      access, compares binary bytes and returns exactly 0 or 1. Deliberate
+      deviation: omit redundant minimum-length temporaries and post-compare

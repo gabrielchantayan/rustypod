@@ -291,21 +291,28 @@ const _: [u8; 0x08] = [0; core::mem::offset_of!(CxxStringPairVector, end)];
 #[cfg(target_pointer_width = "32")]
 const _: [u8; 0x0c] = [0; core::mem::size_of::<CxxStringPairVector>()];
 
-/// COW-string equality used by [`cxx_vector_find_equal`]'s private
-/// `FUN_083eac08` callee.
+/// cxx_string_equal — original: `FUN_083eac08` @ 0x083eac08.
 ///
-/// The string object's word is its character-data pointer and its `_Rep`
-/// length is the u32 immediately before that data. The ARM helper gates on
-/// equal lengths, calls `memcmp(data_a, data_b, length)`, then turns a zero
-/// comparison result into 1. The redundant post-`memcmp` length ordering in
-/// its raw body cannot change the result after the initial equality gate.
-#[inline(always)]
-unsafe fn cxx_string_equal(left: *const *mut u8, right: *const *mut u8) -> bool {
+/// True size: 152 bytes, ending at the next prologue @ 0x083eaca0.
+/// Raw ARM contains one plain BL (memcmp @ 0x08030f64), zero predicated BLs.
+/// Compares COW-string lengths at data-4, rejects unequal lengths without
+/// reading payloads, and returns the widened C++ bool for bytewise equality.
+/// Deliberate deviation: omit the redundant minimum-length stack temporaries
+/// and post-compare length ordering; valid immutable strings retain equal
+/// lengths throughout the call. Embedded NUL bytes are ordinary payload bytes.
+///
+/// # Safety
+/// Both arguments point to readable character-data pointer words. Each data
+/// pointer has an aligned u32 length immediately before it and that many
+/// readable payload bytes. Objects and lengths remain unchanged during the call.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn cxx_string_equal(left: *const *mut u8, right: *const *mut u8) -> i32 {
     let left_data = left.read();
     let right_data = right.read();
     let left_length = (left_data as *const u32).sub(1).read();
     let right_length = (right_data as *const u32).sub(1).read();
-    left_length == right_length && memcmp(left_data, right_data, left_length as usize) == 0
+    (left_length == right_length && memcmp(left_data, right_data, left_length as usize) == 0) as i32
 }
 
 /// cxx_vector_find_equal — original: `FUN_0825c2c0` @ 0x0825c2c0
@@ -317,12 +324,9 @@ unsafe fn cxx_string_equal(left: *const *mut u8, right: *const *mut u8) -> bool 
 /// raw ARM body loads its bounds from `this + 4` and `this + 8`, advances the
 /// record cursor by 8 only after a failed comparison, writes the found record
 /// to `out`, and returns the widened C++ bool 1; a miss returns 0 without
-/// touching `out`. Its direct callee `FUN_083eac08` @ 0x083eac08 (152 bytes)
-/// is an unported `basic_string::operator==`: raw ARM establishes that it
+/// touching `out`. Its direct callee [`cxx_string_equal`] @ 0x083eac08
 /// reads the `_Rep` lengths at `data - 4`, rejects unequal lengths, and calls
-/// the ported [`memcmp`] @ 0x08030f64 over that length. This is represented
-/// exactly by the established `memcmp` seam; no comparator stub or
-/// approximation is introduced.
+/// the ported [`memcmp`] @ 0x08030f64 over that length.
 ///
 /// # Safety
 /// `owner` must contain valid `begin..end` bounds over contiguous
@@ -338,7 +342,7 @@ pub unsafe extern "C" fn cxx_vector_find_equal(
 ) -> i32 {
     let mut record = (*owner).begin;
     while record != (*owner).end {
-        if cxx_string_equal(core::ptr::addr_of!((*record).first), needle) {
+        if cxx_string_equal(core::ptr::addr_of!((*record).first), needle) != 0 {
             out.write(record);
             return 1;
         }
@@ -11339,6 +11343,33 @@ mod tests {
             prefix: 0,
             begin: records.as_mut_ptr(),
             end: unsafe { records.as_mut_ptr().add(length) },
+        }
+    }
+
+    #[test]
+    fn cxx_string_equal_handles_binary_payloads_and_every_mismatch_position() {
+        let mut left = search_string([0, 0x80, 0xff, 7, 0, 42, 3, 9]);
+        let left_data = left.data.as_mut_ptr();
+        for length in 0..=8 {
+            left.rep.length = length;
+            let mut right = search_string(left.data);
+            right.rep.length = length;
+            let right_data = right.data.as_mut_ptr();
+            unsafe {
+                assert_eq!(cxx_string_equal(&left_data, &right_data), 1);
+                assert_eq!(cxx_string_equal(&left_data, &left_data), 1);
+                for index in 0..length as usize {
+                    right.data[index] ^= 0xff;
+                    assert_eq!(cxx_string_equal(&left_data, &right_data), 0);
+                    assert_eq!(cxx_string_equal(&right_data, &left_data), 0);
+                    right.data[index] ^= 0xff;
+                }
+                right.rep.length = length + 1;
+                // No payload access is permitted on this unequal-length path,
+                // including when the advertised right length exceeds storage.
+                assert_eq!(cxx_string_equal(&left_data, &right_data), 0);
+                assert_eq!(cxx_string_equal(&right_data, &left_data), 0);
+            }
         }
     }
 
