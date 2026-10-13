@@ -389,6 +389,7 @@ pub mod word_pair_list_copy_construct;
 pub mod embedded_list_operation_dispatch;
 pub mod embedded_list_clear;
 pub mod vector_word_clear;
+pub mod vector_halfword_clear;
 pub mod word_range_fill_if_destination;
 pub mod word_range_copy_if_destination;
 pub mod pair_range_fill_after_cursor;
