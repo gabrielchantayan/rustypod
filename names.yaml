@@ -28464,6 +28464,37 @@ functions:
       tail wrapper. The shared 21-instruction removal body preserves slot
       loads, vtable reload, exact -1 guard and saved result, using BEQ rather
       than predicated erase.
+  - address: 0x083cfd9c
+    ghidra: FUN_083cfd9c
+    name: attached_observable_array_construct_083cfd9c
+    size: 40
+    sig: "AttachedObservableArray *attached_observable_array_construct_083cfd9c(AttachedObservableArray *this, uint32_t flag)"
+    module: cxx/attached_observable_array_construct_083cfd9c
+    status: ported
+    renames:
+      param_1/r0: this_and_base_constructor_result
+      param_2/r1/r4: flag
+      puVar1: object
+      DAT_083cfdc0: ATTACHED_OBSERVABLE_ARRAY_VTABLE_083CFD9C
+      FUN_08271cec: observable_array_construct
+      "[this + 0x14]": attached_object
+    notes: >-
+      Raw A32 words verify 36 code bytes plus the vtable literal 0x089a3a68
+      at 0x083cfdc0, giving a true 40-byte extent before the next real
+      function at 0x083cfdc4. Whole-image decoding finds one inbound plain
+      BL at 0x080fe840, zero predicated inbound BLs, and one outbound plain
+      BL to the already-ported observable_array_construct at 0x08271cec,
+      zero predicated BLs. Installs the derived vtable, stores the low byte
+      of flag at +0x10, clears attached_object at +0x14, and returns the
+      base constructor result unchanged. Caller 0x080fe824 embeds the array
+      at +8 with flag one; stronger flag semantics remain unresolved.
+      The matching destructor releases attached_object via virtual slot
+      +0x1c. No deliberate deviations; padding stays untouched. Reuses the
+      existing target-width AttachedObservableArray layout, with no new seam.
+      Host suite and ARM release build pass. Unicorn executes original and
+      linked Rust with real base constructors: 32 cases match returned
+      pointer and all 32 guarded bytes. match.py exits 1: LLVM adds a frame
+      and saved registers; call, store values, offsets and order match.
   - address: 0x083d0c2c
     ghidra: FUN_083d0c2c
     name: attached_observable_array_construct
