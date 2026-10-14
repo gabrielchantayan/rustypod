@@ -331,6 +331,7 @@ pub mod deque_layout_construct;
 pub mod fixed_point_record_construct;
 pub mod deque_iterator_current_or_zero;
 pub mod deque_front_advance_release;
+pub mod deque_back_retire_segment;
 pub mod deque_front_dispatch;
 pub mod deque_drain_release;
 pub mod deque_prepend_dispatch;
