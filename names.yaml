@@ -16,6 +16,43 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083d1104
+    ghidra: FUN_083d1104
+    name: scoped_context_container_erase_at
+    size: 68
+    sig: "i32 scoped_context_container_erase_at(ObservableArray *this, i32 index)"
+    module: cxx/scoped_context_container_erase_at
+    status: ported
+    renames:
+      param_1/r0/r4: this
+      param_2/r1/r5: index
+      "[this + 0x10]": delete_enabled
+      FUN_083d6a68: container_element_at_alias_6a68
+      FUN_08270414: scoped_context_destroy
+      FUN_082aad24: operator_delete
+      tail_08271bec: observable_array_erase_at
+    notes: >-
+      Raw A32 extent [0x083d1104,0x083d1148) is 68 bytes, ending with
+      pop restoring LR and tail B to the base erase; next independent PUSH
+      at 0x083d1148. Whole-image aligned BL decoding verifies one incoming
+      plain BL at 0x0812fcb8, zero predicated callers, and three outgoing
+      plain BLs at 0x083d1124/0x083d1130/0x083d1134, zero predicated BLs.
+      When enabled byte +0x10 is nonzero, retrieve the unchanged signed
+      index, destroy and tag-2-delete the non-NULL element, then return
+      base observable-array erase. Deletion precedes base validation and
+      INT_MAX sentinel resolution. Ghidra incorrectly inlines the tail
+      target and marks delete noreturn. All four callees already ported;
+      no new seams. Rust passes the saved element to delete because the
+      void empty destructor does not promise r0 pass-through. Host uses
+      existing native-pointer layouts; tail B becomes a returning Rust call.
+      Tests cover disabled/NULL elements, high-bit enabled, signed invalid
+      indices, unchanged INT_MAX lookup, and delete-before-validation.
+      ARM match review: accessor BL, non-NULL predicated delete BL, and base
+      erase tail B retained; LLVM removes the proven-empty destructor and
+      adds an FP frame. Relocations confirm all remaining callees.
+      Throwaway host smoke exercised valid middle erase (lookup, shift,
+      finish, notify; result 0) and INT_MAX (lookup original sentinel,
+      finish, notify resolved index 1; result 1), with length decrements.
   - address: 0x083d1380
     ghidra: FUN_083d1380
     name: observable_array_attached_elements_destruct
