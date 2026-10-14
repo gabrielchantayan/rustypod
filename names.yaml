@@ -16,6 +16,31 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083d5fd4
+    ghidra: FUN_083d5fd4
+    name: container_element_at_alias_5fd4
+    size: 24
+    sig: "u32 container_element_at_alias_5fd4(void *receiver, u32 index)"
+    module: cxx/vtable_slot_40_result_word_at
+    status: ported
+    vars: {param_1/r0: receiver, param_2/r1: index, r2: indexed_method, return/r0: element_word}
+    notes: >-
+      Raw words e92d4010 e5902000 e5922040 e12fff32 e5900000 e8bd8010
+      establish the true extent [0x083d5fd4,0x083d5fec), followed by an
+      independent PUSH prologue. Whole-image aligned A32 decoding finds
+      one incoming plain BL at 0x0839c928 and zero predicated BLs. The body
+      contains zero plain or predicated BLs and one unconditional BLX r2.
+      Invoke receiver vtable word 16 (+0x40) with receiver and index, then
+      return the first u32 of the returned slot without NULL guards.
+      Raw caller reloads r1 from its saved index before calling; Ghidra's
+      one-argument prototype is incomplete. Concrete virtual method identity
+      remains unresolved; no fixed-address callee seam is invented.
+      Deliberate deviations: host vtable pointers widen but preserve slot
+      index 16; dedicated text section and empty compiler barrier keep the
+      byte-identical sibling independently hookable. Host edge tests and
+      actual-source executable smoke pass; ARM build-std release passes.
+      match.py exits 1: LLVM adds MOV FP,SP and saves FP instead of R4;
+      the two vtable loads, indirect BLX and result-word load are identical.
   - address: 0x083d7350
     ghidra: FUN_083d7350
     name: word_slot_not_equal

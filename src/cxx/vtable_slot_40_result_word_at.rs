@@ -112,6 +112,36 @@ pub unsafe extern "C" fn container_element_at_alias_6844(receiver: *mut u8, inde
     unsafe { result.read() }
 }
 
+/// Indexed container element-word getter.
+///
+/// Original: `FUN_083d5fd4` at `0x083d5fd4`, 24 bytes, ending at the next
+/// real prologue at `0x083d5fec`. Whole-image raw A32 decoding finds one
+/// incoming plain BL (`0x0839c928`) and zero predicated BLs. The body has
+/// zero plain or predicated BLs and one unconditional indirect BLX.
+/// Invoke vtable word 16 (`+0x40`) with `(receiver, index)`, then load the
+/// first u32 from the returned slot. The caller supplies its live r1 index;
+/// Ghidra's one-argument prototype is incomplete. No NULL checks.
+///
+/// Deliberate deviations: host vtables use native-width function pointers
+/// indexed by target word number. A dedicated section and empty compiler
+/// barrier preserve this identical sibling as an independently hookable
+/// symbol without adding an ARM instruction. Concrete method identity is
+/// unresolved; no fixed-address callee is assumed.
+///
+/// # Safety
+/// Receiver and vtable word 16 must be valid for the indexed method ABI;
+/// the method must return a nonnull aligned pointer to a readable u32.
+#[inline(never)]
+#[cfg_attr(target_os = "none", link_section = ".text.container_element_at_alias_5fd4")]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn container_element_at_alias_5fd4(receiver: *mut u8, index: u32) -> u32 {
+    unsafe { core::arch::asm!("", options(nostack, preserves_flags)) };
+    let vtable = unsafe { (receiver as *const *const VtableSlot40ResultAt).read() };
+    let callback = unsafe { vtable.add(RESULT_WORD_SLOT).read() };
+    let result = unsafe { callback(receiver, index) };
+    unsafe { result.read() }
+}
+
 
 
 #[cfg(test)]
@@ -200,5 +230,36 @@ mod tests {
         assert_eq!(unsafe { FORWARDED_INDEX }, 0x8000_0001);
         assert_eq!(unsafe { DISPATCH_CALLS }, 1);
         assert_eq!(unsafe { WRONG_SLOT_CALLS }, 0, "only vtable slot +0x40 dispatches");
+    }
+
+    #[repr(C)]
+    struct IndexedWords {
+        vtable: *const VtableSlot40ResultAt,
+        words: [u32; 3],
+        last: [u32; 2],
+    }
+
+    unsafe extern "C" fn indexed_word_slot(receiver: *mut u8, index: u32) -> *const u32 {
+        let words = receiver.cast::<IndexedWords>();
+        if index == u32::MAX {
+            unsafe { core::ptr::addr_of!((*words).last).cast::<u32>() }
+        } else {
+            unsafe { core::ptr::addr_of!((*words).words).cast::<u32>().add(index as usize) }
+        }
+    }
+
+    #[test]
+    fn alias_5fd4_reads_selected_word_including_zero_and_full_width_values() {
+        let vtable = [indexed_word_slot as VtableSlot40ResultAt; RESULT_WORD_SLOT + 1];
+        let mut words = IndexedWords {
+            vtable: vtable.as_ptr(), words: [0, 0x8000_0000, u32::MAX],
+            last: [0x1234_abcd, 0xfeed_beef],
+        };
+        for (index, expected) in [(0, 0), (1, 0x8000_0000), (2, u32::MAX), (u32::MAX, 0x1234_abcd)] {
+            assert_eq!(unsafe { container_element_at_alias_5fd4((&mut words as *mut IndexedWords).cast(), index) }, expected);
+        }
+        words.words[1] = 7;
+        assert_eq!(unsafe { container_element_at_alias_5fd4((&mut words as *mut IndexedWords).cast(), 1) }, 7);
+        assert_eq!(words.last[1], 0xfeed_beef);
     }
 }
