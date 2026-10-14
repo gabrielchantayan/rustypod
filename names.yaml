@@ -65529,6 +65529,35 @@ functions:
       return this. Rust emits explicit byte loops and inlines the trivial
       fTable +4 accessor/tracker no-op rather than their retailOS calls.
 
+  - address: 0x083d518c
+    ghidra: FUN_083d518c
+    name: slot_array_remove_at_virtual_40
+    size: 80
+    sig: "void slot_array_remove_at_virtual_40(SlotArray *this, i32 index)"
+    module: cxx/slot_array_remove_at_virtual_40
+    status: ported
+    vars: {param_1: this, param_2: index, piVar1: object, bVar2: bounds_flags}
+    notes: >-
+      Raw extent 0x083d518c..0x083d51dc; the next word is a constructor
+      push. Whole-image A32 decoding finds zero incoming plain BL and one
+      BLNE at 0x08106244 (word 0x1b0b3bd0); Ghidra's additional caller
+      is an overlapping fragment. Body has zero plain or predicated BL
+      and one BLX register at 0x083d51bc. Rejects negative indices and
+      indices at or above signed capacity (+4). For a nonzero storage
+      entry, invokes virtual slot +0x40 with the object receiver, reloads
+      storage (+0), clears the indexed word, and decrements the current
+      occupied count (+8) with wrapping arithmetic. Concrete virtual
+      method identity remains unknown; no direct callee seam is created.
+      Uses the existing target-width SlotArray prefix. Host object and
+      vtable pointers are native-width solely to execute callbacks.
+      Host tests cover signed bounds, empty slots, callback ordering,
+      replacement storage, and count wraparound; executable smoke also
+      confirms occupied-slot dispatch and removal. match.py prints a
+      structural diff: 20 original versus 25 Rust instructions, preserving
+      signed guards, null guard, virtual +0x40 dispatch, post-call storage
+      reload, slot clear, and decrement. LLVM uses explicit branches and
+      a different register allocation/prologue instead of ADS predication.
+
   - address: 0x083d51dc
     ghidra: FUN_083d51dc
     name: element_array5_construct

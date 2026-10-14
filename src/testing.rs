@@ -40,6 +40,7 @@ extern crate std;
 /// overlap.
 pub mod hints {
     pub const ELEMENT_TRACKER_ARRAY_INSERT: usize = 0x52a4_0000;
+    pub const CXX_SLOT_ARRAY_REMOVE_VIRTUAL_40: usize = 0x53d5_1800;
     pub const TRACKED_STRING_CHAIN_REMOVE: usize = 0x53f3_0000;
     pub const VIRTUAL_INDEXED_PAYLOAD_LENGTH: usize = 0x436e_0000;
     pub const SIGNED_KEY_TREE_EQUAL_RANGE: usize = 0x6104_0000;
