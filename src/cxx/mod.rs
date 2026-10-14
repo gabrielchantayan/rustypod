@@ -719,6 +719,7 @@ pub mod wide_streambuf_put;
 pub mod wide_filebuf_set_owned;
 pub mod wide_filebuf_set_unbuffered;
 pub mod wide_filebuf_set_write_mode;
+pub mod filebuf_finish_conversion;
 pub mod wide_filebuf_set_buffer;
 pub mod strstreambuf_set_buffer;
 pub mod stream_parse_radix_segment;

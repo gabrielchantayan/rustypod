@@ -98,14 +98,14 @@ pub unsafe extern "C" fn stream_write_all(
 
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     extern crate std;
     use super::*;
     use std::sync::Mutex;
     use std::vec::Vec;
 
     /// Serializes tests that swap STREAM_WRITE_PUTC.
-    static HOOK_LOCK: Mutex<()> = Mutex::new(());
+    pub(crate) static HOOK_LOCK: Mutex<()> = Mutex::new(());
 
     fn hook_lock() -> std::sync::MutexGuard<'static, ()> {
         HOOK_LOCK.lock().unwrap_or_else(|e| e.into_inner())

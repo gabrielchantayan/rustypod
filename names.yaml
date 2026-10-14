@@ -16,6 +16,36 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083d8dbc
+    ghidra: FUN_083d8dbc
+    name: filebuf_finish_conversion
+    size: 204
+    sig: "u32 filebuf_finish_conversion(ConversionFileBuffer *buffer)"
+    module: cxx/filebuf_finish_conversion
+    status: ported
+    vars:
+      param_1/r4: buffer
+      local_14: state_copy
+      auStack_54: output
+      local_58: output_next
+      iVar3/r5: output_count
+    renames:
+      FUN_083eab08: type_handler_lookup
+      FUN_082a7638: vtable_slot_18_result_dispatch
+      FUN_080334f4: ptr_or_deref_is_null
+      FUN_08266be8: stream_write_all
+    notes: >-
+      Raw A32 proves extent [0x083d8dbc,0x083d8e88), 204 bytes rather
+      than Ghidra's 176. Whole-image decoding finds zero incoming plain
+      BLs and one BLNE at 0x083d9290; five outgoing plain BLs, zero
+      predicated BLs, and an indirect MOV PC,IP through vtable +0x14.
+      Nonnegative virtual query or null state succeeds. Otherwise finish
+      conversion into 64 bytes using a local state copy. Result 2 fails;
+      result 3 succeeds without writing. Other results preserve the stock
+      inverted writer test: nonzero stream_write_all fails; zero succeeds
+      and adds the byte count to position modulo 2^32. No invented virtual
+      callee identity. All direct callees reuse existing ports. repr(C)
+      preserves target offsets while host pointer fields/vtable cells widen.
   - address: 0x083d90b0
     ghidra: FUN_083d90b0
     name: strstreambuf_set_buffer
