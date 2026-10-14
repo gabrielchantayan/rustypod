@@ -65852,6 +65852,30 @@ functions:
       reaches the two unresolved boundaries at verified addresses; host tests
       install explicit seams. Rust models the predicated BLX and tail branch as
       ordinary control flow.
+  - address: 0x083d1834
+    ghidra: FUN_083d1834
+    name: string_object_owned_member_array_attached_destruct
+    size: 60
+    sig: "uint32_t *string_object_owned_member_array_attached_destruct(uint32_t *this)"
+    module: cxx/string_object_owned_member_array_attached_destruct
+    status: ported
+    vars: {param_1/r4: this, DAT_083d186c: derived_vtable, "[this + 0x14]": attached, FUN_083d178c: string_object_owned_member_container_destroy, FUN_08271d2c: observable_array_destruct}
+    notes: >-
+      Raw osos.dec establishes 56 instruction bytes through the tail B at
+      0x083d1868, followed by literal 0x089a5130 at 0x083d186c. The next
+      real function starts at 0x083d1870, making the true size 60 bytes.
+      The body has one plain direct BL at 0x083d185c to the established
+      string_object_owned_member_container_destroy port, zero predicated
+      direct BLs, and one indirect BLXNE at 0x083d1854. Whole-image A32 decoding
+      finds one inbound plain BL at 0x0826b6a0 and zero predicated inbound BLs.
+      Installs the derived vtable, releases the optional attachment through
+      virtual slot +0x1c, destroys enabled owned-string-member elements, then
+      tail-chains to observable_array_destruct, preserving this. Ghidra
+      incorrectly expands the tail callee into this function. Rust directly
+      calls both established ports and uses ordinary control flow for BLXNE
+      and the tail branch. Host tests substitute the target-width virtual
+      boundary and cover callback mutation before base teardown, NULL
+      attachment, disabled cleanup, returned identity and adjacent state.
   - address: 0x083d1870
     ghidra: FUN_083d1870
     name: observable_array_release_cells_pre_destruct
