@@ -257455,3 +257455,40 @@ functions:
       four operational instructions exactly: two vtable loads, BLX r2,
       and the returned-cell load. LLVM adds mov fp,sp and saves fp rather
       than r4; no semantic codegen deviation. No device execution.
+  - address: 0x083d6710
+    ghidra: FUN_083d6710
+    name: u32_key_tree_equal_range_6710
+    size: 204
+    sig: void u32_key_tree_equal_range_6710(u32 *out, const void *tree, const u32 *key)
+    module: cxx/u32_key_tree_equal_range
+    status: ported
+    vars:
+      param_1: out
+      param_2: tree
+      param_3: key
+      iVar4: lower
+      iVar1: upper
+    notes: >-
+      Raw A32 extent is 0x083d6710..0x083d67dc, 204 bytes, ending in
+      e8bd87f0; the next function starts with e5901014 at 0x083d67dc.
+      Whole-image decoding finds one inbound unconditional BL at 0x08185498
+      and zero predicated inbound BLs. Two outbound unconditional BLs at
+      0x083d6748 and 0x083d6784 call the existing port less_unsigned at
+      0x083d7598; zero predicated outbound BLs. Independent lower/upper
+      bound walks use header at tree+0x10, root at header+4, node left/right
+      at +8/+12 and unsigned key at +16. The current node becomes the
+      candidate before descending left, contrary to Ghidra's child-pointer
+      assignment. Writes two target pointer words; header denotes end.
+      Caller 0x081850f0 queries an unsigned key and consumes the iterator
+      pair. Ghidra's fourth argument and comparator stack zero are dead.
+      Shares the existing inline equal-range algorithm, preserves four-byte
+      links on hosts, omits dead arguments and redundant stack copies.
+      Tests cover duplicate keys, absent keys, unsigned high-bit ordering,
+      zero/MAX boundaries, empty trees and output-adjacent canaries.
+      Host test suite and ARM release build passed. Standalone actual-source
+      smoke confirmed singleton lower/equal/greater queries and empty bounds.
+      match.py shows 35 Rust instructions versus 51 retail instructions:
+      both comparator BLs, both traversal loops, candidate updates and two
+      output stores remain. LLVM removes stack copies and dead comparator
+      arguments and reuses the loaded root for the second walk; less_unsigned
+      is read-only. No device execution.
