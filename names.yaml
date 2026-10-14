@@ -257875,3 +257875,39 @@ functions:
       constructor and memory/string ports with a std allocator, checks ten
       zeroed slots and the two-NUL label tail, and writes the last slot.
       Device execution was not exercised.
+  - address: 0x083d533c
+    ghidra: FUN_083d533c
+    name: element_tracker_array_expand
+    size: 120
+    sig: "void element_tracker_array_expand(u32 *array)"
+    module: app/element_tracker_array_expand
+    status: ported
+    vars: {param_1: array, iVar3: expanded_slots, iVar1: resized_storage}
+    renames:
+      FUN_0802edec: realloc
+      thunk_EXT_FUN_2200027c: memzero_aligned
+      FUN_083d52a0: disabled_element_tracker_diagnostic
+    notes: >-
+      Raw A32 extent is 0x083d533c..0x083d53b4 (120 bytes), followed by
+      60 bytes of diagnostic strings before the next push at 0x083d53f0.
+      Whole-image raw decoding finds one inbound BLEQ at 0x083d52ec and
+      zero inbound plain BLs. Three outbound plain BLs at 0x083d5358,
+      0x083d5378 and 0x083d53ac target realloc, the IRAM zero-fill veneer
+      and the diagnostic respectively; zero outbound predicated BLs.
+      Multiply allocated slots (+4) by factor (+16) with u32 wrapping,
+      publish realloc's result (+0) even on failure, zero the wrapped
+      grown byte range, and commit allocated slots only on success.
+      Target-width header words preserve four-byte field spacing on hosts.
+      Deliberate deviation: omit diagnostic argument setup and call;
+      raw 0x083d52a0 is bx lr with no side effects or consumed result.
+      Existing realloc and memzero_aligned ports are dispatched through
+      volatile function pointers to preserve call boundaries. The zero
+      helper's different return convention is immaterial here. ARM match.py
+      shows the same multiply, pointer publication, NULL branch, tail
+      clear and count commit, with two BLX calls and inert logging removed.
+      Host tests exercise empty and unchanged capacities, growth, prefix
+      and sentinel preservation, failure publication and wrapped byte sizes.
+      Full host suite and ARM release build pass. Standalone host smoke
+      exercises the public entry with host realloc and the real zero-fill
+      port, observing capacity 2 to 6 and preserved non-capacity fields.
+      Device execution was not exercised.
