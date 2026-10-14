@@ -1125,33 +1125,10 @@ pub unsafe extern "C" fn element_array8_insert_unique(this: *mut u8, element: *m
     -1
 }
 
-/// Calls the retail array-7 expansion member at `0x083d4bf4`.
-///
-/// That sibling remains stock firmware: it reallocates the slot buffer to
-/// `growth * slots`, clears its new tail, records the result, and returns.
-/// The wrapper preserves its actual device entry rather than duplicating a
-/// second port.
-#[cfg(target_os = "none")]
-#[inline(always)]
-unsafe fn element_array7_expand_for_insert(this: *mut u8) {
-    let retail_expand: unsafe extern "C" fn(*mut u8) =
-        core::mem::transmute(0x083d_4bf4usize);
-    retail_expand(this);
-}
-
-/// Host-side replacement for the stock array-7 expansion member.
-///
-/// Only unit tests execute this path: target builds call the fixed retailOS
-/// entry above, while non-test host builds must not pretend to implement the
-/// unported sibling.
+/// Test override for the ported array-7 expansion member.
 #[cfg(all(not(target_os = "none"), test))]
 static mut ELEMENT_ARRAY7_EXPAND_FOR_INSERT: unsafe extern "C" fn(*mut u8) =
-    missing_element_array7_expand_for_insert;
-
-#[cfg(all(not(target_os = "none"), test))]
-unsafe extern "C" fn missing_element_array7_expand_for_insert(_this: *mut u8) {
-    panic!("element_array7_insert_unique expansion seam was not installed")
-}
+    crate::app::element_array7_expand::element_array7_expand;
 
 #[cfg(all(not(target_os = "none"), test))]
 #[inline(always)]
@@ -1162,10 +1139,10 @@ unsafe fn element_array7_expand_for_insert(this: *mut u8) {
     expand(this);
 }
 
-#[cfg(all(not(target_os = "none"), not(test)))]
+#[cfg(any(target_os = "none", not(test)))]
 #[inline(always)]
-unsafe fn element_array7_expand_for_insert(_this: *mut u8) {
-    panic!("element_array7_insert_unique requires retailOS expansion member")
+unsafe fn element_array7_expand_for_insert(this: *mut u8) {
+    crate::app::element_array7_expand::element_array7_expand(this);
 }
 
 /// element_array7_insert_unique — original: `FUN_083d4b5c` @ **0x083d4b5c**
@@ -1180,23 +1157,22 @@ unsafe fn element_array7_expand_for_insert(_this: *mut u8) {
 ///
 /// Scans every signed-valid slot for the exact pointer first, returning `-1`
 /// without mutation for a duplicate (including a NULL argument in an empty
-/// table). If the live count equals capacity, it expands through the retail
+/// table). If the live count equals capacity, it expands through the ported
 /// sibling. It then rescans for the first NULL slot; if one exists, it stores
 /// the pointer, increments `used` with ARM wrapping semantics, and returns
 /// that index. A full table whose `used` does not equal capacity still returns
 /// `-1`; the scan, not `used`, decides vacancy.
 ///
-/// Device deviation: none. The target directly calls the unported retail
-/// expansion sibling. Host unit tests install that one call as a volatile
-/// seam; pointer slots remain pointer-width on the host while retaining the
-/// target's four-byte stride on ARM.
+/// Device deviation: none. The target calls the ported expansion sibling.
+/// Host unit tests can override that call; pointer slots remain pointer-width
+/// on the host while retaining the target's four-byte stride on ARM.
 ///
 /// # Safety
 ///
 /// `this` must be non-null and word-aligned through its six element-array
 /// words. Its `data` word must address `slots` readable/writable pointer
 /// slots whenever signed `slots` is positive. When `used == slots`, the
-/// retail expansion member must be callable.
+/// header and storage must satisfy the expansion member's safety contract.
 #[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 #[cfg_attr(target_os = "none", link_section = ".text.element_array7_insert_unique")]
