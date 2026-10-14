@@ -151502,7 +151502,7 @@ functions:
       FUN_082045ac: screen_base_construct
       DAT_0812d8a0: DUAL_POOL_SCREEN_VTABLE_ADDRESS (0x08983cf8)
       FUN_083dcb1c: first_pool_reserve_16_byte_element (unported)
-      FUN_083dc9b0: second_pool_reserve_36_byte_element (unported)
+      FUN_083dc9b0: dual_pool_screen_reserve_record
     notes: >-
       Raw osos.dec confirms the 164-byte true extent: 160 bytes of ARM code
       from 0x0812d800 through pop {r4, r5, r6, pc} at 0x0812d89c, followed
@@ -151518,9 +151518,45 @@ functions:
       0x083dcb1c and 0x083dc9b0 with (header, 1). Their returned pre-advance
       cursors become header+0x10 sentinels whose first two words are self
       linked. The helpers reserve 16-byte and 36-byte elements respectively;
-      neither is ported, so target builds use typed fixed-address calls while
-      host tests install observable operations. Deliberate deviations: those
-      host-only reserve seams; none on target.
+      the first remains a fixed-address target call with a host-only seam;
+      the second now calls the ported dual_pool_screen_reserve_record on both
+      targets. The constructor test exercises its real allocation and sentinel.
+
+  - address: 0x083dc9b0
+    ghidra: FUN_083dc9b0
+    name: dual_pool_screen_reserve_record
+    size: 184
+    sig: "u32 *dual_pool_screen_reserve_record(PoolHeader *pool, u32 single)"
+    module: app/dual_pool_screen_reserve_record
+    status: ported
+    renames:
+      param_1/r4: pool
+      param_2/r1: single
+      uVar5/r5: capacity
+      piVar2/r6: chunk
+      FUN_08266c70: operator_new_checked
+    notes: >-
+      Raw osos.dec establishes 0x083dc9b0..0x083dca68: 184 bytes,
+      ending in pop at 0x083dca64; the next real function starts with
+      ldr r1,[r0,#16] at 0x083dca68. Two outbound unconditional plain
+      BLs at 0x083dca1c and 0x083dca30 call checked new 0x08266c70;
+      no predicated BLs. Whole-image aligned A32 immediate decoding finds
+      one inbound unconditional BL at 0x0812d884, no predicated inbound BLs.
+      Pops free_list through the element's first word, otherwise advances
+      cursor by 36. Exhaustion allocates a 12-byte previous/capacity/arena
+      chunk header and capacity*36 untouched bytes. Nonzero single selects
+      one element; otherwise empty pools start at 32 and existing pools grow
+      by max(old+32,old+old/2+old/8), using wrapping u32 arithmetic.
+      Preserves sentinel/reserved words and has no allocation failure guard.
+      Deviation: explicit pointer return preserves the stock r0 consumed by
+      the constructor despite Ghidra's void signature; allocator's unused
+      second argument is omitted according to its existing Rust contract.
+      Host tests cover free-list precedence, bump allocation, nonzero single,
+      both growth branches, unchanged payload and metadata, and chunk chaining.
+      Host gate: 16001 passed. ARM release build passes. match.py exits 1:
+      46 instructions versus 46; preserves free-list early return, unsigned
+      growth selection, two checked-new calls and 36-byte advancement.
+      LLVM shrink-wraps the prologue and replaces multiply with shifts/adds.
 
   # --- Range append with boundary newline preservation (app/range_append_boundary_newline) ---
   - address: 0x0811853c
