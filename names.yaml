@@ -16,6 +16,36 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083d1f80
+    ghidra: FUN_083d1f80
+    name: owned_element_array_erase_at
+    size: 56
+    sig: "i32 owned_element_array_erase_at(ObservableArray *this, i32 index)"
+    module: cxx/owned_element_array_erase_at
+    status: ported
+    vars:
+      param_1/r4: this
+      param_2/r5: index
+      this_plus_0x10: owns_elements
+      FUN_083d6c6c: container_element_at_alias_6c6c
+      FUN_082aad24: operator_delete
+      FUN_08271bec: observable_array_erase_at
+    notes: >-
+      Raw A32 extent [0x083d1f80,0x083d1fb8) is 56 bytes, ending in
+      a tail B before the next independent PUSH. Whole-image aligned word
+      decoding finds one incoming plain BL at 0x081b937c and zero predicated
+      BLs. Outgoing: two plain BLs at 0x083d1fa0 and 0x083d1fa4, zero
+      predicated BLs, then a base erase tail B. If byte +0x10 is nonzero,
+      fetch the unchanged indexed element through the existing 0x083d6c6c
+      port and tag-2-delete it, including NULL, before base validation.
+      Do not clear the cell or destroy the element. All callees reuse ports;
+      no new fixed-address seams. Host pointers widen and accessor indices
+      preserve target u32 bits. Host tests cover signed boundary indices,
+      nonzero ownership bytes, NULL, and deletion before invalid-index
+      rejection. Full host tests and ARM release build pass. Standalone host
+      smoke exercises enabled NULL deletion and disabled rejection. Match
+      exits 1: 14 original versus 13 Rust instructions; conditional two-BL
+      path and base tail B remain, with shrink-wrapped frame and new registers.
   - address: 0x083d2058
     ghidra: FUN_083d2058
     name: owned_cell_array_erase_at

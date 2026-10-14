@@ -2,6 +2,7 @@
 //! retailOS's application layer is built on. They live in the
 //! 0x083c0000-0x083dffff block of osos (~1000 functions), separate from
 //! the ARM ADS C runtime.
+pub mod owned_element_array_erase_at;
 pub mod owned_cell_array_erase_at;
 pub mod tracked_refcounted_handle_remove;
 pub mod element_tracker_array_construct;
