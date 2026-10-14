@@ -16,6 +16,32 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083d1380
+    ghidra: FUN_083d1380
+    name: observable_array_attached_elements_destruct
+    size: 60
+    sig: "ObservableArray *observable_array_attached_elements_destruct(ObservableArray *array)"
+    module: cxx/observable_array_attached_elements_destruct
+    status: ported
+    renames:
+      param_1/r0/r4: array
+      "[array + 0x14]": attached_object
+      DAT_083d13b8: derived_vtable_089a4cf8
+      FUN_083d12d8: observable_array_release_elements
+      FUN_08271d2c: observable_array_destruct
+    notes: >-
+      Raw osos.dec establishes 60 bytes: fourteen A32 instructions from
+      0x083d1380 through tail B at 0x083d13b4, then vtable literal 0x089a4cf8
+      at 0x083d13b8; next real function starts with push at 0x083d13bc.
+      Full-image aligned word decoding finds one inbound plain BL at
+      0x0826b628 and zero predicated BL callers. Body has one plain BL to
+      ported element release at 0x083d12d8, zero predicated BLs, one BLXNE
+      through attached object vtable +0x1c with the object in r0, and tail B
+      to ported observable_array_destruct. Install derived vtable, release
+      optional attachment at +0x14, release enabled elements, destroy base,
+      return receiver for caller's operator_delete. Rust uses ordinary control
+      flow for BLXNE/tail B. Host seams preserve target-width fields because
+      element release's native-pointer host layout is incompatible here.
   - address: 0x083d17d8
     ghidra: FUN_083d17d8
     name: owned_string_member_array_erase_at
