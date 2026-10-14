@@ -259940,3 +259940,37 @@ functions:
       19 original versus 23 Rust instructions including literal words.
       Both lookup calls, +16 adjustments, stores and destination return
       remain; LLVM combines the first two stores with STM and adds a frame.
+
+  - address: 0x083b6c88
+    ghidra: FUN_083b6c88
+    name: opaque_header_089a8a3c_create
+    size: 36
+    sig: "u32 *opaque_header_089a8a3c_create(u32 unused_first, u32 unused_second, u32 payload)"
+    module: cxx/opaque_header_089a8a3c_create
+    status: ported
+    vars: {param_1: unused_first, param_2: unused_second, param_3: payload, iVar2: record}
+    renames:
+      FUN_082aadd4: operator_new
+      FUN_082a8c8c: opaque_header_089a8a3c_construct
+    notes: >-
+      Raw A32 establishes [0x083b6c88,0x083b6cac), nine instructions,
+      36 bytes without literals; the next word starts an independent PUSH.
+      Whole-image aligned BL decoding finds one plain incoming BL at
+      0x083b635c, no predicated incoming BLs, two plain body BLs at
+      0x083b6c94 and 0x083b6ca0, and no predicated body BLs. Allocate 16
+      bytes using the existing operator_new port, call the existing opaque
+      header constructor with zero payload, replace word 3 with r2, and
+      return the record pointer. Raw STR and POP preserve r0; Ghidra's
+      void return is incorrect. The first two arguments are unused.
+      No invented callee seams, null checks, or behavioral deviations.
+      Host tests cover zero, one, high-bit and maximum payloads, initialized
+      header/state words, pointer return and adjacent allocation sentinels.
+      Host suite passes 16136 main tests; ARM release builds. match.py exits
+      1 with nine original and nine Rust instructions: LLVM adds a frame
+      pointer and removes the unused r5 copy. Relocations verify both real
+      callee symbols; allocation size, zero constructor argument, payload
+      store and pointer return remain. Standalone real-source smoke with
+      a host allocator observes [0x089a8a3c,32,0,0x80000000].
+      Full non-test host library smoke is blocked by existing unresolved
+      prepare_metadata, extract_metadata, configure_shared_payload_kind and
+      notify_calendar_change functions. Device execution is not tested.
