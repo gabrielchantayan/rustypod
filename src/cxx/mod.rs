@@ -144,6 +144,7 @@ pub mod opaque_refcounted_construct;
 pub mod opaque_header_089a8a3c_construct;
 pub mod opaque_header_089a8a3c_create;
 pub mod opaque_header_089a8a0c_construct;
+pub mod opaque_header_089a8a0c_create;
 pub mod string_triple_member_destroy;
 pub mod descriptor_variant_index;
 pub mod vtable_089a58c8_destruct;

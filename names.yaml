@@ -259974,3 +259974,34 @@ functions:
       Full non-test host library smoke is blocked by existing unresolved
       prepare_metadata, extract_metadata, configure_shared_payload_kind and
       notify_calendar_change functions. Device execution is not tested.
+
+  - address: 0x083b6c64
+    ghidra: FUN_083b6c64
+    name: opaque_header_089a8a0c_create
+    size: 36
+    sig: "u32 *opaque_header_089a8a0c_create(u32 unused_first, u32 unused_second, u32 payload)"
+    module: cxx/opaque_header_089a8a0c_create
+    status: ported
+    vars: {param_1: unused_first, param_2: unused_second, param_3: payload, iVar2: record}
+    renames:
+      FUN_082aadd4: operator_new
+      FUN_082a8c64: opaque_header_089a8a0c_construct
+    notes: >-
+      Raw A32 establishes [0x083b6c64,0x083b6c88), nine instructions,
+      36 bytes without literals; the next word starts an independent PUSH.
+      Whole-image aligned BL decoding finds one plain incoming BL at
+      0x083b6310, no predicated incoming BLs, two plain body BLs at
+      0x083b6c70 and 0x083b6c7c, and no predicated body BLs. Allocate 16
+      bytes using the existing operator_new port, call the existing opaque
+      header constructor with zero payload, replace word 3 with r2, and
+      return the record pointer. Raw STR and POP preserve r0; Ghidra's
+      void return is incorrect. The first two arguments are unused.
+      No invented callee seams, null checks, or behavioral deviations.
+      Host tests cover zero, one, high-bit and maximum payloads, initialized
+      header/state words, pointer return and adjacent allocation sentinels.
+      Standalone real-source smoke with a host allocator observes
+      [0x089a8a0c,32,0,0x80000000]. Device execution is not tested.
+      Required host suite and ARM release build pass. match.py exits 1
+      with nine original and nine Rust instructions: LLVM adds a frame
+      pointer and removes the dead r5 copy; allocation size, both BLs,
+      zero constructor argument, payload store and pointer return remain.
