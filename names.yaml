@@ -22301,7 +22301,7 @@ functions:
     status: ported
     renames:
       param_1/r0: this (adjusted through callee returns)
-      FUN_083df2d4: clear four-byte-element deque (verified retail seam)
+      FUN_083df2d4: deque_clear_elem4
       FUN_08262944: destroy_opaque_context
       FUN_08261e54: cxx_mutex_destroy
     notes: >-
@@ -22313,10 +22313,10 @@ functions:
       pthread destroy incorrectly implied by Ghidra C. Clear deque at
       this+0x38, subtract 0x1c from its result, destroy opaque context,
       subtract 0x1c from that result, destroy mutex and return this.
-      The unported deque clear is retained at its verified firmware address;
-      hosts require an injected implementation. Existing context and mutex
-      ports are reused. Host tests cover partial teardown with busy/invalid
-      mutexes and return-pointer chaining. ARM structural diff reviewed.
+      Deque clear, context and mutex ports are reused. Only the deque's
+      pop-front helper remains a retail seam with explicit host injection.
+      Host tests cover complete deque clearing despite a busy mutex, and
+      preservation of the original object return. ARM structural diff reviewed.
   - address: 0x08261d30
     ghidra: FUN_08261d30
     name: cxx_mutexattr_destroy
@@ -48496,6 +48496,36 @@ functions:
       deterministic NULL initializer call and stack temporary with
       DequeIter::NULL, while preserving the returned dq and untouched trailing
       map-capacity word.
+  - address: 0x083df2d4
+    ghidra: FUN_083df2d4
+    name: deque_clear_elem4
+    size: 44
+    sig: "void *deque_clear_elem4(void *deque)"
+    module: heap/deque_clear_elem4
+    vars: {param_1: deque}
+    status: ported
+    renames:
+      param_1/r4: deque
+      FUN_083d7600: container_is_empty
+      FUN_083df194: pop_front_elem4 (verified retail helper, unported)
+    notes: >-
+      Raw A32 establishes 44 bytes at 0x083df2d4..0x083df300, ending in
+      pop {r4,pc}; the next independent push prologue starts at 0x083df300.
+      Whole-image branch decoding finds one inbound plain BL at 0x08261c30,
+      zero predicated BLs and no inbound B. Two outbound plain BLs call
+      pop-front at 0x083df194 and the empty predicate at 0x083d7600;
+      no outbound predicated BLs. Check count at word 8 before every pop,
+      loop until empty and return the original deque pointer. Reuse the
+      existing equivalent container_is_empty Rust port. The unported pop-front
+      advances cur by four, decrements count and frees exhausted blocks and
+      finally the map; retain its verified retail address on ARM and require
+      an explicit host operation. Host storage uses raw u32 word indices,
+      not widened pointer offsets. Tests cover empty untouched storage,
+      single/multiple elements, identity and repeated clearing. The existing
+      context/mutex destructor now calls this port rather than a clear seam.
+      ARM structural comparison retains the check/pop loop and saved input;
+      LLVM uses an indirect BLX for the retail pop and hoists its address.
+
   - address: 0x083df7a4
     ghidra: FUN_083df7a4
     name: deque_construct_elem4_alias_f7a4
