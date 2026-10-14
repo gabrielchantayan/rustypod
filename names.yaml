@@ -257625,3 +257625,35 @@ functions:
       index load, lookup and length return; LLVM adds a frame, initializes
       scratch and swaps its stack slots. The relocatable BL names its own
       section; its relocation targets the existing lookup symbol.
+
+  - address: 0x083d5f8c
+    ghidra: FUN_083d5f8c
+    name: container_element_at_alias_5f8c
+    size: 24
+    sig: "u32 container_element_at_alias_5f8c(void *receiver, u32 index)"
+    module: cxx/vtable_slot_40_result_word_at
+    status: ported
+    vars: {param_1/r0: receiver, param_2/r1: index, r2: virtual_accessor, return/r0: element_word}
+    notes: >-
+      Raw osos.dec establishes the six-word A32 extent [0x083d5f8c,0x083d5fa4):
+      push {r4,lr}; ldr r2,[r0]; ldr r2,[r2,#0x40]; blx r2;
+      ldr r0,[r0]; pop {r4,pc}. The next word begins a distinct function
+      with push {r4,lr}. Whole-image immediate decoding finds one incoming
+      unconditional plain BL at 0x0839c688, zero predicated BLs, and one
+      predicated tail BGT at 0x0812dc48. Both callers establish a live r1
+      index. The body has no direct plain or predicated BLs and one
+      unconditional indirect BLX at 0x083d5f98. Invoke receiver vtable word
+      16 with receiver and index, then return the first word of its result,
+      without NULL or bounds checks. Ghidra omits the index argument.
+      Concrete virtual callee identity is unresolved; no fixed-address seam
+      is invented. Existing result-word accessor module is already registered.
+      Deliberate deviations: native-width host vtable pointers selected by
+      target word index; a dedicated text section and empty compiler barrier
+      retain an independently hookable byte-identical sibling. Host edge
+      tests cover zero, high-bit and maximum words, maximum index, live
+      storage changes and adjacent-word isolation. Standalone host smoke
+      returned 0 and 0x80000000 for successive indices. No device execution.
+      Host suite and ARM release build pass. match.py exits 1 with six
+      original instructions versus seven Rust instructions: identical
+      vtable loads, indirect BLX and result-word load; LLVM saves fp rather
+      than unused r4 and adds mov fp,sp. The exported symbol remains distinct.
