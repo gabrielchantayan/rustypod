@@ -40,6 +40,7 @@ extern crate std;
 /// overlap.
 pub mod hints {
     pub const WORD_KEY_TREE_POOL_RELEASE: usize = 0xb741_0000;
+    pub const RED_BLACK_TREE_PAYLOAD_12_NODE_POOL_ACQUIRE_083B6D00: usize = 0x53f5_0000;
     pub const TRACKED_REFCOUNTED_HANDLE_REMOVE: usize = 0x53f4_0000;
     pub const SLOT_ARRAY_INSERT: usize = 0x53d5_0000;
     pub const SLOT_ARRAY_EXPAND: usize = 0x53d4_e000;
