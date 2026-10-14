@@ -13,6 +13,13 @@ use crate::heap::veneers::cxx_array_dealloc;
 /// Every non-BL instruction is identical to the 0x083df8e4 body; its distinct
 /// capacity, empty-predicate and iterator-init targets are verified equivalent.
 /// The existing export intentionally serves both addresses, with no wrapper.
+/// Also ports `FUN_083dec00` @ 0x083dec00: true size 164 bytes through
+/// 0x083deca4 (next real PUSH), seven outgoing plain BLs, no predicated BLs,
+/// one incoming plain BL at 0x081da680 and no predicated incoming calls.
+/// All non-BL words match 0x083df8e4. Its capacity target 0x083da240 returns
+/// 32, empty predicate 0x083d75f0 tests count == 0, and initializer 0x083da26c
+/// builds the same four-word iterator. This export deliberately serves the
+/// copy without a wrapper; the raw caller ignores restored r0-r3.
 ///
 /// Retreats the back map slot and frees its former segment. The caller has
 /// already decremented the element cursor and count. If count is zero, clears
@@ -106,11 +113,21 @@ mod tests {
         unsafe { slot.write(0x7000) };
         let mut deque = [11, 22, 33, 44, 55, 66, 77, slot as usize as u32, 0, 0x8000, 13];
         let mut frees = std::vec::Vec::new();
+        let deque_ptr = deque.as_mut_ptr();
+        let mut states_at_free = std::vec::Vec::new();
         unsafe {
-            deque_back_retire_segment_with(deque.as_mut_ptr(), |p, n, e| frees.push((p, n, e)));
+            deque_back_retire_segment_with(deque_ptr, |p, n, e| {
+                frees.push((p, n, e));
+                states_at_free.push(core::ptr::read(deque_ptr.cast::<[u32; 11]>()));
+            });
         }
         assert_eq!(deque, [0, 0, 0, 0, 0, 0, 0, 0, 0, 0x8000, 13]);
         assert_eq!(frees, [(0x7000, 32, 0), (0x8000, 13, 0)]);
+        assert_eq!(states_at_free, [
+            [11, 22, 33, 44, 55, 66, 77, (slot as usize as u32).wrapping_sub(4),
+                0, 0x8000, 13],
+            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0x8000, 13],
+        ]);
     }
 
     #[test]
