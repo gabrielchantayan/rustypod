@@ -741,6 +741,7 @@ pub mod opaque_object_implementation;
 pub mod flag_2c_is_one;
 pub mod tracker_event_log_noop;
 pub mod tracker_array_expand;
+pub mod element_tracker_array_expand;
 pub mod tracker_array_diagnostic_noop;
 pub mod element_array0_tracker_diagnostic_noop;
 pub mod element_array1_tracker_diagnostic_noop;
