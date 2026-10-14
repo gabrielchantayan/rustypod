@@ -28393,6 +28393,35 @@ functions:
       LLVM retains the fixed-address destroy call as a literal-loaded blx and
       uses a larger prologue, while preserving the enabled guard, signed loop,
       virtual access, null guard, and destroy-before-delete order.
+  - address: 0x083d0c2c
+    ghidra: FUN_083d0c2c
+    name: attached_observable_array_construct
+    size: 40
+    sig: "AttachedObservableArray *attached_observable_array_construct(AttachedObservableArray *this, uint32_t flag)"
+    module: cxx/attached_observable_array_construct
+    status: ported
+    renames:
+      param_1/r0: this_and_base_constructor_result
+      param_2/r1/r4: flag
+      puVar1: object
+      DAT_083d0c50: ATTACHED_OBSERVABLE_ARRAY_VTABLE
+      FUN_08271cec: observable_array_construct
+      "[this + 0x14]": attached_object
+    notes: >-
+      Raw A32 words establish 36 code bytes and the vtable literal
+      0x089a4710 at 0x083d0c50, giving a true 40-byte extent before the
+      next function at 0x083d0c54. Whole-image decoding finds one inbound
+      plain BL at 0x081fbd8c, no predicated inbound BLs, and one outbound
+      plain BL to the already-ported observable_array_construct at
+      0x08271cec, no predicated BLs. Installs the derived vtable, stores
+      the low byte of r1 at +0x10, clears attached_object at +0x14, and
+      returns the base constructor result unchanged. The matching destructor
+      releases attached_object through virtual slot +0x1c; flag semantics
+      remain unresolved. No deliberate deviations; padding stays untouched.
+      Host suite and ARM release build pass. Unicorn executes original and
+      linked Rust with actual base constructors: 32 cases match returned
+      pointer and all 32 guarded bytes. match.py exits 1: LLVM adds a frame
+      and saved registers; call, store values, offsets and order match.
   - address: 0x083d0c54
     ghidra: FUN_083d0c54
     name: observable_array_assert_empty_attached_destruct_083d0c54

@@ -195,6 +195,7 @@ pub mod owned_string_owner_array_attached_release_destruct;
 pub mod observable_array_attached_release_destruct;
 pub mod observable_array_assert_empty_attached_destruct_083d0430;
 pub mod observable_array_assert_empty_attached_destruct_083d0c54;
+pub mod attached_observable_array_construct;
 pub mod observable_array_attached_release_pre_destruct_083d0334;
 pub mod observable_array_attached_release_cleanup_destruct;
 pub mod collection_payloads_destruct;
