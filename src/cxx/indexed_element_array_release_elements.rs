@@ -74,6 +74,32 @@ pub unsafe extern "C" fn indexed_element_array_release_elements(array: *mut u8) 
     }
 }
 
+/// Delete then erase an indexed element: `FUN_083cff30` @ `0x083cff30`.
+///
+/// True extent [0x083cff30,0x083cff68): 56 bytes, ending in a tail B
+/// before the next independent PUSH. Raw whole-image decoding verifies one
+/// incoming plain BL (0x08284b5c), two outgoing plain BLs (element lookup
+/// at 0x083d6870 and tag-2 delete at 0x082aad24), and no predicated BLs.
+/// If byte +0x10 is nonzero, delete the element for the unchanged index,
+/// including NULL. Then return base erase at 0x08271bec. Deletion precedes
+/// bounds validation and sentinel normalization; no element destructor or
+/// slot clear occurs. Deliberate deviation: the host uses the native-pointer
+/// layout above; LLVM may select different registers and tail-call codegen.
+///
+/// # Safety
+/// `array` must satisfy the base observable-array erase contract. If enabled,
+/// its +0x40 virtual slot must return a readable element slot for `index`,
+/// even if the base erase will reject it; the element must be NULL or a
+/// tag-2 allocation. Deletion must leave the container valid for base erase.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn indexed_element_array_erase_at(array: *mut u8, index: i32) -> i32 {
+    if is_enabled(array) {
+        operator_delete(container_element_at_alias_6870(array, index as usize));
+    }
+    super::observable_array::observable_array_erase_at(array.cast(), index)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -89,6 +115,43 @@ mod tests {
         INDICES[CALLS] = index;
         CALLS += 1;
         SLOTS.as_mut_ptr().add(index)
+    }
+
+    unsafe extern "C" fn unchecked_element_slot(_: *mut u8, index: usize) -> *mut *mut u8 {
+        INDICES[0] = index;
+        CALLS += 1;
+        core::ptr::addr_of_mut!(SLOTS).cast::<*mut u8>()
+    }
+
+    #[test]
+    fn erase_deletes_before_base_rejects_without_normalizing_or_clearing() {
+        let _heap = crate::heap::veneers::tests::mock_heap();
+        let _guard = TEST_LOCK.lock();
+        for enabled in [0, 1, 0x80, 0xff] {
+            for index in [i32::MIN, -1, 0, i32::MAX] {
+                for pointer in [ptr::null_mut(), 0x1111usize as *mut u8] {
+                    let (mut array, mut vtable) = fixture(0, enabled);
+                    vtable[0x40 / 4] = unchecked_element_slot as usize;
+                    array.vtable = vtable.as_ptr();
+                    unsafe {
+                        CALLS = 0;
+                        INDICES[0] = 42;
+                        SLOTS[0] = pointer;
+                        let before = crate::heap::veneers::tests::free_log().0;
+                        assert_eq!(indexed_element_array_erase_at(ptr::addr_of_mut!(array).cast(), index), -1);
+                        assert_eq!(CALLS, usize::from(enabled != 0));
+                        assert_eq!(INDICES[0], if enabled != 0 { index as usize } else { 42 });
+                        assert_eq!(SLOTS[0], pointer);
+                        let after = crate::heap::veneers::tests::free_log();
+                        assert_eq!(after.0 - before, usize::from(enabled != 0 && !pointer.is_null()));
+                        if enabled != 0 && !pointer.is_null() {
+                            assert_eq!((after.1, after.2), (pointer, 2));
+                        }
+                    }
+                    assert_eq!(array.count, 0);
+                }
+            }
+        }
     }
 
     fn fixture(count: i32, enabled: u8) -> (HostIndexedElementArrayReleaseElements, [usize; 17]) {
