@@ -342,6 +342,8 @@ pub mod hints {
     pub const ELEMENT_TRACKER_ARRAY_EXPAND: usize = 0x4fdf_0000;
     // Dedicated array-6 expansion fixture; mappings never unmap.
     pub const ELEMENT_ARRAY6_EXPAND: usize = 0x6c41_0000;
+    // Dedicated pointer tracker expansion fixture; mappings never unmap.
+    pub const POINTER_TRACKER_EXPAND: usize = 0x6c42_0000;
     // 0x6c40_0000: dedicated to app/element_array2_expand's target-width storage fixture; mappings never unmap.
     pub const ELEMENT_ARRAY2_EXPAND: usize = 0x6c40_0000;
     // 0x6c10_0000: dedicated to cxx/vector_copy_construct_elem20's

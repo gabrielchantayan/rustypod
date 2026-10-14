@@ -65348,6 +65348,47 @@ functions:
       realloc succeeds. The logging call is preserved despite its verified
       no-op body. No deliberate behavioral deviations.
 
+  - address: 0x083d4714
+    ghidra: FUN_083d4714
+    name: pointer_tracker_expand
+    size: 120
+    sig: "void pointer_tracker_expand(u32 *array)"
+    module: app/pointer_tracker_expand
+    status: ported
+    vars: {param_1: array, iVar3: expanded_capacity, iVar1: resized_storage, pcVar2: diagnostic_result}
+    renames:
+      "array+0x00": storage
+      "array+0x04": allocated
+      "array+0x08": used
+      "array+0x10": growth_factor
+      "array+0x14": diagnostic_name
+      FUN_0802edec: realloc
+      thunk_EXT_FUN_2200027c: memzero_aligned_iram_veneer
+      FUN_083d4678: disabled_tracker_diagnostic
+    notes: >-
+      Raw A32 code is [0x083d4714,0x083d478c), 120 bytes; diagnostic
+      strings occupy 60 more bytes through the next function at 0x083d47c8.
+      Independent whole-image word scan finds zero inbound plain BLs and
+      one BLEQ at 0x083d46c4. Three outbound plain BLs at 0x083d4730
+      (realloc 0x0802edec), 0x083d4750 (IRAM zero-fill veneer 0x08037db8),
+      and 0x083d4784 (diagnostic 0x083d4678); no predicated outbound BLs.
+      Multiply capacity by growth with wrapping u32 arithmetic, publish
+      realloc's pointer including NULL, clear the added tail on success,
+      then commit capacity. Failure preserves all other header words.
+      Share the identical element_tracker_array_expand algorithm and ported
+      allocation and zero-fill helpers. Headers use four-byte words on hosts.
+      Deliberately omit diagnostic preparation and call: raw 0x083d4678 is
+      exactly bx lr and its return is unused. Host tests cover tail bounds,
+      empty and unchanged capacity, failure and wrapped allocation sizes.
+      Export smoke verified moved storage, unchanged prefix, four cleared
+      slots and capacity six. LLVM folds identical expansion exports; nm
+      confirms pointer_tracker_expand exists, although match.py cannot select
+      the alias by name.
+      Canonical element_array6_expand match.py review shows 22 versus 30
+      instructions, preserving multiply, unconditional pointer publication,
+      failure branch, tail clear and capacity commit. Volatile helper loads
+      produce BLX calls; the disabled diagnostic tail is removed.
+
   - address: 0x083d58ac
     ghidra: FUN_083d58ac
     name: vtable_owned_payload_destruct
