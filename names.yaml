@@ -44454,18 +44454,16 @@ functions:
     notes: >-
       Raw ARM is exactly 16 instructions at 0x083e8d7c..0x083e8db8; the
       independent 8-byte string-pair range constructor at 0x083e8dbc fixes
-      the 64-byte extent. It COW-constructs the leading 12-byte string-pair
-      entry of every 40-byte record in [first,last), forwarding owner as r0
-      to cxx_string_pair_entry_copy_ctor @ 0x083d7e88, then returns the
-      advanced output cursor. Raw B/BL decoding finds four inbound direct
-      unconditional BL sites (0x0825c1a0, 0x0825c61c, 0x083d7e88, and
-      0x083e3410) and no predicated inbound BLs; the body has one plain BL
-      and no predicated BLs. Deliberate deviation: the ARM port uses a
-      volatile opaque helper pointer so LLVM retains owner although the
-      helper currently discards it; this emits blx instead of retailOS's
-      direct bl. Host tests verify two 40-byte records, COW sharing/cloning,
-      trailer copying, untouched trailing bytes, returned end, and an empty
-      null range. match.py finds the same cursor loop and 0x28 strides.
+      the 64-byte extent. It copy-constructs every 40-byte plist node in
+      [first,last), forwarding owner as r0 to plist_node_child_construct_at
+      at 0x083d7e88, then returns the advanced output cursor. Whole-image
+      raw ARM decoding finds three plain inbound BL sites (0x0825c70c,
+      0x083e34a4, 0x083e3598), no predicated inbound BLs, and one plain body
+      BL at 0x083e8da0. The adapter conditionally reaches the established
+      unported plist-node constructor seam at 0x0825c61c; it is not the
+      12-byte string-pair constructor at 0x083d7e58. Target-width byte
+      strides retain the original layout. The obsolete string-pair-only
+      host fixture was removed; the empty NULL range test remains.
   - address: 0x083e9038
     ghidra: FUN_083e9038
     name: cxx_string_pair_vector_growth_copy
@@ -81148,6 +81146,34 @@ functions:
       osos.dec finds four direct unconditional bl callers (0x081df428,
       0x083e2fb8, 0x083e3058, 0x083e8fe4), zero predicated BL callers,
       and no direct tail branches. No deliberate deviations.
+  - address: 0x083d7e88
+    ghidra: FUN_083d7e88
+    name: plist_node_child_construct_at
+    size: 16
+    sig: "PlistNode *plist_node_child_construct_at(void *owner, PlistNode *destination, const PlistNode *source)"
+    module: fp/fp_misc
+    status: ported
+    vars: {param_1/r0: owner, param_2/r1: destination, param_3/r2: source, return/r0: result}
+    renames: {FUN_0825c61c: plist_node_child_copy_construct}
+    notes: >-
+      Raw words e1b00001 e1a01002 1afa11e1 e12fff1e at
+      0x083d7e88..0x083d7e94 are movs r0,r1; mov r1,r2;
+      bne 0x0825c61c; bx lr. The independent push at 0x083d7e98
+      proves the 16-byte extent. Ghidra incorrectly inlines the branch
+      target and invents a fourth argument. Owner is discarded; NULL
+      destination returns NULL without accessing source, otherwise the
+      two-argument plist-node copy constructor's result passes through.
+      Whole-image aligned ARM branch decoding finds one plain inbound BL
+      at 0x083e8da0, zero predicated inbound BLs, no inbound B, and zero
+      body BLs. Deliberate deviation: reuse the existing volatile
+      PLIST_NODE_CHILD_VECTOR_PUSH_BACK_OPS copy seam for the unported
+      0x0825c61c callee. Its raw prologue preserves source from r1 and
+      copy-constructs destination from r0. Corrected the existing range
+      caller which had incorrectly used the 12-byte string-pair helper.
+      Host NULL-gate regression and temporary runtime smoke verified unreadable
+      inputs are skipped, constructor return passes through, and the range
+      caller copies two full 40-byte records. The constructor seam reads only
+      its copy slot, not the unrelated growth slot.
   - address: 0x083d7e98
     ghidra: FUN_083d7e98
     name: cxx_string_pair_copy_ctor
