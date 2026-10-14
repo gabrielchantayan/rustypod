@@ -53,12 +53,38 @@ pub unsafe extern "C" fn word_pair_copy_construct(
     destination
 }
 
+/// `word_pair_copy_insert_result` — retailOS `FUN_083d3048` at **0x083d3048**.
+/// True extent: **20 bytes**, `0x083d3048..0x083d305c`; the next function
+/// begins an independent identical copy body. Raw words: e5912000 e5802000
+/// e5911004 e5801004 e12fff1e. Whole-image aligned ARM decoding verifies one
+/// plain inbound BL at 0x0826a100, zero predicated inbound BLs, and zero
+/// outbound BLs. Caller 0x0826a00c copies the first two words of an insertion
+/// result into an eight-byte stack object. Copy aligned words in ascending
+/// order, alternating reads and writes; forward overlap propagates word zero.
+///
+/// Deliberate deviations: none; expose preserved r0 as the return value.
+/// LLVM may fold this body with the identical neighboring copy ports.
+///
+/// # Safety
+/// Source must permit two aligned u32 reads and destination two aligned u32
+/// writes. The ranges may overlap; neither pointer may be null.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn word_pair_copy_insert_result(
+    destination: *mut u32,
+    source: *const u32,
+) -> *mut u32 {
+    destination.write(source.read());
+    destination.add(1).write(source.add(1).read());
+    destination
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{word_pair_copy_construct, word_pair_copy_forward};
+    use super::{word_pair_copy_construct, word_pair_copy_forward, word_pair_copy_insert_result};
 
-    const COPIERS: [unsafe extern "C" fn(*mut u32, *const u32) -> *mut u32; 2] =
-        [word_pair_copy_forward, word_pair_copy_construct];
+    const COPIERS: [unsafe extern "C" fn(*mut u32, *const u32) -> *mut u32; 3] =
+        [word_pair_copy_forward, word_pair_copy_construct, word_pair_copy_insert_result];
 
     #[test]
     fn disjoint_copy_preserves_neighbors_and_all_bits() {
