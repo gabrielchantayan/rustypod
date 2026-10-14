@@ -10,7 +10,7 @@
 //! Deliberate deviations: LLVM may branch instead of predicate; header and
 //! storage retain four-byte words on hosts. No allocation-failure guard is added.
 
-unsafe fn insert_with(array: *mut u32, element: u32, expand: impl FnOnce(*mut u32)) -> i32 {
+pub(super) unsafe fn insert_with(array: *mut u32, element: u32, expand: impl FnOnce(*mut u32)) -> i32 {
     let capacity = array.add(1).read() as i32;
     let mut index = 0;
     while index < capacity {
