@@ -257560,3 +257560,43 @@ functions:
       walks, candidate updates, comparator calls and output stores remain.
       LLVM reuses the root and drops unused comparator context and stack
       copies. No device execution.
+
+  - address: 0x083d6490
+    ghidra: FUN_083d6490
+    name: virtual_indexed_payload_length
+    size: 52
+    sig: "u32 virtual_indexed_payload_length(VirtualIndexedPayload *object)"
+    module: app/virtual_indexed_payload_length
+    status: ported
+    renames:
+      param_1/r0: object
+      param_2/r1: unused
+      param_3/r2: initial_length_scratch
+      param_4/r3: initial_payload_scratch
+      local_10: encoded_length
+      uStack_c: payload
+      puVar1: entry_word
+      FUN_080d6e50: indexed_payload_lookup_mode_one
+    notes: >-
+      Raw aligned ARM establishes [0x083d6490,0x083d64c4), 52 bytes;
+      the next function begins with ldr r0,[r0]. One outbound plain BL
+      to the existing ported mode-one lookup, zero predicated BLs, and
+      one virtual BLX through slot +0x18. The instruction listing contains
+      no inbound BL. Whole-image decoding finds a conditional candidate
+      at 0x088a9e78 absent from the listing, not established as code.
+      Call the embedded provider at object +0x1c, dereference its returned
+      entry word, load index at +0x14 after dispatch, and return the encoded
+      length from lookup regardless of status. Dynamic slot identity is
+      deliberately unclaimed. Incoming r1 is unused; incoming r2/r3 seed
+      output scratch always overwritten by the backend, so omitted.
+      repr(C) pointer fields and slots preserve ARM offsets while widening
+      on hosts. Tests exercise real backend mode-one lookup, provider index
+      mutation, live and maximum lengths, empty and out-of-range entries,
+      dead entries and invalid tags. No device execution.
+      Standalone host smoke invokes the real virtual slot and mode-one
+      backend for an empty entry and observes length zero. Host suite and
+      ARM release build pass. match.py exits 1: 13 original instructions
+      versus 18 Rust instructions, preserving virtual dispatch, post-call
+      index load, lookup and length return; LLVM adds a frame, initializes
+      scratch and swaps its stack slots. The relocatable BL names its own
+      section; its relocation targets the existing lookup symbol.

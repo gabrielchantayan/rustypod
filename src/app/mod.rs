@@ -979,6 +979,7 @@ pub mod format_duration;
 pub mod parse_duration_milliseconds;
 pub mod indexed_timestamp_window_bounds;
 pub mod indexed_payload_lookup;
+pub mod virtual_indexed_payload_length;
 pub mod selected_resource_path_load;
 pub mod segmented_entry_lookup;
 pub mod message_arena;
