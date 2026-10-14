@@ -1,0 +1,45 @@
+# Registry entry pending insertion into names.yaml: the read/grep tools omit
+# its required hashline snapshot tag for this 12.8 MB file (reported to QA).
+functions:
+  - address: 0x083d3a90
+    ghidra: FUN_083d3a90
+    name: element_array3_insert
+    size: 152
+    sig: "i32 element_array3_insert(u32 *array, u32 element)"
+    module: app/element_array3_insert
+    status: ported
+    renames:
+      param_1: array
+      param_2: element
+      iVar1: index
+      iVar2: capacity
+      "array+0x00": storage
+      "array+0x04": capacity
+      "array+0x08": used
+      "array+0x0c": options
+      "array+0x10": growth_factor
+      "array+0x14": diagnostic_name
+      FUN_083d3b28: element_array3_expand
+    notes: >-
+      Raw A32 establishes the exact 152-byte extent [0x083d3a90,0x083d3b28),
+      ending in POP before the next independent PUSH. Whole-image aligned
+      immediate BL decoding finds one inbound plain BL at 0x082c8584 and
+      zero inbound predicated BLs. The body has zero plain BLs and one BLEQ
+      at 0x083d3ad8 to the existing ported element_array3_expand. Caller
+      0x082c851c passes the element-table tracker at +0x48. Reject duplicates
+      before expansion when used equals capacity; reload capacity, fill the
+      first zero slot, increment used modulo 2^32, return the index or -1.
+      Signed capacity bounds and four-byte header/storage words are preserved.
+      Ghidra misdecodes CMPGE followed by GT: index zero is a valid insertion.
+      Reuse the identical existing tracker insertion algorithm, with no new
+      firmware seams and no allocation-failure guard. Host tests exercise all
+      hole positions, duplicate precedence at full capacity, zero duplicates,
+      signed bounds, exhausted storage, count wrap and real expansion/relocation.
+      Full host suite and ARM build-std release pass. Standalone actual-source
+      ABI smoke with allocation/zero-fill fixture adapters passes relocation,
+      tail clearing, duplicate rejection and insertion. match.py exits 1 with
+      38 original versus 39 Rust instructions: both scans, conditional expansion,
+      signed bounds, count increment and slot write remain. LLVM changes the
+      prologue/registers and branches instead of predicating; its R_ARM_CALL
+      targets element_array0_expand, the intentional identical-body fold of
+      element_array3_expand documented in its existing names.yaml entry.
