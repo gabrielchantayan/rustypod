@@ -258085,3 +258085,36 @@ functions:
       four cleared slots and intact tail canary. match.py reports 27 versus
       30 instructions, preserving multiply, null publication, conditional
       tail zero-fill and success-only capacity commit; calls become BLX.
+
+  - address: 0x083d4dd4
+    ghidra: FUN_083d4dd4
+    name: slot_array_insert
+    size: 164
+    sig: "i32 slot_array_insert(TrackedSlotArray *array, u32 value)"
+    module: cxx/slot_array_insert
+    status: ported
+    vars: {param_1/r4: array, param_2/r5: value, iVar1/r6: free_index}
+    renames:
+      FUN_083d4e78: slot_array_expand
+      FUN_083d4db8: slot_array_index_in_bounds
+    notes: >-
+      Raw A32 extent [0x083d4dd4,0x083d4e78) is 164 instruction bytes,
+      ending with pop return before the independent expansion prologue.
+      Whole-image aligned BL decoding finds one incoming plain BL at
+      0x081ef1d0 and zero incoming predicated BLs; outgoing BLEQ at
+      0x083d4e1c expands and plain BL at 0x083d4e54 validates the index.
+      Reject duplicates before expansion when count equals capacity; scan
+      relocated storage for the first zero, increment count modulo 2^32,
+      store value and return index, or return -1 when duplicate or full.
+      Preserve signed capacity comparisons and zero-value behavior.
+      No behavioral deviations; reuse existing six-word target-width layout
+      and both ported callees. Host tests cover every hole, duplicate
+      precedence when full, zero values, exhausted storage, signed empty
+      capacities, count overflow and relocation. Host suite and ARM release
+      build passed. Standalone public-entry smoke with real insertion,
+      expansion, bounds and zero-fill ports plus an mmap allocation adapter
+      observed relocated growth, preserved prefix, cleared tail, duplicate
+      rejection and last-hole insertion. match.py reports 46 versus 41
+      instructions: both scans, conditional expansion, bounds call and
+      predicated count/store remain; LLVM hoists storage loads and uses
+      branches instead of BLEQ. No device execution was exercised.
