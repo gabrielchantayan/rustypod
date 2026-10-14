@@ -16,6 +16,40 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083dc640
+    ghidra: FUN_083dc640
+    name: payload_list_destruct
+    size: 212
+    sig: "u32 *payload_list_destruct(u32 *list)"
+    module: cxx/payload_list_destruct
+    status: ported
+    vars: {param_1/r4: list, r5: chunk, local_18: cursor, local_1c: captured_sentinel}
+    renames: {FUN_083d6f40: not_equal_deref_alias_6f40, FUN_083dc3fc: list_node_pool_list_erase_releasing_payload, FUN_08266f2c: cxx_array_dealloc}
+    notes: >-
+      Raw extent 0x083dc640..0x083dc714 is 212 bytes; next independent PUSH
+      begins at 0x083dc714. Four outgoing plain BLs at 0x083dc688,
+      0x083dc69c, 0x083dc6d8, and 0x083dc6e8; no predicated BLs.
+      Whole-image A32 decoding finds one incoming plain BL at 0x0811f554
+      and no predicated calls. Caller 0x0811f548 uses the returned owner.
+      Erase live nodes to the initially captured sentinel; reload and recycle
+      the sentinel; unlink each chunk before releasing arena (capacity, 0)
+      then record (1, 0). Clear free/next/end and return list. Null sentinel
+      leaves every word untouched. Target pointer fields remain aligned u32.
+      Comparison is inlined. Erase deliberately calls retail 0x083dc3fc:
+      raw 0x083dc45c loads the release handle at node+8, then 0x083dc460
+      dereferences it once before BLX at 0x083dc464. The existing Rust erase
+      port dereferences twice, so reusing it would dispatch incorrectly.
+      No identity is invented for the indirect payload release.
+      Host suite passes 16006 tests; ARM build-std release passes.
+      Actual-source standalone smoke verifies null-sentinel preservation and
+      owner return; no device execution. Host tests cover empty and two-node
+      rings, release before recycling, multiple chunks, unlink-before-free,
+      poisoned freed records, and final state.
+      match.py reports 44 Rust versus 53 retail instructions (exit 1):
+      sentinel guard, captured-sentinel erase loop, post-erase sentinel reload,
+      arena/record release loop, three reset stores and owner return remain.
+      Erase is BLX to literal 0x083dc3fc; canonical deallocator drops unused
+      count/element arguments. Frame layout and inlined comparison differ.
   - address: 0x083dcdbc
     ghidra: FUN_083dcdbc
     name: region_list_destruct
