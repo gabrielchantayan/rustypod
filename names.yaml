@@ -259905,3 +259905,38 @@ functions:
       lower-bound loop, sentinel guard, reverse comparator and output store remain;
       LLVM removes spills, the accessor call and unused stateless comparator
       argument, and selects the child with an indexed load.
+
+  - address: 0x083b6cac
+    ghidra: FUN_083b6cac
+    name: typed_handler_pair_initialize
+    size: 84
+    sig: "TypedHandlerPair *typed_handler_pair_initialize(TypedHandlerPair *out, void **registry)"
+    module: app/typed_handler_pair_initialize
+    status: ported
+    renames:
+      param_1/r0/r4: out
+      param_2/r1/r5: registry
+      FUN_083eaae0: type_handler_lookup_primary_id
+      FUN_082a7280: typed_handler_registry_lookup
+      DAT_083b6cf8: opaque_default_entry
+      DAT_083b6cfc: secondary_type_id
+    notes: >-
+      Raw A32 establishes 76 executable bytes plus two literal words, ending
+      at the independent push at 0x083b6d00: true extent 84 bytes.
+      Whole-image aligned branch decoding finds one incoming plain BL at
+      0x083b69b8 and zero predicated BLs. Body has two plain BLs at
+      0x083b6cbc and 0x083b6ce4, no predicated BLs. Resolves the primary
+      handler through the existing port, writes it and its +16 subobject,
+      then resolves type ID 0x08a0fc28 with direction 1, flags 0x80 and
+      opaque default entry 0x083ab504. Writes the second result plus 16
+      and returns out. No NULL checks; additions wrap. Both callees reuse
+      existing Rust ports and their existing slow-lookup boundary.
+      Host pointers widen in repr(C); the fixed type ID uses raw firmware
+      words on hosts. Tests cover NULL results, ordinary and wrapping
+      addresses, intermediate write order and untouched adjacent fields.
+      Host suite passes 16135 tests; ARM release build succeeds. Standalone
+      API smoke observes primary 0x1000, primary subobject 0x1010 and NULL
+      secondary subobject 0x10, with destination returned. match.py exits 1:
+      19 original versus 23 Rust instructions including literal words.
+      Both lookup calls, +16 adjustments, stores and destination return
+      remain; LLVM combines the first two stores with STM and adds a frame.

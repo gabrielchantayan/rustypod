@@ -1216,6 +1216,7 @@ pub mod type_handler_lookup;
 pub mod type_handler_lookup_alt_id;
 pub mod type_handler_lookup_primary_id;
 pub mod typed_handler_registry_lookup;
+pub mod typed_handler_pair_initialize;
 pub mod stream_context_reset_notify;
 pub mod stream_cache_mass_storage_manager;
 pub mod stream_ensure_available;
