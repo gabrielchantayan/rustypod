@@ -28890,6 +28890,41 @@ functions:
       nodes} header and capacity*12 backing storage: one node for single, then
       32 initially and max(capacity + 32, capacity + capacity/2 + capacity/8).
       Deliberate deviations: none; pointer fields remain target-width u32 words.
+  - address: 0x083dd260
+    ghidra: FUN_083dd260
+    name: shared_cell_list_erase
+    size: 132
+    sig: "void shared_cell_list_erase(SharedCellListNode **out, SharedCellList *list, SharedCellListNode **iterator)"
+    module: cxx/shared_cell_list_erase
+    status: ported
+    renames:
+      param_1/r0: out
+      param_2/r1: list
+      param_3/r2: iterator
+      uVar1: successor
+      puVar2: node
+      FUN_083b52f4: shared_cell_release_direct_secondary
+    notes: >-
+      Raw osos.dec proves 33 A32 words, 132 bytes from 0x083dd260 through
+      the pop at 0x083dd2e0; the next real function starts at 0x083dd2e4.
+      Exactly one outgoing unconditional plain BL at 0x083dd2c4 targets
+      the registered shared_cell_release_direct_secondary at 0x083b52f4;
+      zero predicated BLs. Whole-image word decoding finds one incoming
+      plain BL at 0x0818b018 and no predicated BLs. The caller searches a
+      shared-cell list and erases its matching node. A sentinel iterator
+      only returns the sentinel. Otherwise saves next, unlinks both
+      directions, wrapping-decrements length, releases the cell at node+8,
+      reloads the iterator, pushes the node onto list+4's free chain, and
+      stores the saved successor to out. Tests cover sentinel no-op,
+      singleton and multi-node unlink, shared reference release, count
+      and refcount wrapping, null handles, and aliased output/iterator.
+      Deliberate deviation: repr(C) pointers widen for host fixtures while
+      preserving all ARM offsets. The existing release implementation is
+      called directly; no new firmware seam.
+      ARM structural comparison shows 28 LLVM instructions versus 33 retail
+      instructions, preserving the sentinel branch, bidirectional unlink,
+      count decrement, release BL, iterator reload, free-chain push, and
+      final successor store; register allocation removes redundant stack saves.
   - address: 0x083dd39c
     ghidra: FUN_083dd39c
     name: word_list_node_pool_list_recycle_all
