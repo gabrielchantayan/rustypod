@@ -333,6 +333,8 @@ pub mod hints {
     pub const HASH_TABLE_BUCKET_CONSTRUCT: usize = 0x6c60_0000;
     // 0x6c30_0000: dedicated to app/tracker_array_expand's target-width storage fixture; mappings never unmap.
     pub const TRACKER_ARRAY_EXPAND: usize = 0x6c30_0000;
+    // Dedicated tracker table expansion fixture; mapping never unmaps.
+    pub const TRACKER_TABLE_EXPAND: usize = 0x4fe0_0000;
     // Dedicated target-width element tracker expansion fixture; mapping never unmaps.
     pub const ELEMENT_TRACKER_ARRAY_EXPAND: usize = 0x4fdf_0000;
     // 0x6c40_0000: dedicated to app/element_array2_expand's target-width storage fixture; mappings never unmap.
