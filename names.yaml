@@ -35041,6 +35041,33 @@ functions:
       host fixtures deliberately replace both direct calls and widen the vtable
       pointer because native callback pointers and fixture allocations cannot
       occupy retailOS u32 words.
+  - address: 0x083d1cc0
+    ghidra: FUN_083d1cc0
+    name: element_array_remove_value
+    size: 64
+    sig: "i32 element_array_remove_value(ElementArrayRemoveValue *this, u32 value)"
+    module: cxx/element_array_remove_value
+    status: ported
+    renames:
+      param_1/r4: this
+      param_2: value
+      uStack_14: value_argument
+      iVar1/r5: index
+    notes: >-
+      Raw A32 establishes 64 instruction bytes [0x083d1cc0,0x083d1d00),
+      ending in POP before the next independent PUSH. Whole-image word
+      decoding finds one incoming plain BL at 0x08211c94 and zero predicated
+      BL callers. Outgoing direct plain and predicated BL counts are both
+      zero; indirect calls are BLX through slot +0x4c and BLXNE through +0x2c.
+      Lookup receives a pointer to a local copy of value; exactly -1 skips
+      erase. Otherwise reload the receiver vtable, erase at the lookup index,
+      and return that index regardless of erase's result. The sole caller
+      passes its +8 array and a node pointer after unlinking the node payload.
+      Concrete virtual targets remain unidentified; no direct callee seam
+      is introduced. Ghidra's extra arguments are incidental register/stack
+      residue. Host pointers and usize padding widen, keeping target slots
+      four bytes apart. Tests cover collection removal, absence, vtable
+      replacement during lookup, ignored erase results, and signed sentinels.
   - address: 0x083d1d00
     ghidra: FUN_083d1d00
     name: owned_element_array_attached_destruct
