@@ -715,6 +715,7 @@ pub mod basic_ios_initialize;
 pub mod streambuf_slot_peek_equal;
 pub mod streambuf_slot_peek_byte;
 pub mod streambuf_slot_consume;
+pub mod wide_streambuf_put;
 pub mod stream_parse_radix_segment;
 pub mod reverse_byte_cursor_pop;
 pub mod stream_read;

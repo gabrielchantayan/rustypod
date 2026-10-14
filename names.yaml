@@ -16,6 +16,38 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083da7fc
+    ghidra: FUN_083da7fc
+    name: wide_streambuf_put
+    size: 84
+    sig: "u32 wide_streambuf_put(WideStreambuf *buffer, u16 character)"
+    module: cxx/wide_streambuf_put
+    status: ported
+    vars: {param_1/r0: buffer, param_2/r1: character, r2: remaining_or_virtual_target}
+    notes: >-
+      Raw extent [0x083da7fc, 0x083da850) ends at POP before an independent
+      MOV PC,LR function. Whole-image A32 decoding finds one incoming plain
+      BL at 0x083d9d40 and zero predicated BLs. Body has no direct BLs and
+      one indirect MOV LR,PC; MOV PC,R2 call through vtable slot +0x28.
+      Flag 8 enables the put area; signed wrapping end-minus-cursor ASR 1
+      being nonzero advances cursor by two, stores a halfword and returns
+      its zero-extended value. Otherwise dispatch the unresolved virtual
+      slot and preserve its full u32 result. No concrete callee seam is
+      invented. Caller 0x083d9b20 converts/writes two-byte characters and
+      ignores the result. Ghidra incorrectly declares a void return.
+      repr(C) pointer fields and virtual slots widen only on hosts; ARM
+      offsets remain flags +4, cursor +0x24 and end +0x28. Arithmetic
+      retains wrapping u32 subtraction, including negative differences.
+      Host tests cover zero, high-bit and surrogate halfwords, last slot,
+      disabled/full/single-byte areas, negative differences, neighboring
+      storage, callback state transitions and full-width EOF-like returns.
+      Host suite and build-std ARM release pass. Actual-source executable
+      smoke exercises buffered surrogate then full-buffer virtual dispatch
+      with state changes and preserved neighbors; no device execution.
+      match.py exits 1: 19 Rust versus 21 stock instructions. Same flag
+      test, cursor/end offsets, advance-before-store and virtual slot.
+      LLVM replaces ASR/nonzero with unsigned difference >1, omits stack
+      argument reloads and tail-dispatches with BX rather than MOV PC.
   - address: 0x083db10c
     ghidra: FUN_083db10c
     name: payload_16_tree_construct
