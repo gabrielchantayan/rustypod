@@ -34951,6 +34951,42 @@ functions:
       vtable pointer; target accesses retain the observed 32-bit offsets. An
       empty target-only assembly barrier keeps this separately hooked retailOS
       BL target from folding into its identical sibling at 0x083cfe00.
+  - address: 0x083d1560
+    ghidra: FUN_083d1560
+    name: observable_array_remove_value
+    size: 64
+    sig: "int32_t observable_array_remove_value(ElementArrayRemoveValue *this, uint32_t value)"
+    module: cxx/observable_array_remove_value
+    status: ported
+    renames:
+      param_1/r0/r4: this
+      param_2/r1: value
+      uStack_14: value_copy
+      iVar1/r0/r5: index
+      "[vtable + 0x4c]": index_of
+      "[vtable + 0x2c]": erase_at
+    notes: >-
+      Raw osos.dec establishes sixteen A32 words spanning 0x083d1560 through
+      the POP at 0x083d159c; the independent PUSH at 0x083d15a0 is the next
+      function boundary. Whole-image decoding finds one inbound plain BL at
+      0x08136490 and zero predicated BLs. The body has no direct BLs, one
+      unconditional BLX through slot +0x4c, and one BLXNE through +0x2c.
+      Lookup receives a writable stack copy of value. Every result except
+      exactly -1 triggers erase through the reloaded vtable; return the saved
+      lookup result regardless of erase's return. Virtual callee identities
+      remain unresolved. Raw bytes are identical to already ported 0x083d1cc0,
+      so Rust deliberately tail-calls element_array_remove_value rather than
+      duplicating it. Host pointer slots widen; ARM slots remain four bytes.
+      Ghidra's extra arguments are incidental register residue. The sole
+      direct caller marks its changed byte only for a nonnegative result;
+      0x082ca5b4 reaches it through a tail branch, not a second direct BL.
+      ARM match.py confirms a four-instruction tail-call wrapper; reviewing
+      its reused target shows 21 instructions versus stock's 16, with both
+      virtual slots, the vtable reload, sentinel comparison, and saved return
+      preserved. LLVM uses an explicit stack store and BEQ instead of
+      predicated erase. Full host tests and the ARM release build passed;
+      an executable smoke removed the first duplicate and preserved an
+      absent value's collection.
   - address: 0x083d15a0
     ghidra: FUN_083d15a0
     name: observable_array_assert_empty_attached_destruct
