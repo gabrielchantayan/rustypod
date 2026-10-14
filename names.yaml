@@ -16,6 +16,39 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083d90b0
+    ghidra: FUN_083d90b0
+    name: strstreambuf_set_buffer
+    size: 188
+    sig: "u32 *strstreambuf_set_buffer(u32 *buffer, u8 *storage, i32 capacity)"
+    module: cxx/strstreambuf_set_buffer
+    status: ported
+    vars: {param_1/r4: buffer, param_2/r5: storage, param_3/r6: capacity, r7: previously_owned}
+    renames: {FUN_083da558: strstreambuf_set_buffer_owned, FUN_083da588: strstreambuf_set_dynamic, FUN_082aad74: operator_new_tag3, FUN_082aad14: operator_delete_tag3}
+    notes: >-
+      Raw extent [0x083d90b0,0x083d916c) is 188 bytes, ending before
+      the next independent PUSH. Whole-image aligned A32 decoding finds one
+      incoming plain BL at 0x083d9854, zero incoming predicated BLs.
+      Three outgoing plain BLs and one BLNE; one indirect MOV PC,R1
+      invokes vtable slot 13 without assigning a guessed concrete identity.
+      Preflight rejection returns null. Positive signed capacity installs
+      supplied storage or allocates capacity bytes, updates ownership, frees
+      old owned storage, disables dynamic mode and clears six cursors.
+      Nonpositive capacity accepts only null storage, retains allocation
+      and ownership, enables dynamic mode and clears cursors. Allocation
+      failure is installed unchecked as in retailOS. Existing heap and
+      flag ports are reused without new seams. Object fields stay u32;
+      host vtable entries use native pointer width. LLVM may reorder
+      independent cursor stores; no ordinary-storage behavioral deviation.
+      Host tests cover preflight rejection, signed capacity boundaries,
+      borrowed and owned transitions, allocation failure, unrelated flags
+      and neighboring storage. Host suite and ARM build-std release pass.
+      Standalone actual-source smoke exercised borrowed storage then dynamic
+      mode with isolated flag/heap dependencies; no device execution.
+      match.py exits 1 with a structural diff: virtual preflight, allocation,
+      ownership update, conditional deletion, dynamic flag and cursor resets
+      remain; LLVM uses BLX, a larger frame, separate pointer/capacity stores
+      and reordered independent cursor clears.
   - address: 0x083da588
     ghidra: FUN_083da588
     name: strstreambuf_set_dynamic

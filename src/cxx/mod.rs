@@ -720,6 +720,7 @@ pub mod wide_filebuf_set_owned;
 pub mod wide_filebuf_set_unbuffered;
 pub mod wide_filebuf_set_write_mode;
 pub mod wide_filebuf_set_buffer;
+pub mod strstreambuf_set_buffer;
 pub mod stream_parse_radix_segment;
 pub mod reverse_byte_cursor_pop;
 pub mod stream_read;
