@@ -16,6 +16,35 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083d59ec
+    ghidra: FUN_083d59ec
+    name: vtable_089a66c0_destruct
+    size: 44
+    sig: "u32 *vtable_089a66c0_destruct(u32 *this)"
+    module: cxx/vtable_089a66c0_destruct
+    status: ported
+    vars: {param_1/r4: this, DAT_083d5a18: VTABLE_089A66C0, "this+0x14": owned_payload, FUN_0802edc8: free}
+    notes: >-
+      Raw osos.dec proves eleven ARM instructions at 0x083d59ec..0x083d5a18,
+      ending with pop at 0x083d5a14. Literal 0x083d5a18 is 0x089a66c0;
+      next real function starts at 0x083d5a1c (48 bytes including literal).
+      Whole-image aligned immediate branch decoding finds one inbound plain
+      BL at 0x08284580, zero inbound predicated BLs and no inbound tail B.
+      Body has zero plain BLs and one BLNE at 0x083d5a04 to canonical ported
+      free at 0x0802edc8. Install vtable, conditionally free the u32 owned
+      pointer at +0x14, clear that word and return this. Caller 0x08284574
+      NULL-guards then tail-calls operator_delete at 0x082aad24. Class identity
+      remains unresolved. No new fixed-address seams. Deliberate codegen
+      deviations: noinline release wrapper retains a direct BL; LLVM changes
+      register allocation and replaces predication with a conditional skip.
+      Host tests cover null/high-bit payloads, install-before-free and
+      clear-after-free ordering, neighboring words, returned this and repeat
+      destruction. Host suite and build-std ARM release pass. Standalone
+      actual-source smoke passed these paths; no device execution. match.py
+      exits 1 with 11 original versus 16 Rust lines including the literal:
+      same vtable installation, +20 load, conditional release, clear and
+      returned pointer; LLVM shrink-wraps the prologue. The relocatable BL
+      operand is unresolved in match.py rather than a recursive call.
   - address: 0x083d5b1c
     ghidra: FUN_083d5b1c
     name: vtable_089a66f0_destruct
