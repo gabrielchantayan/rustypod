@@ -16,6 +16,35 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083d1b58
+    ghidra: FUN_083d1b58
+    name: owned_string_object_array_erase_at
+    size: 68
+    sig: "i32 owned_string_object_array_erase_at(ObservableArray *this, i32 index)"
+    module: cxx/owned_string_object_array_erase_at
+    status: ported
+    vars:
+      param_1/r4: this
+      param_2/r5: index
+      this_plus_0x10: owns_elements
+      FUN_083d6bec: container_element_at_alias_6bec
+      FUN_08201610: string_object_destroy_08201610
+      FUN_082aad24: operator_delete
+      FUN_08271bec: observable_array_erase_at
+    notes: >-
+      Raw A32 extent [0x083d1b58,0x083d1b9c) is 68 bytes, ending in a
+      tail B before an independent PUSH. Three outgoing plain BLs, zero
+      predicated BLs; one incoming plain BL at 0x08201b0c, zero predicated.
+      If byte +0x10 is nonzero, fetch the indexed object via virtual +0x40
+      and its cell load, destroy and delete a non-NULL StringObject, then
+      always base-erase with the unchanged index. Cleanup precedes validation;
+      the cell is not cleared. All callees reuse ports, no new stock seams.
+      Host pointers widen and accessor indices preserve target u32 bits.
+      Host boundary tests and ARM release build pass. Actual-source host smoke
+      confirms disabled and enabled-NULL rejection using test cfg; ordinary
+      host library build has four unrelated missing helper errors. Match exits
+      1: 17 original versus 18 Rust instructions; guards, three BLs and tail B
+      remain, with an added frame pointer and changed registers.
   - address: 0x083d1f80
     ghidra: FUN_083d1f80
     name: owned_element_array_erase_at
