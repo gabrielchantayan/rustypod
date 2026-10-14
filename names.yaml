@@ -258046,3 +258046,42 @@ functions:
       untouched tail canary. LLVM folds this export with element_tracker_array_expand;
       both symbols exist, but match.py selects only the canonical alias.
       Its 22-instruction diff preserves the algorithm; diagnostic is removed.
+
+  - address: 0x083d4e78
+    ghidra: FUN_083d4e78
+    name: slot_array_expand
+    size: 180
+    sig: "void slot_array_expand(TrackedSlotArray *array)"
+    module: cxx/slot_array_expand
+    status: ported
+    vars: {param_1/r4: array, iVar3/r5: expanded_capacity, iVar1/r0: resized_storage}
+    renames:
+      "array+0x00": storage
+      "array+0x04": capacity
+      "array+0x08": count
+      "array+0x0c": options
+      "array+0x10": growth
+      "array+0x14": tracker_label
+      FUN_0802edec: realloc
+      thunk_EXT_FUN_2200027c: memzero_aligned
+      FUN_083d4dd0: slot_array_tracker_diagnostic_no_op
+    notes: >-
+      Raw aligned A32 decoding establishes 120 code bytes ending at
+      0x083d4ef0 and 60 diagnostic-string bytes before the next real
+      function at 0x083d4f2c: occupied extent 180 bytes. Whole-image
+      decoding finds zero inbound plain BLs and one BLEQ at 0x083d4e1c;
+      three outbound plain BLs at 0x083d4e94, 0x083d4eb4 and 0x083d4ee8,
+      zero predicated outbound BLs. Multiply capacity by growth modulo
+      2^32, publish realloc result even on failure, zero the wrapped added
+      byte range on success, then commit capacity. Existing six-word layout
+      retains target-width pointer spacing. All callees already ported;
+      zero-fill veneer reaches the IRAM mirror of memzero_aligned.
+      Deliberate deviation: omit unused variadic arguments to the verified
+      bx lr diagnostic; retain its call (LLVM lowers it to a tail branch).
+      Volatile existing allocator and zero-fill pointers prevent builtin
+      substitution. Host tests cover relocation, growth one, failure,
+      zero capacity and arithmetic wrap. Host suite and ARM release build
+      passed. Exported-entry slab smoke observed preserved prefix/header,
+      four cleared slots and intact tail canary. match.py reports 27 versus
+      30 instructions, preserving multiply, null publication, conditional
+      tail zero-fill and success-only capacity commit; calls become BLX.
