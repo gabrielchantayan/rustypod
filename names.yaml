@@ -28815,6 +28815,43 @@ functions:
       deliberately remains visible on allocation failure. Target pointers are
       stored as u32 and indexed as words; a volatile realloc function pointer
       retains the allocator call boundary against LLVM inlining.
+  - address: 0x083d584c
+    ghidra: FUN_083d584c
+    name: fixed_increment_u32_array_construct
+    size: 96
+    sig: "FixedIncrementU32Array *fixed_increment_u32_array_construct(FixedIncrementU32Array *array, u32 capacity)"
+    module: cxx/fixed_increment_u32_array_construct
+    status: ported
+    vars: {param_1/r0: array, param_2/r5: capacity, "array+0x00": vtable, "array+0x04": allocated, "array+0x08": increment, "array+0x0c": len, "array+0x10": compacted_byte, "array+0x14": values}
+    renames:
+      FUN_0813eec4: opaque_header_literal_construct
+      FUN_0802edac: malloc
+      thunk_FUN_08030f44: heap_panic_nonreturn_entry
+      DAT_083d58a8: VTABLE_089A6690
+    notes: >-
+      Raw A32 extent [0x083d584c,0x083d58ac) contains 92 instruction
+      bytes and the 0x089a6690 literal at 0x083d58a8; the next real
+      function opens with PUSH at 0x083d58ac. Whole-image aligned BL
+      decoding finds one plain incoming call at 0x0827bf80, zero
+      predicated incoming calls. Body has two plain BLs to the canonical
+      header constructor and malloc, plus one BLEQ to 0x080eba5c.
+      Ghidra loses the incoming object argument and mistakes the header
+      constructor's r0 passthrough for allocation. Construct in place,
+      set increment to 16 and length to zero, clear only the byte at
+      +0x10, install the vtable, default zero capacity to 16, allocate
+      wrapping u32 capacity*4 bytes, store values before the fatal NULL
+      check, then commit capacity and return this. Preserve padding and
+      leave element storage uninitialized. Reuse the existing six-word
+      array layout and ported callees; deliberately call heap_panic
+      directly instead of its one-word entry. Volatile malloc dispatch
+      preserves the call boundary. Host tests cover default/nonzero and
+      overflowing capacities, padding/object bounds, and fatal allocation.
+      ARM release build succeeds; match.py prints the expected structural
+      diff (LLVM store scheduling, frame pointer, indirect malloc, and
+      conditional return around the fatal gate). Standalone host smoke
+      using the real constructor/append bodies and a host mmap allocator
+      fills all 16 initial slots and preserves the padding bytes; device
+      execution was not exercised.
   - address: 0x083db704
     ghidra: FUN_083db704
     name: kinded_node_pool_construct
