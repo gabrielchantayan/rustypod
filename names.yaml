@@ -259482,3 +259482,35 @@ functions:
       and base tail-chain are preserved. Standalone host smoke is blocked by
       existing non-test unresolved helpers in prepare_entry_metadata,
       shared_payload_select_kind and calendar_schedule; these remain unchanged.
+
+  - address: 0x083cf818
+    ghidra: FUN_083cf818
+    name: equal_deref
+    size: 24
+    sig: "u32 equal_deref(const u32 *a, const u32 *b)"
+    module: cxx/templates
+    status: ported
+    vars: {param_1: a, param_2: b}
+    notes: >-
+      Raw osos.dec contains six A32 words from 0x083cf818 through bx lr
+      at 0x083cf82c; the next real function starts at 0x083cf830.
+      ldr r0,[r0]; ldr r1,[r1]; cmp r0,r1; movne r0,#0; moveq r0,#1;
+      bx lr. Independent whole-image aligned decoding finds one incoming
+      plain BL at 0x083c3330, zero predicated BLs and zero outgoing BLs.
+      The branch-shaped word 0x9aec9ca1 at 0x088a858c is in non-code data,
+      not a verified tail caller. Caller 0x083c327c compares the candidate
+      iterator word against the tree header's leftmost word before insertion.
+      The body is byte-identical to the already-ported equal_deref at
+      0x083cf968; deliberately reuse that export rather than introduce
+      a duplicate dispatch seam. Both operands require readable aligned
+      words, with no NULL guard; their contents are never dereferenced.
+      Shared host coverage includes equal values at distinct addresses,
+      aliasing operands, zero, all-bits-set, sign-bit and low-bit differences,
+      and iterator records with distinct trailing words.
+      Host suite and ARM release build pass. A standalone smoke compiled
+      from the actual Rust function body confirms equal, unequal and
+      zero-node iterator results. match.py resolves equal_deref and prints
+      the expected structural diff (exit 1): eight instructions versus six,
+      frame-pointer prologue/epilogue and sub/clz/lsr replace the retail
+      cmp/movne/moveq selection; two word loads and normalized equality
+      are preserved.
