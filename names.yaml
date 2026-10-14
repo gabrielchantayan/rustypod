@@ -258578,3 +258578,39 @@ functions:
       signed bounds, NULL guard, word-seven BLX, data reload, clear and count
       decrement remain. LLVM replaces predication with early branches and
       changes register saves/returns; identical removal exports may fold.
+  - address: 0x083d3bdc
+    ghidra: FUN_083d3bdc
+    name: tracked_empty_handle_remove
+    size: 76
+    sig: "void tracked_empty_handle_remove(TrackedSlotArray *array, i32 index)"
+    module: cxx/tracked_empty_handle_remove
+    status: ported
+    vars:
+      param_1: array
+      param_2: index
+      piVar1: capacity
+      FUN_081070b4: empty_destructor_1070b4
+      FUN_082aad24: operator_delete
+    notes: >-
+      Raw A32 establishes [0x083d3bdc,0x083d3c28), 76 bytes ending in
+      e8bd8070 before the next independent e92d407c PUSH. Ghidra's 48-byte
+      extent truncates the final 28 bytes because delete is incorrectly
+      noreturn. Independent whole-image aligned BL decoding finds zero
+      incoming plain BLs and one BLNE at 0x081062fc; two outgoing plain BLs
+      at 0x083d3c04 and 0x083d3c08, no outgoing predicated BLs. Reject negative
+      indices or indices >= signed capacity at +4, ignore null slots, call
+      the existing identity destructor at 0x081070b4 and tag-2 operator_delete,
+      reload storage at +0, clear the selected u32 slot, then decrement the
+      reloaded used count at +8 modulo 2^32. Caller 0x08106108 drains this
+      tracker at owner +0x48. Class identity remains unresolved; no new seams.
+      Deliberate deviations: repr(C) header pointers widen on hosts while
+      slot words remain u32; LLVM removes the inert destructor BL, retains
+      operator_delete, changes registers/prologue and replaces predication
+      with branches. Host tests cover signed boundaries, null slots, each
+      live slot, repeat removal, post-delete storage/count mutations and
+      wrapping subtraction. Full host suite and ARM release build pass.
+      Exported host smoke proves bounds/null-slot state preservation using
+      a directly compiled test-configured library because unrelated existing
+      host non-test code has unresolved helpers. Both default-size and
+      explicit --size 76 match.py reports reviewed; full extent preserves
+      guards, delete, reloads, clearing and decrement, with expected codegen diff.
