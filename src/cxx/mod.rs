@@ -388,6 +388,7 @@ pub mod list_node_pool_list_append_value;
 pub mod list_node_pool_list_erase;
 pub mod list_node_pool_list_erase_releasing_payload;
 pub mod list_node_pool_clear_owned;
+pub mod record_40_list_clear;
 pub mod list_node_pool_list_construct;
 pub mod selector_list_construct;
 pub mod list_node_pool_list_insert_payload_range;
