@@ -256743,3 +256743,35 @@ functions:
       slot retreat, delete, count branch, reanchor and clear/map delete remain.
       LLVM removes helper calls/dead allocator arguments and tail-calls map
       delete. No device execution performed.
+
+  - address: 0x083dc968
+    ghidra: FUN_083dc968
+    name: record_40_list_construct
+    size: 72
+    sig: "Record40List *record_40_list_construct(Record40List *list)"
+    module: cxx/record_40_list_construct
+    status: ported
+    renames:
+      param_1/r0/r4: list
+      uVar1/r0: sentinel
+      "list+0x00": pool.chunks
+      "list+0x04": pool.free
+      "list+0x08": pool.next
+      "list+0x0c": pool.end
+      "list+0x10": sentinel
+      "list+0x14": count
+      FUN_083dc7e4: record_40_list_node_pool_acquire
+    notes: >-
+      Raw osos.dec establishes the 72-byte extent [0x083dc968,0x083dc9b0):
+      push {r4,lr} through pop {r4,pc}, immediately followed by the next
+      function's push {r4-r6,lr}. Independent aligned A32 decoding finds
+      one outgoing plain BL at 0x083dc994 to the ported node pool acquire
+      at 0x083dc7e4, zero predicated outgoing BLs, one incoming plain BL
+      at 0x081a8b94, and zero predicated incoming BLs. Clear six words,
+      acquire a one-node chunk, store the sentinel, self-link its two
+      links, and return the original list. Payload is left uninitialized.
+      Deliberate deviations: none; unused caller r1 is omitted and stored
+      pointers remain u32 target words on hosts. The existing shared-record
+      list owner now calls this port instead of inlining its stores.
+      Host tests cover dirty and zero storage, empty-ring and exhausted-pool
+      invariants, untouched payload, and adjacent storage boundaries.
