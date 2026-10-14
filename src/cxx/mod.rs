@@ -135,6 +135,7 @@ pub mod vtable_089a58c8_destruct;
 pub mod vtable_08981fec_destruct;
 pub mod vtable_08981e3c_destruct;
 pub mod fixed_increment_u32_array_append;
+pub mod fixed_increment_u32_array_construct;
 pub mod vector_copy_construct_elem20;
 pub mod vector_copy_construct_elem32;
 pub mod path_object_vector_push_back;
