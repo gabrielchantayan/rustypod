@@ -198,6 +198,73 @@ pub unsafe extern "C" fn word_key_map_find_db19c_copy(
     out.write(candidate);
 }
 
+/// Stack value_type passed to the retail word-key map insertion routine.
+#[repr(C)]
+pub struct WordKeyMapPair {
+    pub key: u32,
+    pub value: u32,
+}
+
+/// Iterator/inserted pair written by the unported insertion routine.
+#[repr(C)]
+pub struct WordKeyMapInsertResult {
+    pub node: *mut WordKeyMapNode,
+    pub inserted: u8,
+}
+
+pub type WordKeyMapInsertUnique = unsafe extern "C" fn(
+    *mut WordKeyMapInsertResult, *mut WordKeyMap, *const WordKeyMapPair,
+);
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_word_key_map_insert_unique(
+    _result: *mut WordKeyMapInsertResult,
+    _map: *mut WordKeyMap,
+    _pair: *const WordKeyMapPair,
+) {
+    panic!("word_key_map_value_slot requires retail insertion 0x083cde30")
+}
+
+/// Host seam only; device builds call the verified retail address directly.
+#[cfg(not(target_os = "none"))]
+pub static mut WORD_KEY_MAP_INSERT_UNIQUE: WordKeyMapInsertUnique =
+    missing_word_key_map_insert_unique;
+
+/// word_key_map_value_slot — `FUN_083dbd64` @ **0x083dbd64**.
+/// True extent: **56 bytes**, `0x083dbd64..0x083dbd9c`; the next function
+/// starts with PUSH at 0x083dbd9c. One outgoing plain BL to 0x083cde30,
+/// zero predicated BLs; one inbound plain BL at 0x081e14b4, zero predicated.
+///
+/// Copies the unsigned key into a stack pair with a zero mapped word,
+/// invokes map insertion, and returns the selected node's mapped-word address.
+/// Existing values are preserved; absent keys are value-initialized to zero.
+/// Deliberate deviations: omit the dead stack home of the returned node;
+/// use typed fields so host pointer widening preserves the layout's meaning.
+/// The unported insertion remains a direct retail call on device and a narrow
+/// host seam, following the silver_item_map_value_slot convention.
+///
+/// # Safety
+/// `map` must be a live retail word-key map and `key` a readable aligned u32.
+/// Insertion must return a live WordKeyMapNode and may invalidate pool pointers.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn word_key_map_value_slot(
+    map: *mut WordKeyMap,
+    key: *const u32,
+) -> *mut u32 {
+    let pair = WordKeyMapPair { key: key.read(), value: 0 };
+    let mut result = WordKeyMapInsertResult {
+        node: core::ptr::null_mut(),
+        inserted: 0,
+    };
+    #[cfg(target_os = "none")]
+    let insert: WordKeyMapInsertUnique = core::mem::transmute(0x083c_de30usize);
+    #[cfg(not(target_os = "none"))]
+    let insert = core::ptr::addr_of!(WORD_KEY_MAP_INSERT_UNIQUE).read_volatile();
+    insert(&mut result, map, &pair);
+    core::ptr::addr_of_mut!((*result.node).value)
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -206,6 +273,81 @@ mod tests {
     use core::ptr;
     use std::boxed::Box;
     use std::vec::Vec;
+
+    // Semantic host reference for the unported operation, without balancing.
+    unsafe extern "C" fn reference_insert(
+        result: *mut WordKeyMapInsertResult,
+        map: *mut WordKeyMap,
+        pair: *const WordKeyMapPair,
+    ) {
+        let mut link = core::ptr::addr_of_mut!((*(*map).header).parent);
+        let mut parent = (*map).header;
+        while !(*link).is_null() {
+            let current = *link;
+            if (*pair).key == (*current).key {
+                result.write(WordKeyMapInsertResult { node: current, inserted: 0 });
+                return;
+            }
+            parent = current;
+            link = if (*pair).key < (*current).key {
+                core::ptr::addr_of_mut!((*current).left)
+            } else {
+                core::ptr::addr_of_mut!((*current).right)
+            };
+        }
+        let mut fresh = Box::new(node((*pair).key));
+        fresh.parent = parent;
+        fresh.value = (*pair).value;
+        let fresh = Box::into_raw(fresh);
+        link.write(fresh);
+        (*map).node_count += 1;
+        result.write(WordKeyMapInsertResult { node: fresh, inserted: 1 });
+    }
+
+    #[test]
+    fn value_slot_initializes_absent_keys_and_preserves_existing_values() {
+        static LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
+        let _lock = LOCK.lock();
+        struct Reset(WordKeyMapInsertUnique);
+        impl Drop for Reset {
+            fn drop(&mut self) {
+                unsafe { WORD_KEY_MAP_INSERT_UNIQUE = self.0; }
+            }
+        }
+        let _reset = unsafe {
+            let reset = Reset(WORD_KEY_MAP_INSERT_UNIQUE);
+            WORD_KEY_MAP_INSERT_UNIQUE = reference_insert;
+            reset
+        };
+        let mut tree = tree(&[]);
+        let mut allocated = Vec::new();
+        // Empty map, unsigned ordering extremes, interior key, and inputs
+        // aliasing an existing mapped word.
+        for key in [0x8000_0000, 0, u32::MAX, 7] {
+            unsafe {
+                let slot = word_key_map_value_slot(&mut *tree.map, &key);
+                assert_eq!(slot.read(), 0);
+                let found = find(&mut tree, key);
+                assert_eq!(slot, core::ptr::addr_of_mut!((*found).value));
+                slot.write(key);
+                assert_eq!(word_key_map_value_slot(&mut *tree.map, slot), slot);
+                assert_eq!(slot.read(), key);
+                allocated.push(found);
+            }
+        }
+        assert_eq!(tree.map.node_count, 4);
+        for (index, &key) in [0x8000_0000, 0, u32::MAX, 7].iter().enumerate() {
+            unsafe {
+                let slot = word_key_map_value_slot(&mut *tree.map, &key);
+                assert_eq!(slot.read(), key);
+                assert_eq!(find(&mut tree, key), allocated[index]);
+            }
+        }
+        assert_eq!(tree.map.node_count, 4);
+        for pointer in allocated {
+            unsafe { drop(Box::from_raw(pointer)); }
+        }
+    }
 
     fn node(key: u32) -> WordKeyMapNode {
         WordKeyMapNode {

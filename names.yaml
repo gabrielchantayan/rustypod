@@ -256909,3 +256909,42 @@ functions:
       range-end branch and both helper paths. LLVM simplifies the loop
       predicates and uses BLX through literal 0x083dc484 for range erase.
       No device execution performed.
+
+  - address: 0x083dbd64
+    ghidra: FUN_083dbd64
+    name: word_key_map_value_slot
+    size: 56
+    sig: "u32 *word_key_map_value_slot(WordKeyMap *map, const u32 *key)"
+    module: cxx/word_key_map
+    status: ported
+    renames:
+      param_1/r0: map
+      param_2/r1: key
+      uStack_14: pair.key
+      uStack_10: pair.value
+      local_c: result
+      FUN_083cde30: word_key_map_insert_unique_retail
+    notes: >-
+      Raw osos.dec establishes the fourteen-word A32 body at
+      0x083dbd64..0x083dbd9c (56 bytes); the next real function begins
+      with PUSH at 0x083dbd9c. Exactly one outgoing unconditional plain
+      BL targets 0x083cde30, with zero predicated BLs. Independent
+      whole-image A32 branch decoding finds one inbound unconditional
+      plain BL at 0x081e14b4 and zero predicated inbound BLs. The caller
+      stores its mapped word through the returned pointer. Copies the
+      unsigned key into pair {key, 0}, inserts if absent, and returns
+      node.value at target offset 0x14. Existing mapped values survive.
+      Neither this address nor the callee had a canonical address entry
+      before this port. Callee identity follows its raw unsigned-key
+      tree descent and decompiled duplicate/insertion branches, not a
+      guessed symbol. The unported insertion remains a direct device
+      call at 0x083cde30; the host seam follows silver_item_map_value_slot.
+      Typed repr(C) fields accommodate host pointer widening. The dead
+      stack home is omitted. Host edge tests cover empty insertion,
+      unsigned extremes, duplicates, mapped-word alias inputs, and
+      preservation of existing values. A separate executable smoke
+      exercised zero initialization and stable existing value pointers.
+      match.py exit 1 shows expected frame changes, initialized result
+      scratch, and a literal-address BLX instead of the original BL;
+      the key/zero pair, one insertion call, and node+20 return remain.
+      Full x86_64 host tests and the release ARM build passed.
