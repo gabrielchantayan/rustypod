@@ -258733,3 +258733,32 @@ functions:
       sequential reference. All 16090 host tests pass; ARM release builds.
       Standalone smoke verifies forward overlap and destination return.
       match.py shows five stock versus seven Rust instructions: identical
+  - address: 0x083d305c
+    ghidra: FUN_083d305c
+    name: word_pair_copy_construct
+    size: 20
+    sig: "uint32_t *word_pair_copy_construct(uint32_t *destination, const uint32_t *source)"
+    module: util/word_pair_copy_forward
+    status: ported
+    renames:
+      param_1/r0: destination (preserved and returned)
+      param_2/r1: source
+      r2: first_word
+    notes: >-
+      Raw words e5912000 e5802000 e5911004 e5801004 e12fff1e establish
+      extent [0x083d305c,0x083d3070), followed by an independent copy body.
+      Whole-image aligned ARM BL decoding finds one plain inbound BL at
+      0x08269880, zero predicated inbound BLs and zero outbound BLs.
+      Caller 0x08269768 copy-constructs a stack pair from an insertion
+      result and reads it through the preserved destination pointer in r0.
+      Alternating aligned u32 reads and writes preserve sequential overlap
+      behavior, including first-word propagation on forward overlap.
+      No callee seams or deliberate behavioral deviations. Existing module
+      tests exercise both copy entry points against a sequential reference,
+      covering all relative positions, self-copy, full-bit values and
+      sentinels. Host suite passes 16090 tests; ARM build-std release passes.
+      Actual-source host smoke verifies forward overlap and destination return.
+      match.py reports five stock versus seven Rust instructions: the four
+      ordered memory operations match; LLVM adds a frame-pointer prologue
+      and returns with POP instead of BX LR. LLVM folds the identical
+      word_pair_copy_forward body; both exported symbols remain present.

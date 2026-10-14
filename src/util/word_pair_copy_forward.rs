@@ -26,34 +26,68 @@ pub unsafe extern "C" fn word_pair_copy_forward(
     destination
 }
 
+/// `word_pair_copy_construct` — retailOS `FUN_083d305c` at **0x083d305c**.
+/// True extent: **20 bytes**, `0x083d305c..0x083d3070`; the next function
+/// starts another independent copy body. Raw words are e5912000 e5802000
+/// e5911004 e5801004 e12fff1e. Whole-image ARM decoding verifies one plain
+/// inbound BL (0x08269880), zero predicated inbound BLs and zero outbound BLs.
+/// Caller 0x08269768 copies a two-word insertion result into stack storage,
+/// then reads it through the preserved destination in r0. Copy each aligned
+/// word in ascending order, alternating reads and writes so forward overlap
+/// propagates the first word.
+///
+/// Deliberate deviations: none; expose preserved r0 as the return value.
+/// LLVM may fold this body with the identical word_pair_copy_forward port.
+///
+/// # Safety
+/// Source must permit two aligned u32 reads and destination two aligned u32
+/// writes. The ranges may overlap; neither pointer may be null.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn word_pair_copy_construct(
+    destination: *mut u32,
+    source: *const u32,
+) -> *mut u32 {
+    destination.write(source.read());
+    destination.add(1).write(source.add(1).read());
+    destination
+}
+
 #[cfg(test)]
 mod tests {
-    use super::word_pair_copy_forward;
+    use super::{word_pair_copy_construct, word_pair_copy_forward};
+
+    const COPIERS: [unsafe extern "C" fn(*mut u32, *const u32) -> *mut u32; 2] =
+        [word_pair_copy_forward, word_pair_copy_construct];
 
     #[test]
     fn disjoint_copy_preserves_neighbors_and_all_bits() {
-        for pair in [[0, u32::MAX], [0x80000000, 0x12345678], [u32::MAX, 0]] {
-            let source = [0x11111111, pair[0], pair[1], 0x22222222];
-            let mut destination = [0x33333333, 0, 0, 0x44444444];
-            let dst = unsafe { destination.as_mut_ptr().add(1) };
-            assert_eq!(unsafe { word_pair_copy_forward(dst, source.as_ptr().add(1)) }, dst);
-            assert_eq!(destination, [0x33333333, pair[0], pair[1], 0x44444444]);
-            assert_eq!(source, [0x11111111, pair[0], pair[1], 0x22222222]);
+        for copy in COPIERS {
+            for pair in [[0, u32::MAX], [0x80000000, 0x12345678], [u32::MAX, 0]] {
+                let source = [0x11111111, pair[0], pair[1], 0x22222222];
+                let mut destination = [0x33333333, 0, 0, 0x44444444];
+                let dst = unsafe { destination.as_mut_ptr().add(1) };
+                assert_eq!(unsafe { copy(dst, source.as_ptr().add(1)) }, dst);
+                assert_eq!(destination, [0x33333333, pair[0], pair[1], 0x44444444]);
+                assert_eq!(source, [0x11111111, pair[0], pair[1], 0x22222222]);
+            }
         }
     }
 
     #[test]
     fn overlapping_copy_matches_sequential_word_reference() {
-        for source_index in 0..4 {
-            for destination_index in 0..4 {
-                let mut actual = [0x12345678, 0xabcdef01, 0, u32::MAX, 0x80000000];
-                let mut expected = actual;
-                expected[destination_index] = expected[source_index];
-                expected[destination_index + 1] = expected[source_index + 1];
-                let base = actual.as_mut_ptr();
-                let dst = unsafe { base.add(destination_index) };
-                assert_eq!(unsafe { word_pair_copy_forward(dst, base.add(source_index)) }, dst);
-                assert_eq!(actual, expected, "source={source_index}, destination={destination_index}");
+        for copy in COPIERS {
+            for source_index in 0..4 {
+                for destination_index in 0..4 {
+                    let mut actual = [0x12345678, 0xabcdef01, 0, u32::MAX, 0x80000000];
+                    let mut expected = actual;
+                    expected[destination_index] = expected[source_index];
+                    expected[destination_index + 1] = expected[source_index + 1];
+                    let base = actual.as_mut_ptr();
+                    let dst = unsafe { base.add(destination_index) };
+                    assert_eq!(unsafe { copy(dst, base.add(source_index)) }, dst);
+                    assert_eq!(actual, expected, "source={source_index}, destination={destination_index}");
+                }
             }
         }
     }
