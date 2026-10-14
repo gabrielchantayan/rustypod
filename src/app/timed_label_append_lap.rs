@@ -9,21 +9,16 @@
 //! remove index zero if the signed append result exceeds 198, return 1.
 //!
 //! No target behavioral deviations; reuse the ported tag-2 allocator.
-//! Collection removal at 0x083d2058 remains a firmware call, not a port.
+//! Collection removal calls the owned-cell erase port at 0x083d2058.
 //! Host vtable entries use native pointer width; owner+0x30 stays a byte
 //! offset. Tests inject allocation/removal without changing global seams.
 
 use crate::heap::veneers::operator_new;
 
 type Append = unsafe extern "C" fn(*mut u8, *mut *mut u32) -> i32;
-#[cfg(target_os = "none")]
-type Remove = unsafe extern "C" fn(*mut u8, i32) -> i32;
 
 unsafe fn remove_first(collection: *mut u8) {
-    #[cfg(target_os = "none")]
-    { core::mem::transmute::<usize, Remove>(0x083d_2058)(collection, 0); }
-    #[cfg(not(target_os = "none"))]
-    { let _ = collection; panic!("collection removal requires retailOS"); }
+    crate::cxx::owned_cell_array_erase_at::owned_cell_array_erase_at(collection.cast(), 0);
 }
 
 #[inline(always)]

@@ -16,6 +16,36 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083d2058
+    ghidra: FUN_083d2058
+    name: owned_cell_array_erase_at
+    size: 68
+    sig: "i32 owned_cell_array_erase_at(ObservableArray *this, i32 index)"
+    module: cxx/owned_cell_array_erase_at
+    status: ported
+    vars:
+      param_1/r4: this
+      param_2/r5: index
+      this_plus_0x10: owns_cells
+      virtual_0x40: element_at
+      cell_plus_0: allocation
+      FUN_082aad24: operator_delete
+      FUN_08271bec: observable_array_erase_at
+    notes: >-
+      Raw A32 extent [0x083d2058,0x083d209c) is 68 bytes, ending in a
+      tail B before the next independent PUSH. Whole-image word decoding
+      finds zero incoming plain BLs and one BLGT at 0x081d0fb8. Outgoing:
+      one plain BL to operator_delete at 0x083d2088, no predicated BLs,
+      one virtual BLX through +0x40, and a tail B to observable_array_erase_at.
+      When byte +0x10 is nonzero, fetch the cell for the unchanged signed
+      index and delete its allocation word, including NULL, before base
+      erase validation. No element destructor or cell clear. Both fixed
+      callees reuse existing ports; caller timed_label_append_lap now calls
+      this port directly. Host pointers widen. Host tests and ARM release
+      build pass; standalone test-configured host smoke confirms disabled
+      empty-array rejection. Match exits 1: 17 original versus 16 Rust
+      instructions, preserving conditional fetch/delete and base tail call.
+      LLVM shrink-wraps the frame and changes registers. No device execution.
   - address: 0x083d4568
     ghidra: FUN_083d4568
     name: tracked_refcounted_handle_remove
