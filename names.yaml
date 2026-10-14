@@ -16,6 +16,44 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083d4a48
+    ghidra: FUN_083d4a48
+    name: tracked_opaque_owner_remove
+    size: 76
+    sig: "void tracked_opaque_owner_remove(TrackedSlotArray *array, i32 index)"
+    module: cxx/tracked_opaque_owner_remove
+    status: ported
+    vars:
+      param_1/r4: array
+      param_2/r5: index
+      array_plus_0x00: data
+      array_plus_0x04: slots
+      array_plus_0x08: used
+      FUN_0826fc64: empty_destructor
+      FUN_082aad24: operator_delete
+    notes: >-
+      Raw A32 establishes [0x083d4a48,0x083d4a94), 76 bytes ending in
+      POP before the next independent constructor PUSH. Ghidra's 48-byte
+      extent is truncated by its incorrect noreturn delete annotation.
+      Whole-image aligned BL decoding finds zero incoming plain BLs and one
+      BLNE at 0x0810618c; outgoing calls are two plain BLs at 0x083d4a70
+      and 0x083d4a74, with zero predicated BLs. Reject negative indices and
+      indices >= signed slots; NULL slots are inert. Call the canonical
+      empty_destructor port, then tag-2 operator_delete on its identity
+      result, reload data, clear the selected slot and decrement reloaded
+      used modulo 2^32. Caller 0x08106108 drains the tracker at owner +0xa8.
+      No new firmware seams. Native header pointers widen on hosts while
+      slot words stay u32. Tests cover signed bounds, holes, every live
+      position, repeated removal, storage/count mutation during deletion
+      and decrement wraparound. Host suite: 16067 passed. ARM release
+      build passed. Isolated exported-path smoke unmapped a real owner via
+      tag-2 heap dispatch, then verified cleared slot, decremented count and
+      inert repeat. Default match.py truncates the original; --size 76
+      reviews all 19 original instructions against 23 Rust instructions.
+      LLVM removes the inert empty_destructor call despite noinline, retains
+      the operator_delete BL (verified R_ARM_CALL), signed guards, NULL
+      handling and post-delete reloads. Other deviations are branches in
+      place of predication and changed registers/frame. No device run.
   - address: 0x083d53f0
     ghidra: FUN_083d53f0
     name: tracked_string_chain_remove
