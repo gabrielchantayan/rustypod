@@ -1065,8 +1065,54 @@ pub unsafe extern "C" fn element_array1_remove(this: *mut u8, index: i32) {
     used.write(used.read().wrapping_sub(1));
 }
 
+/// element_array2_remove — `FUN_083d40a0` @ **0x083d40a0**.
+/// True extent: 80 bytes, [0x083d40a0, 0x083d40f0); the next
+/// constructor begins with an independent push at 0x083d40f0.
+/// Whole-image raw A32 decoding verifies zero incoming plain BLs and one
+/// BLNE at 0x08106358. No outgoing plain or predicated BLs; one register
+/// BLX invokes vtable word seven (+0x1c), whose identity is not established.
+///
+/// Reject negative indices and indices >= signed capacity. For a non-NULL
+/// element, dispatch with the element as `this`, reload the slot buffer,
+/// clear the selected slot, and decrement the current used count modulo
+/// 2^32. Empty slots leave the count unchanged. The caller tears down the
+/// element table's third array at +0x30.
+///
+/// Deliberate deviation: host pointer, header and vtable strides widen,
+/// following this module's convention; scalar fields remain u32.
+/// ARM retains the original four-byte layout and behavior.
+/// LLVM deliberately folds the identical body with `element_array1_remove`;
+/// both exported symbols share its 100-byte section. match.py's label lookup
+/// cannot select this alias; review of the shared label verifies equivalent
+/// bounds checks, NULL handling, dispatch, reload, clearing and decrement.
+///
+/// # Safety
+/// For nonnegative indices, `this` must expose a readable capacity word.
+/// In-range storage must be readable. Non-NULL elements must have a valid
+/// vtable with an `unsafe extern "C" fn(*mut u8)` at word seven.
+/// The header and current selected slot must remain writable after dispatch.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn element_array2_remove(this: *mut u8, index: i32) {
+    if index < 0 || array_slots(this) <= index {
+        return;
+    }
+    let element = array_data(this).add(index as usize).read();
+    if element.is_null() {
+        return;
+    }
+    let vtable = (element as *const *const usize).read();
+    let remove: unsafe extern "C" fn(*mut u8) =
+        core::mem::transmute(vtable.add(7).read());
+    remove(element);
+    let data = array_data(this) as *mut *mut u8;
+    data.add(index as usize).write(core::ptr::null_mut());
+    let used = this.add(ARRAY_USED_INDEX * WORD) as *mut u32;
+    used.write(used.read().wrapping_sub(1));
+}
+
 #[cfg(test)]
-mod array1_remove_tests {
+mod array_remove_tests {
     use super::*;
 
     #[repr(C)]
@@ -1090,11 +1136,10 @@ mod array1_remove_tests {
         }
     }
 
-    #[test]
-    fn signed_bounds_empty_slots_and_repeated_removal() {
+    fn check_bounds_and_repeated_removal(remove: unsafe extern "C" fn(*mut u8, i32)) {
         unsafe {
             // A negative index must not even dereference the header.
-            element_array1_remove(core::ptr::null_mut(), -1);
+            remove(core::ptr::null_mut(), -1);
             let mut slots = [core::ptr::null_mut::<u8>(); 3];
             let mut header = [slots.as_mut_ptr() as usize, 3, 1, 0, 0, 0];
             let mut vtable = [0usize; 8];
@@ -1106,25 +1151,24 @@ mod array1_remove_tests {
             slots[1] = (&mut element as *mut Element).cast();
             for (capacity, index) in [(3, 3), (3, i32::MAX), (0, 0), (u32::MAX, 0)] {
                 header[1] = capacity as usize;
-                element_array1_remove(header.as_mut_ptr().cast(), index);
+                remove(header.as_mut_ptr().cast(), index);
                 assert_eq!(element.calls, 0);
                 assert_eq!(header[2], 1);
             }
             header[1] = 3;
-            element_array1_remove(header.as_mut_ptr().cast(), 0);
+            remove(header.as_mut_ptr().cast(), 0);
             assert_eq!(header[2], 1);
-            element_array1_remove(header.as_mut_ptr().cast(), 1);
+            remove(header.as_mut_ptr().cast(), 1);
             assert_eq!(element.calls, 1);
             assert!(slots[1].is_null());
             assert_eq!(header[2], 0);
-            element_array1_remove(header.as_mut_ptr().cast(), 1);
+            remove(header.as_mut_ptr().cast(), 1);
             assert_eq!(element.calls, 1);
             assert_eq!(header[2], 0);
         }
     }
 
-    #[test]
-    fn reloads_storage_and_count_after_virtual_call() {
+    fn check_reload_after_dispatch(remove: unsafe extern "C" fn(*mut u8, i32)) {
         unsafe {
             let mut slots = [core::ptr::null_mut::<u8>(); 3];
             let sentinel = 0x1234usize as *mut u8;
@@ -1138,11 +1182,25 @@ mod array1_remove_tests {
             };
             let pointer = (&mut element as *mut Element).cast();
             slots[1] = pointer;
-            element_array1_remove(header.as_mut_ptr().cast(), 1);
+            remove(header.as_mut_ptr().cast(), 1);
             assert_eq!(element.calls, 1);
             assert_eq!(slots[1], pointer);
             assert_eq!(replacement, [sentinel, core::ptr::null_mut(), sentinel]);
             assert_eq!((header.as_ptr().add(2) as *const u32).read(), u32::MAX);
+        }
+    }
+
+    #[test]
+    fn signed_bounds_empty_slots_and_repeated_removal() {
+        for remove in [element_array1_remove, element_array2_remove] {
+            check_bounds_and_repeated_removal(remove);
+        }
+    }
+
+    #[test]
+    fn reloads_storage_and_count_after_virtual_call() {
+        for remove in [element_array1_remove, element_array2_remove] {
+            check_reload_after_dispatch(remove);
         }
     }
 }

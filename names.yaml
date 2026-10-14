@@ -65296,6 +65296,35 @@ functions:
       is disabled element-array-1 tracker instrumentation. Target builds use
       naked A32 assembly to preserve the exact one-word body; host builds
       return the observed r0 pass-through. No deliberate deviations.
+  - address: 0x083d40a0
+    ghidra: FUN_083d40a0
+    name: element_array2_remove
+    size: 80
+    sig: "void element_array2_remove(void *this, i32 index)"
+    module: app/element_table
+    status: ported
+    vars: {param_1: this, param_2: index, piVar1: element, bVar2: bounds_condition}
+    notes: >-
+      Raw osos.dec establishes the 80-byte extent 0x083d40a0..0x083d40f0,
+      ending with pop before the next constructor's independent push.
+      Whole-image A32 decoding finds zero inbound plain BLs and one BLNE
+      at 0x08106358; no outgoing plain or predicated BLs, and one register
+      BLX at 0x083d40d0. Rejects negative indices and indices at or above
+      signed capacity, unlike Ghidra's misleading conditional expression.
+      For a non-NULL element, invokes vtable word seven (+0x1c) with the
+      element as this; the virtual method's identity remains unknown.
+      Reloads current storage after dispatch, clears the selected slot,
+      and decrements current used modulo 2^32. Empty slots are unchanged.
+      The caller tears down the element table's third array at +0x30.
+      Host pointer, header and vtable strides widen under the existing
+      element_table convention; ARM retains four-byte strides. Behavioral
+      tests cover signed bounds, empty and repeated removal, dispatch order,
+      storage replacement during dispatch, and wrapping count updates.
+      LLVM folds this identical body with element_array1_remove.
+      match.py cannot select the alias label; comparing the shared body
+      under element_array1_remove shows equivalent bounds, NULL handling,
+      virtual dispatch, buffer reload, clearing, and decrement structure.
+
   - address: 0x083d40f0
     ghidra: FUN_083d40f0
     name: element_array2_construct
