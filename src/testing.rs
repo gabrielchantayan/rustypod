@@ -2893,6 +2893,10 @@ pub mod hints {
     // target-width list and source-range fixture; mappings never unmap, so no
     // other user may share this hint.
     pub const LIST_NODE_POOL_LIST_INSERT_PAYLOAD_RANGE: usize = 0xe2c0_0000;
+    // 0xe300_0000: dedicated to cxx/list_node_pool_list_erase_range's
+    // target-width list and four-node intrusive-ring fixture; mappings never
+    // unmap, so no other user may share this hint.
+    pub const LIST_NODE_POOL_LIST_ERASE_RANGE: usize = 0xe300_0000;
     // 0xe200_0000: dedicated to cxx/word_pair_list_node_pool_acquire's target-width
     // pool/chunk/node fixture; mappings never unmap, so no other user may share it.
     pub const WORD_PAIR_LIST_NODE_POOL_ACQUIRE: usize = 0xe200_0000;

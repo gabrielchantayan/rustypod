@@ -101086,6 +101086,28 @@ functions:
       the end store ahead of it. match.py shows the same block shape,
       capacity math, chunk-link stmia, and both bl boundaries.
 
+  - address: 0x083dc484
+    ghidra: FUN_083dc484
+    name: list_node_pool_list_erase_range
+    size: 192
+    sig: "void list_node_pool_list_erase_range(u32 *out, ListNodePoolList *list, ListNode *first, const u32 *end)"
+    module: cxx/list_node_pool_list_erase_range
+    status: ported
+    vars: {param_1: out, param_2: list, param_3: first, param_4: end}
+    notes: >-
+      Raw osos.dec establishes the exact 192-byte extent: 48 ARM words from
+      push {r4-r7,lr} @ 0x083dc484 through pop {r4-r7,pc} @ 0x083dc540;
+      the next independently linked function starts at 0x083dc544. Whole-image
+      aligned A32 decoding finds one incoming direct call, unconditional plain
+      bl at 0x083dc7c0, and no predicated direct callers. The body contains no
+      plain BL and one indirect BLX at 0x083dc4f8 through the first word of
+      the node payload's vtable. For every next-linked node in [first, *end),
+      unlink it, decrement list.count with wrapping arithmetic, invoke that
+      virtual payload method with node+8, and push the node onto pool.free;
+      write the terminating node to out. Deliberate deviation: target builds
+      preserve the target-width vtable dispatch; host tests inject its callback
+      because a 64-bit host function address cannot inhabit the retail u32 slot.
+
   - address: 0x083dc544
     ghidra: FUN_083dc544
     name: list_node_pool_list_insert_payload_range
