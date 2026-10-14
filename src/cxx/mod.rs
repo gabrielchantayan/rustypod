@@ -6,6 +6,7 @@ pub mod tracked_refcounted_handle_remove;
 pub mod element_tracker_array_construct;
 pub mod tracked_slot_array_construct;
 pub mod tracked_opaque_owner_remove;
+pub mod tracked_empty_handle_remove;
 pub mod string_id_tracker_remove;
 pub mod scoped_context_tracker_remove;
 pub mod opaque_observable_array_cell_value;
