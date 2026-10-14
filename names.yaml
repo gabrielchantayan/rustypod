@@ -259444,3 +259444,41 @@ functions:
       Host fixtures deliberately use native pointers. A standalone host API
       smoke is blocked by pre-existing non-test host compile errors in
       prepare_entry_metadata, shared_payload_select_kind and calendar_schedule.
+  - address: 0x083cfabc
+    ghidra: FUN_083cfabc
+    name: virtual_cell_array_attached_destruct
+    size: 60
+    sig: "void *virtual_cell_array_attached_destruct(void *array)"
+    module: cxx/virtual_cell_array_attached_destruct
+    vars:
+      param_1/r0/r4: array
+      DAT_083cfaf4: DERIVED_VTABLE
+      "array+0x14": attachment
+      "attachment.vtable+0x1c": release
+      FUN_083cf9fc: observable_array_release_virtual_cells
+      FUN_08271d2c: observable_array_destruct
+    status: ported
+    notes: >-
+      Raw osos.dec establishes fourteen A32 code words at 0x083cfabc through
+      the tail B at 0x083cfaf0, plus vtable literal 0x089a37e0 at 0x083cfaf4.
+      The next real function starts with push at 0x083cfaf8: true size 60,
+      not Ghidra's 56. Whole-image aligned branch decoding finds one inbound
+      plain BL at 0x0826b3d0 and zero predicated BLs. Body has one plain BL
+      to the already-ported virtual-cell cleanup at 0x083cf9fc, zero
+      predicated BLs, one indirect BLXNE, and a tail B to the ported base
+      destructor at 0x08271d2c. Install the derived vtable, release a non-NULL
+      attachment at +0x14 through slot +0x1c with attachment in r0, clean
+      enabled virtual cells, then destroy the base and return the receiver.
+      Raw caller 0x0826b3c4 guards NULL and forwards the result to delete.
+      Ghidra incorrectly incorporates base-destructor effects into this body.
+      Rust models predication and tail chaining as ordinary control flow;
+      host seams replace attachment dispatch and the existing cleanup's
+      incompatible host layout. No new absolute-address callee seams.
+      Host suite passes 16121 tests, including NULL/non-NULL attachment,
+      callback mutation visibility, derived-before-base teardown and receiver
+      preservation. ARM release build succeeds. match.py prints a structural
+      diff (exit 1): 17 versus 14 instructions, with a frame pointer and
+      explicit NULL branch replacing predicated BLX; dispatch, direct cleanup
+      and base tail-chain are preserved. Standalone host smoke is blocked by
+      existing non-test unresolved helpers in prepare_entry_metadata,
+      shared_payload_select_kind and calendar_schedule; these remain unchanged.
