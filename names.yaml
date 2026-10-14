@@ -258398,3 +258398,37 @@ functions:
       diff: equivalent initialization, allocations, zero/copy and return;
       LLVM uses heap dispatch and BLX memory helpers, one strlen scan, and
       removes the inert diagnostic.
+
+  - address: 0x083d4304
+    ghidra: FUN_083d4304
+    name: element_array1_remove
+    size: 80
+    sig: "void element_array1_remove(void *this, i32 index)"
+    module: app/element_table
+    status: ported
+    vars:
+      param_1/r4: this
+      param_2/r5: index
+      r0: element
+      "this+0x00": data
+      "this+0x04": slots
+      "this+0x08": used
+    notes: >-
+      Raw A32 extent 0x083d4304..0x083d4354 is 80 bytes, ending in
+      pop {r4,r5,r6,pc}; the next push starts element_array1_construct.
+      Whole-image aligned word decoding finds zero plain inbound BLs and
+      one BLNE at 0x081063b4, within the table destructor whose overlapping
+      Ghidra entries report the same call twice. No outgoing BLs; one BLX
+      at 0x083d4334 dispatches through element vtable word seven (+0x1c).
+      Its specific method identity is unproven; no fixed callee seam added.
+      Reject negative indices or index >= signed capacity; ignore NULL slots.
+      Invoke the virtual method with element as this, reload data, clear the
+      selected slot, then decrement the reloaded used word modulo 2^32.
+      Host header and pointer/vtable strides follow element_table pointer
+      width conventions; scalar fields remain u32. No device deviation.
+      Tests cover signed bounds, NULL/repeated removal, dispatch ordering,
+      callback replacement of data and used, and count underflow. Isolated
+      source smoke observes one virtual call, NULL slot and zero used count.
+      Host suite and ARM release build pass. match.py reports equivalent
+      bounds/NULL checks, word-seven BLX, storage reload and clear/decrement,
+      with LLVM early branches and a different register save/return sequence.

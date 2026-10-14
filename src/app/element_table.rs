@@ -1024,6 +1024,129 @@ pub unsafe extern "C" fn element_array8_at(index: i32) -> *mut u8 {
     element_array_at(8, index)
 }
 
+/// element_array1_remove — `FUN_083d4304` @ **0x083d4304**.
+/// True extent: 80 bytes, through the pop at 0x083d4350; the next
+/// constructor starts at 0x083d4354. Whole-image raw A32 decoding finds
+/// zero plain inbound BLs and one BLNE at 0x081063b4. No outgoing BLs;
+/// one indirect BLX calls the element's vtable word seven (+0x1c).
+///
+/// Rejects negative indices and indices >= the signed capacity. A non-NULL
+/// slot receives the virtual call with the element as `this`, then the
+/// current slot buffer is reloaded, that slot cleared, and the current live
+/// count decremented modulo 2^32. Empty slots do not change the count.
+/// The virtual method's more specific identity is not established.
+///
+/// Deliberate deviation: pointer slots, header strides and vtable strides
+/// scale with host pointer width, following this module's existing layout.
+/// Scalar fields remain u32; there is no device behavior deviation.
+///
+/// # Safety
+/// For nonnegative indices, `this` must expose a readable capacity word.
+/// In-range slots must be readable, and non-NULL elements must expose a
+/// valid vtable with an `unsafe extern "C" fn(*mut u8)` at word seven.
+/// After that call, the header and selected slot must remain writable.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn element_array1_remove(this: *mut u8, index: i32) {
+    if index < 0 || array_slots(this) <= index {
+        return;
+    }
+    let element = array_data(this).add(index as usize).read();
+    if element.is_null() {
+        return;
+    }
+    let vtable = (element as *const *const usize).read();
+    let remove: unsafe extern "C" fn(*mut u8) =
+        core::mem::transmute(vtable.add(7).read());
+    remove(element);
+    let data = array_data(this) as *mut *mut u8;
+    data.add(index as usize).write(core::ptr::null_mut());
+    let used = this.add(ARRAY_USED_INDEX * WORD) as *mut u32;
+    used.write(used.read().wrapping_sub(1));
+}
+
+#[cfg(test)]
+mod array1_remove_tests {
+    use super::*;
+
+    #[repr(C)]
+    struct Element {
+        vtable: *const usize,
+        header: *mut usize,
+        replacement: *mut *mut u8,
+        calls: u32,
+    }
+
+    unsafe extern "C" fn record(element: *mut u8) {
+        let element = &mut *element.cast::<Element>();
+        element.calls += 1;
+        // Dispatch must precede clearing and decrementing.
+        let original = element.header.read() as *mut *mut u8;
+        assert_eq!(original.add(1).read(), (element as *mut Element).cast());
+        assert_eq!((element.header.add(2) as *const u32).read(), 1);
+        if !element.replacement.is_null() {
+            element.header.write(element.replacement as usize);
+            (element.header.add(2) as *mut u32).write(0);
+        }
+    }
+
+    #[test]
+    fn signed_bounds_empty_slots_and_repeated_removal() {
+        unsafe {
+            // A negative index must not even dereference the header.
+            element_array1_remove(core::ptr::null_mut(), -1);
+            let mut slots = [core::ptr::null_mut::<u8>(); 3];
+            let mut header = [slots.as_mut_ptr() as usize, 3, 1, 0, 0, 0];
+            let mut vtable = [0usize; 8];
+            vtable[7] = record as *const () as usize;
+            let mut element = Element {
+                vtable: vtable.as_ptr(), header: header.as_mut_ptr(),
+                replacement: core::ptr::null_mut(), calls: 0,
+            };
+            slots[1] = (&mut element as *mut Element).cast();
+            for (capacity, index) in [(3, 3), (3, i32::MAX), (0, 0), (u32::MAX, 0)] {
+                header[1] = capacity as usize;
+                element_array1_remove(header.as_mut_ptr().cast(), index);
+                assert_eq!(element.calls, 0);
+                assert_eq!(header[2], 1);
+            }
+            header[1] = 3;
+            element_array1_remove(header.as_mut_ptr().cast(), 0);
+            assert_eq!(header[2], 1);
+            element_array1_remove(header.as_mut_ptr().cast(), 1);
+            assert_eq!(element.calls, 1);
+            assert!(slots[1].is_null());
+            assert_eq!(header[2], 0);
+            element_array1_remove(header.as_mut_ptr().cast(), 1);
+            assert_eq!(element.calls, 1);
+            assert_eq!(header[2], 0);
+        }
+    }
+
+    #[test]
+    fn reloads_storage_and_count_after_virtual_call() {
+        unsafe {
+            let mut slots = [core::ptr::null_mut::<u8>(); 3];
+            let sentinel = 0x1234usize as *mut u8;
+            let mut replacement = [sentinel; 3];
+            let mut header = [slots.as_mut_ptr() as usize, 3, 1, 0, 0, 0];
+            let mut vtable = [0usize; 8];
+            vtable[7] = record as *const () as usize;
+            let mut element = Element {
+                vtable: vtable.as_ptr(), header: header.as_mut_ptr(),
+                replacement: replacement.as_mut_ptr(), calls: 0,
+            };
+            let pointer = (&mut element as *mut Element).cast();
+            slots[1] = pointer;
+            element_array1_remove(header.as_mut_ptr().cast(), 1);
+            assert_eq!(element.calls, 1);
+            assert_eq!(slots[1], pointer);
+            assert_eq!(replacement, [sentinel, core::ptr::null_mut(), sentinel]);
+            assert_eq!((header.as_ptr().add(2) as *const u32).read(), u32::MAX);
+        }
+    }
+}
+
 /// element_array8_insert_unique — original: `FUN_083d441c` @ **0x083d441c**
 /// (**152 bytes**; **two direct inbound plain `bl` call sites**).
 /// Raw A32 words establish the exact extent `0x083d441c..0x083d44b4`:
