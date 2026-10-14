@@ -16,6 +16,45 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083d4568
+    ghidra: FUN_083d4568
+    name: tracked_refcounted_handle_remove
+    size: 76
+    sig: "void tracked_refcounted_handle_remove(TrackedSlotArray *array, i32 index)"
+    module: cxx/tracked_refcounted_handle_remove
+    status: ported
+    vars:
+      param_1/r4: array
+      param_2/r5: index
+      array_plus_0: data
+      array_plus_4: slots
+      array_plus_8: used
+      FUN_0816ccb0: refcounted_ptr_release_dtor_copy
+      FUN_082aad24: operator_delete
+    notes: >-
+      Raw A32 extent [0x083d4568,0x083d45b4) is 76 bytes, ending in
+      POP before the next independent PUSH. Ghidra's 48-byte extent loses
+      the post-delete slot clear and count decrement because delete is
+      incorrectly marked noreturn. Whole-image aligned BL decoding finds
+      zero incoming plain BLs and one BLNE at 0x0810612c; the body has two
+      plain BLs at 0x083d4590 and 0x083d4594 and no predicated BLs.
+      Reject negative index or index >= signed capacity; ignore NULL slots.
+      Release the allocated handle through the already ported 0x0816ccb0,
+      delete its returned slot with existing tag-2 operator_delete, reload
+      data, clear the selected u32 word, reload used and subtract one modulo
+      2^32. Caller 0x08106108 removes occupied tracker entries during teardown.
+      No new fixed-address seam. Native header/handle pointers widen on hosts;
+      tracker entries remain target-width words. Host tests cover signed bounds,
+      empty entries, real shared-body release before deletion, repeat removal,
+      replacement storage and wrapping count mutations. Full host suite passes
+      16074 tests; ARM release builds. Full-size match reports 19 original versus
+      24 Rust instructions: guards, two BLs, reload/clear/decrement preserved;
+      LLVM changes registers, prologue and predication, and carries the known
+      identity handle return across release. Standalone test-configured host
+      smoke exercises the exported negative/empty/capacity paths. Non-test host
+      library build is blocked by unrelated missing prepare_metadata,
+      extract_metadata, configure_shared_payload_kind and notify_calendar_change.
+
   - address: 0x083d4a48
     ghidra: FUN_083d4a48
     name: tracked_opaque_owner_remove
