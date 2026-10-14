@@ -258989,3 +258989,33 @@ functions:
       shared word_pair_copy_construct body against this address shows the
       same four ordered memory operations, with frame-pointer setup and
       POP return replacing the stock BX LR.
+  - address: 0x083d1628
+    ghidra: FUN_083d1628
+    name: container_release_erase_at
+    size: 68
+    sig: "i32 container_release_erase_at(ObservableArray *this, i32 index)"
+    module: cxx/container_release_erase_at
+    status: ported
+    renames:
+      param_1/r0/r4: this
+      param_2/r1/r5: index
+      piVar2/r0: element
+      FUN_083d6b14: container_element_at_alias_6b14
+      "tail B 0x08271bec": observable_array_erase_at
+    notes: >-
+      Raw osos.dec establishes seventeen A32 words (68 bytes) from PUSH at
+      0x083d1628 through tail B at 0x083d1668; the next real function starts
+      with PUSH at 0x083d166c. Whole-image branch decoding finds one inbound
+      plain BL at 0x08235c64 and zero predicated BLs. The body has one plain
+      BL to the established accessor at 0x083d6b14, zero predicated BLs, and
+      one indirect BLXNE through element vtable +0x04. When byte +0x10 is
+      nonzero, release the indexed non-NULL element before tail-dispatching
+      observable_array_erase_at with unchanged this and index. No validation
+      or INT_MAX resolution occurs before release. Ghidra incorrectly expands
+      the tail target into this function. Host tests verify release mutation
+      precedes base validation, negative and INT_MAX index preservation,
+      disabled ownership, and NULL elements using native-pointer layouts.
+      Host suite and release ARM build pass. match.py reports 19 Rust versus
+      17 original instructions: frame-pointer setup and explicit branch around
+      the indirect release replace predication; the accessor call and base
+      tail branch remain. No new firmware seams are introduced.
