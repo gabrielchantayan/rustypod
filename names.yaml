@@ -16,6 +16,40 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083de838
+    ghidra: FUN_083de838
+    name: deque_back_retire_segment
+    size: 164
+    module: cxx/deque_back_retire_segment
+    status: ported
+    sig: "void deque_back_retire_segment(uint32_t *deque)"
+    renames:
+      param_1/r4: deque
+      puVar1/r0: old_slot
+      uVar4/r5: retired_segment
+      local_20: initialized_back_iterator
+      FUN_083da1a8: deque_seg_capacity
+      FUN_083d75e0: container_is_empty
+      FUN_083da1d4: deque_iter_init_elem4_alias_a1d4
+      FUN_08266f2c: cxx_array_dealloc
+    notes: >-
+      Raw extent 0x083de838..0x083de8dc is 164 bytes, ending before the next
+      independent PUSH. Seven outgoing plain BLs at 0x083de850, 0x083de860,
+      0x083de868, 0x083de884, 0x083de8a8, 0x083de8b0 and 0x083de8c4;
+      zero predicated outgoing BLs. Whole-image word decoding finds one
+      incoming plain BL at 0x0815b8bc and no predicated incoming calls.
+      Every non-BL word matches the existing 0x083df8e4 port. Verified
+      capacity is 32; the empty predicate tests count == 0; iterator
+      initialization sets cur/base/end/slot with a 128-byte segment extent.
+      Retreat the back map slot, free the retired segment, then reanchor
+      end at the preceding segment's exclusive end. For count zero,
+      null both iterators and free the map, retaining count/map/map_cap.
+      Reuse the existing registered export without a wrapper; inline the
+      predicate and iterator initialization using target-width words.
+      Restored r0-r3 are ignored by the raw caller and omitted from the
+      Rust signature. Host regression covers slot reload after deallocation,
+      alongside empty, null segment, high count and address-wrap cases.
+
   - address: 0x083dec00
     ghidra: FUN_083dec00
     name: deque_back_retire_segment
