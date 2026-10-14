@@ -28756,6 +28756,42 @@ functions:
       storage: one node when single is nonzero, otherwise 32 initially and
       max(capacity + 32, capacity + capacity/2 + capacity/8). Deliberate
       deviations: none; target pointer fields remain u32 words.
+  - address: 0x083dc89c
+    ghidra: FUN_083dc89c
+    name: record_40_list_clear
+    size: 204
+    sig: "void record_40_list_clear(Record40List *list)"
+    module: cxx/record_40_list_clear
+    status: ported
+    renames:
+      param_1/r0: list
+      local_14: current
+      piVar1: captured_sentinel
+      piVar2: successor
+      "list+0x04": free
+      "list+0x10": sentinel
+      "list+0x14": count
+      "node+0x08": inline_polymorphic_payload
+    notes: >-
+      Raw osos.dec establishes the 204-byte extent from push {r4,r5,lr}
+      at 0x083dc89c through pop {r4,r5,pc} at 0x083dc964; the next real
+      function is record_40_list_construct at 0x083dc968. Zero outgoing
+      plain or predicated BL instructions; one unconditional indirect BLX
+      at 0x083dc91c invokes payload vtable slot zero with r0=node+8.
+      Whole-image aligned A32 decoding finds one inbound unconditional BL
+      at 0x081f15ec and no predicated inbound BLs. Walks to the captured
+      sentinel, saves each successor, unlinks the node, decrements count
+      with wrapping arithmetic, destroys its inline payload, then prepends
+      the node to the free list using the post-callback head. Retains chunks
+      and the self-linked sentinel. No static callee identity is asserted.
+      Deliberate deviations: omit dead stack temporaries; retain u32 link
+      and vtable-address fields on hosts but use native-width function
+      pointers in host vtable entries. Host tests cover empty, singleton,
+      multi-node, count wraparound, callback ordering and mutation, retained
+      storage, and repeated clear. Standalone host smoke also exercises
+      destruction and recycling. ARM codegen has 30 instructions versus
+      retail's 51, preserving the loop, unlink/count writes, inline-payload
+      BLX, successor capture, and post-callback free-list reload.
   - address: 0x083dca68
     ghidra: FUN_083dca68
     name: two_word_list_node_pool_list_recycle_all
