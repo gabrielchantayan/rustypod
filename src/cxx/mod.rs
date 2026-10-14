@@ -932,6 +932,7 @@ pub mod generic_descriptor_convert;
 pub mod opaque_descriptor_convert_089062ec;
 pub mod value_compare;
 pub mod word_slot_equal;
+pub mod word_slot_not_equal;
 pub mod object_matches_active_context;
 pub mod record_u16_casefold_compare;
 pub mod vtable;
