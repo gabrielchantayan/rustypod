@@ -256362,3 +256362,32 @@ functions:
       Host tests cover no-op requests, empty and populated growth, growth from
       size rather than capacity, requested-capacity precedence, and untouched
       padding and unused storage. All 15981 host tests and ARM release pass.
+  - address: 0x083df8b8
+    ghidra: FUN_083df8b8
+    name: deque_drain_front_release
+    size: 44
+    sig: "u32 *deque_drain_front_release(u32 *deque)"
+    module: cxx/deque_drain_front_release
+    status: ported
+    vars: {param_1/r0/r4: deque}
+    renames:
+      FUN_083df7e4: deque_front_advance_release
+      FUN_083d7620: container_is_empty
+    notes: >-
+      Raw words establish the 44-byte extent 0x083df8b8..0x083df8e4,
+      ending with POP {r4,pc} before the next independent PUSH.
+      Whole-image A32 BL decoding finds one inbound plain BL at 0x0825c434
+      and zero predicated inbound BLs. Two outgoing plain BLs at
+      0x083df8c8 and 0x083df8d0 call front advancement/release and the
+      emptiness predicate; no predicated BLs. Repeatedly release/remove
+      the front until empty and return the original deque pointer.
+      Reuse the canonical emptiness port for its byte-identical alias.
+      Target-width word indexing preserves layout on hosts. Host tests
+      cover empty preservation, singleton retirement, and cross-segment
+      draining with release order, segment/map retirement, and return-self.
+      Host suite and ARM release build pass. match.py reports 12 Rust
+      instructions versus 11 original: LLVM adds a frame pointer and moves
+      the predicate to the loop head, preserving both call relocations,
+      empty-before-removal, iteration, and return-self. A direct debugger
+      smoke call to the host export returns its input and preserves the
+      sentinel cursor on an empty deque.

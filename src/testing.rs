@@ -39,6 +39,7 @@ extern crate std;
 /// six files. Each region is at most 0x0100_0000 wide, so neighbours cannot
 /// overlap.
 pub mod hints {
+    pub const DEQUE_DRAIN_FRONT_RELEASE: usize = 0xb733_0000;
     pub const DEQUE_BACK_RETIRE_SEGMENT: usize = 0xb731_0000;
     pub const DEQUE_BACK_RETIRE_SEGMENT_EMPTY: usize = 0xb732_0000;
     pub const TAGGED_BUFFER_VECTOR_FILL_CONSTRUCT: usize = 0xaef1_0000;
