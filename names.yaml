@@ -259242,3 +259242,39 @@ functions:
       16 instructions, preserving both slot loads, vtable reload, exact -1
       test and saved return. LLVM adds a stack store/frame and replaces
       predicated erase with a conditional branch.
+
+  # --- opaque collection attached-object destruction ---
+  - address: 0x083d07f8
+    ghidra: FUN_083d07f8
+    name: opaque_collection_attached_release_destruct
+    size: 60
+    sig: "ObservableArray *opaque_collection_attached_release_destruct(ObservableArray *this)"
+    module: cxx/opaque_collection_attached_release_destruct
+    status: ported
+    renames:
+      param_1/r0/r4: this
+      param_1_plus_0x14/r0: attached_object
+      DAT_083d0830: VTABLE_089A43B0
+      virtual_0x1c/r1: attached_object_release
+      FUN_083d0738: opaque_collection_release_allocation
+      FUN_08271d2c: observable_array_destruct
+    notes: >-
+      Raw osos.dec establishes [0x083d07f8,0x083d0834), 60 bytes: thirteen
+      A32 instructions through tail B at 0x083d082c plus vtable literal
+      0x089a43b0 at 0x083d0830; the next real function begins with push at
+      0x083d0834. Ghidra's 56 bytes omit the literal and its C incorrectly
+      folds the base destructor into this function. Independently decoded
+      body calls are one plain BL at 0x083d0820 to ported allocation release,
+      zero predicated BLs, and one BLXNE at 0x083d0818 through attached
+      object's vtable +0x1c. Whole-image aligned A32 scan finds one inbound
+      plain BL at 0x0826b520, zero predicated callers, and no aligned pointer
+      references. That caller null-guards this, destroys it, and tail-calls
+      operator_delete. Install the derived vtable, release non-null attachment,
+      release collection allocation, then tail-chain to ported base destruction
+      and return its result. Host seams preserve target word offsets despite
+      the existing collection port's widened host pointers. Tests cover null
+      and non-null attachments, release side-effect visibility, derived-vtable
+      installation, base teardown ordering, return identity, and untouched
+      surrounding words. ARM match confirms virtual slot +0x1c, direct release,
+      and base tail branch; LLVM uses an explicit null branch instead of
+      predication and a larger frame. Both direct target callees are reused.
