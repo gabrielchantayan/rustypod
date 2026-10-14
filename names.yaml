@@ -28780,6 +28780,39 @@ functions:
       when single is nonzero, otherwise 32 initially and
       max(capacity + 32, capacity + capacity/2 + capacity/8). Deliberate
       deviations: none; target pointer fields remain u32 words.
+  - address: 0x083dcf94
+    ghidra: FUN_083dcf94
+    name: word_pair_list_clear
+    size: 180
+    sig: "void word_pair_list_clear(WordPairList *list)"
+    module: cxx/word_pair_list_clear
+    status: ported
+    renames:
+      param_1/r0: list
+      local_8: current
+      piVar1: sentinel
+      piVar2: next
+      "list+0x04": free
+      "list+0x10": sentinel
+      "list+0x14": state
+    notes: >-
+      Raw osos.dec verifies 45 A32 words (180 bytes), from 0x083dcf94
+      through bx lr at 0x083dd044; 0x083dd048 is the next real boundary.
+      Zero outgoing plain or predicated BL calls. Whole-image A32 decoding
+      finds one inbound plain BL at 0x083dd184, no predicated inbound BL.
+      Unlinks each non-sentinel node from the doubly linked pair ring,
+      decrements state with wrapping arithmetic, and pushes the node onto
+      the pool free chain in reverse traversal order. Preserves payloads,
+      sentinel storage, and chunk/bump allocation fields. The destructor
+      caller then recycles the sentinel and releases pool chunks.
+      Deliberate deviation: omit dead stack iterator temporaries and the
+      redundant current-sentinel check for valid rings; pointer fields
+      retain their four-byte target layout.
+      LLVM folds the exported symbol into the identical 80-byte
+      list_node_pool_recycle_all section; both symbols exist at the same
+      section offset. match.py cannot select the alias by name, so structural
+      comparison uses list_node_pool_recycle_all: 20 instructions versus
+      45 original instructions, preserving the call-free unlink/recycle loop.
   - address: 0x083dce90
     ghidra: FUN_083dce90
     name: word_pair_list_node_pool_acquire
