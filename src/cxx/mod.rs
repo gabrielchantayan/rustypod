@@ -387,6 +387,7 @@ pub mod list_node_pool_acquire_083dd4cc;
 pub mod list_node_pool_list_init;
 pub mod list_node_pool_list_append_value;
 pub mod list_node_pool_list_erase;
+pub mod list_node_pool_list_erase_range;
 pub mod list_node_pool_list_erase_releasing_payload;
 pub mod list_node_pool_clear_owned;
 pub mod record_40_list_clear;
