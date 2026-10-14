@@ -39,6 +39,7 @@ extern crate std;
 /// six files. Each region is at most 0x0100_0000 wide, so neighbours cannot
 /// overlap.
 pub mod hints {
+    pub const SLOT_ARRAY_CONSTRUCT: usize = 0x53d4_f000;
     pub const ELEMENT_TRACKER_ARRAY_INSERT: usize = 0x52a4_0000;
     pub const CXX_SLOT_ARRAY_REMOVE_VIRTUAL_40: usize = 0x53d5_1800;
     pub const TRACKED_STRING_CHAIN_REMOVE: usize = 0x53f3_0000;

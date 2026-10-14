@@ -65617,6 +65617,38 @@ functions:
       its -1 result), empty array, and negative-capacity rejection.
 
 
+  - address: 0x083d4f78
+    ghidra: FUN_083d4f78
+    name: slot_array_construct
+    size: 196
+    sig: "TrackedSlotArray *slot_array_construct(TrackedSlotArray *this, uint32_t options, uint32_t capacity, uint32_t growth)"
+    module: cxx/slot_array_construct
+    status: ported
+    vars: {param_1/r4: this, param_2/r1: options, param_3/r2: capacity, param_4/r3: growth, iVar2/r5: tracker_name, uVar1: allocation, uVar3: tracker_name_length, iVar4: source_offset}
+    renames: {FUN_0802edac: malloc, thunk_EXT_FUN_2200027c: memzero_aligned, FUN_082a7774: tracker_record_name, FUN_08392478: strlen, FUN_080310d4: strncpy, FUN_083d4dd0: slot_array_tracker_diagnostic_no_op}
+    notes: >-
+      Raw A32 extent [0x083d4f78,0x083d503c) is 196 bytes: 160
+      instruction bytes and 36 literal bytes, before the independent bx lr
+      at 0x083d503c. Whole-image aligned BL decoding verifies one incoming
+      plain BL at 0x081ef148 and nine outgoing plain BLs, with zero predicated
+      BLs in either direction. Caller constructs a 24-byte array with
+      options=0, capacity=10, growth=2. Initialize six target-width words,
+      allocate capacity shifted left two with u32 wrapping, zero the storage,
+      then load the name from runtime record 0x0897cbd4 + 4. Allocate exactly
+      strlen(name) bytes and copy that length from name+1 for lengths <=10,
+      otherwise name+2; strncpy NUL-pads the skipped prefix. No allocation
+      checks or extra terminator allocation. Diagnostic callee is inert.
+      Deviations: inline aligned tracker-record accessor and combine three
+      stable-name strlen scans; private providers isolate host fixtures;
+      volatile memory-helper pointers prevent builtin substitution.
+      Host tests cover zero capacity, wrapping byte size, exact zero/write
+      boundaries, empty and short names, and lengths 10/11. Public-entry
+      smoke verifies actual runtime-record loading and retained padded name.
+      ARM build succeeds; match.py prints the expected structural diff:
+      equivalent field initialization, zero fill, allocation/copy, and return;
+      LLVM inlines heap dispatch and accessor, uses BLX for memory helpers,
+      and emits one length scan instead of three.
+
   - address: 0x083d4dd0
     ghidra: FUN_083d4dd0
     name: slot_array_tracker_diagnostic_no_op
