@@ -1062,3 +1062,4 @@ pub mod vector_reserve_record8;
 pub mod word_pair_list_pool_release;
 pub mod tracked_string_chain_remove;
 pub mod string_object_owned_member_array_attached_destruct;
+pub mod virtual_cell_array_attached_destruct;
