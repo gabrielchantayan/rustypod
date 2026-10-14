@@ -2510,6 +2510,16 @@ pub unsafe extern "C" fn not_equal_deref(a: *const u32, b: *const u32) -> u32 {
 /// orders, zero, all-bits-set, and iterator-shaped records whose trailing
 /// word is not read. Deliberate deviations: none.
 ///
+/// `FUN_083cf818` @ 0x083cf818 is a 24-byte copy: two aligned word
+/// loads, compare, normalized 0/1 selection, and `bx lr` at 0x083cf82c.
+/// The next real function begins at 0x083cf830. Whole-image A32 decoding
+/// verifies one inbound plain BL (0x083c3330), zero predicated BLs, and
+/// zero outgoing BLs. The caller compares a candidate iterator with the
+/// tree's leftmost iterator before insertion. A branch-shaped word at
+/// 0x088a858c lies in non-code data, not a verified caller.
+/// Deliberate deviation: reuse this byte-identical export, with no new seam;
+/// hook 0x083cf818 to `equal_deref`. There is no NULL guard on either operand.
+///
 /// Decoding every ARM B/BL word in `osos.dec` finds 8 plain `bl` callers at
 /// 0x083cf8a8 (0x081bf838, 0x0839bc00, 0x083c6ff8, 0x083c7464,
 /// 0x083c7480, 0x083c7504, 0x083c75c8, and 0x083db8ac), with no predicated
@@ -9039,6 +9049,14 @@ mod tests {
             let max: u32 = 0xffff_ffff;
             assert_eq!(equal_deref(&min, &max), 0);
             assert_eq!(equal_deref(&max, &max), 1, "sign bit is not special-cased");
+            // Iterator words are opaque 32-bit values, not signed keys or
+            // addresses to follow. Include low-bit and sign-bit differences.
+            let words = [0, 1, 0x7fff_ffff, 0x8000_0000, 0xffff_fffe, u32::MAX];
+            for (i, left) in words.iter().enumerate() {
+                for (j, right) in words.iter().enumerate() {
+                    assert_eq!(equal_deref(left, right), u32::from(i == j));
+                }
+            }
             // Iterator-shaped use, as the 0x083cf980 copy's callers do
             // it: compare the FIRST word of two wider records.
             let cursor = [0x083d_0000u32, 0xaaaa_aaaa];
