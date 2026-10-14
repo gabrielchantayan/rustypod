@@ -1994,8 +1994,36 @@ pub unsafe fn plist_node_child_copy_construct(
     destination: *mut PlistNode,
     source: *const PlistNode,
 ) -> *mut PlistNode {
-    let ops = unsafe { plist_node_child_vector_push_back_ops() };
-    unsafe { (ops.copy)(destination, source) }
+    let copy = unsafe {
+        core::ptr::read_volatile(core::ptr::addr_of!(PLIST_NODE_CHILD_VECTOR_PUSH_BACK_OPS.copy))
+    };
+    unsafe { copy(destination, source) }
+}
+
+/// plist_node_child_construct_at — retailOS `FUN_083d7e88` @ 0x083d7e88.
+/// True size: 16 bytes, ending at the independent push at 0x083d7e98.
+/// Raw ARM decoding verifies one plain inbound BL (0x083e8da0), zero
+/// predicated inbound BLs, and zero body BLs. Discard owner; return NULL for
+/// NULL destination without reading source; otherwise tail-call the plist-node
+/// copy constructor at 0x0825c61c and pass through its result.
+/// Deliberate deviation: reuse the existing volatile constructor operation
+/// seam instead of a direct conditional branch to unported firmware.
+///
+/// # Safety
+///
+/// For non-NULL destination, both nodes must satisfy the copy constructor's
+/// requirements. NULL destination permits an unreadable source and owner.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn plist_node_child_construct_at(
+    _owner: *mut u8,
+    destination: *mut PlistNode,
+    source: *const PlistNode,
+) -> *mut PlistNode {
+    if destination.is_null() {
+        return destination;
+    }
+    unsafe { plist_node_child_copy_construct(destination, source) }
 }
 
 
@@ -6355,6 +6383,17 @@ mod tests {
             companion: core::ptr::null_mut(),
             kind: 0,
         }
+    }
+
+    #[test]
+    fn plist_node_child_construct_at_null_destination_skips_unreadable_inputs() {
+        assert!(unsafe {
+            plist_node_child_construct_at(
+                core::ptr::without_provenance_mut(1),
+                core::ptr::null_mut(),
+                core::ptr::without_provenance(1),
+            )
+        }.is_null());
     }
 
     #[test]
