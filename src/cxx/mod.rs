@@ -203,6 +203,7 @@ pub mod opaque_observable_array_dispose_first_string;
 pub mod observable_array_item_release_destruct;
 pub mod observable_array_release_virtual_cells;
 pub mod observable_array_release_elements;
+pub mod observable_array_attached_elements_destruct;
 pub mod observable_array_release_elements_083d119c;
 pub mod observable_array_release_string_objects;
 pub mod owned_string_object_array_erase_at;
