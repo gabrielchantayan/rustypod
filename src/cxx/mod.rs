@@ -266,6 +266,7 @@ pub mod slot_array_remove_at_release_inline;
 pub mod slot_array_tracker_diagnostic_no_op;
 pub mod slot_array_construct;
 pub mod slot_array_expand;
+pub mod slot_array_insert;
 pub mod element_array7_tracker_diagnostic_no_op;
 pub mod slot_array_owner_get;
 pub mod slot_array_owner_has_value;
