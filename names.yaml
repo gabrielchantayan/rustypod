@@ -257780,3 +257780,26 @@ functions:
       original instructions versus seven Rust instructions: identical
       vtable loads, indirect BLX and result-word load; LLVM saves fp rather
       than unused r4 and adds mov fp,sp. The exported symbol remains distinct.
+
+  - address: 0x083d566c
+    ghidra: FUN_083d566c
+    name: string_id_tracker_remove
+    size: 76
+    sig: "void string_id_tracker_remove(StringIdTracker *tracker, int32_t index)"
+    module: cxx/string_id_tracker_remove
+    status: ported
+    vars: {param_1/r4: tracker, param_2/r5: index, tracker_0: slots, tracker_4: capacity, tracker_8: live_count, FUN_08258c80: string_id_record_destroy, FUN_082aad24: operator_delete}
+    notes: >-
+      Raw A32 extent [0x083d566c,0x083d56b8) is 76 bytes, ending in
+      pop before the next independent push. Ghidra's 48-byte extent
+      omits the post-delete clear and live-count decrement. Whole-image
+      aligned BL-word decoding finds zero incoming plain BLs and one
+      incoming BLNE at 0x081062a0; two outgoing plain BLs at 0x083d5694
+      and 0x083d5698, zero predicated outgoing BLs. Reject negative or
+      signed out-of-capacity indices; skip NULL slots. Destroy the record,
+      delete the destructor return, reload slots, clear that index, and
+      decrement the current live count modulo 2^32. Reuses both ported
+      callees without new address seams. Native-width repr(C) pointers
+      widen the host model. Host tests cover signed bounds, empty slots,
+      lifecycle ordering, changed storage, wrapping and repeated removal.
+      LLVM replaces predication with branches and uses a larger prologue.
