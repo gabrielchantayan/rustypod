@@ -257981,3 +257981,36 @@ functions:
       duplicate return and count/store update remain; LLVM replaces predication
       with branches and hoists invariant storage reads. Device execution was
       not exercised.
+
+  - address: 0x083d50d8
+    ghidra: FUN_083d50d8
+    name: tracker_table_expand
+    size: 120
+    sig: "void tracker_table_expand(u32 *table)"
+    module: app/tracker_table_expand
+    status: ported
+    vars: {param_1/r4: table, iVar3/r5: expanded_capacity, iVar1/r0: storage}
+    renames:
+      "table+0x00": storage
+      "table+0x04": capacity
+      "table+0x08": used
+      "table+0x10": growth_factor
+      "table+0x14": name
+      FUN_0802edec: realloc
+      thunk_EXT_FUN_2200027c: memzero_aligned
+      FUN_083d503c: tracker_table_diagnostic_no_op
+    notes: >-
+      Raw A32 code occupies [0x083d50d8,0x083d5150), 120 bytes; 60
+      string bytes precede the next real PUSH at 0x083d518c. Whole-image
+      decoding finds zero inbound plain BLs and one BLEQ at 0x083d5088;
+      three outbound plain BLs and zero predicated outbound BLs. Multiply
+      capacity by growth factor modulo 2^32, publish allocator result even
+      on failure, clear the wrapped added byte range, commit capacity only
+      on success. Omit verified bx lr diagnostic with unused return value;
+      volatile existing allocator/zero-fill pointers preserve call boundaries.
+      Target-width header words retain four-byte spacing on hosts.
+      Host suite and ARM release build passed. Exported-entry mmap smoke
+      observed relocation, preserved prefix/header, four cleared slots and
+      untouched tail canary. LLVM folds this export with element_tracker_array_expand;
+      both symbols exist, but match.py selects only the canonical alias.
+      Its 22-instruction diff preserves the algorithm; diagnostic is removed.
