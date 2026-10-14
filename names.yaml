@@ -34855,6 +34855,36 @@ functions:
       Target builds use an empty inline-assembly barrier to retain this
       distinct retailOS BL target rather than allowing LLVM to fold it into
       the byte-identical indexed_element_array_release at 0x083d00a0.
+  - address: 0x083d129c
+    ghidra: FUN_083d129c
+    name: observable_array_attached_release_elements_destruct
+    size: 60
+    sig: "ObservableArray *observable_array_attached_release_elements_destruct(ObservableArray *this)"
+    module: cxx/observable_array_attached_release_elements_destruct
+    status: ported
+    renames:
+      param_1/r0/r4: this
+      "[this + 0x14]": attached_object
+      DAT_083d12d4: derived_vtable
+      "[attached_object.vtable + 0x1c]": attached_release
+      FUN_083d119c: observable_array_release_elements_083d119c
+      FUN_08271d2c: observable_array_destruct
+    notes: >-
+      Raw osos.dec establishes 60 bytes, not Ghidra's 56: fourteen A32
+      instructions through the tail B at 0x083d12d0, followed by literal
+      0x089a4c20 at 0x083d12d4. PUSH at 0x083d12d8 starts the next function.
+      Whole-image aligned ARM decoding finds one inbound plain BL at
+      0x0826b610 and zero predicated BL callers. The body has one plain BL
+      to the already-ported element-release helper, one indirect BLXNE
+      through the optional attached object's vtable slot +0x1c, and a tail
+      B to observable_array_destruct. It plants the derived vtable before
+      attached release and element cleanup; the base destructor returns
+      this, which the deleting caller passes to operator delete. Ghidra
+      incorrectly follows the tail branch and includes base cleanup here.
+      ARM invokes existing Rust callees directly. Host seams replace
+      target-width virtual dispatch and the element helper's incompatible
+      native host layout. Rust expresses BLXNE and the tail B as ordinary
+      calls, preserving effects, ordering, and the return pointer.
   - address: 0x083d12d8
     ghidra: FUN_083d12d8
     name: observable_array_release_elements
