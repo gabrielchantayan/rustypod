@@ -16,6 +16,41 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083df8e4
+    ghidra: FUN_083df8e4
+    name: deque_back_retire_segment
+    size: 164
+    module: cxx/deque_back_retire_segment
+    status: ported
+    sig: "void deque_back_retire_segment(uint32_t *deque)"
+    renames:
+      param_1/r4: deque
+      puVar1/r0: old_slot
+      uVar4/r5: retired_segment
+      local_20: initialized_back_iterator
+      FUN_083da450: deque_seg_capacity
+      FUN_083d7630: container_is_empty_alias_7630
+      FUN_083da47c: deque_iter_init_elem4
+      FUN_08266f2c: cxx_array_dealloc
+    notes: >-
+      Raw osos.dec establishes the 164-byte extent 0x083df8e4..0x083df987;
+      the next independent PUSH begins at 0x083df988. Seven outgoing plain
+      BLs (0x083df8fc, 0x083df90c, 0x083df914, 0x083df930, 0x083df954,
+      0x083df95c, 0x083df970), zero predicated BLs. Whole-image aligned ARM
+      word decoding finds one incoming plain BL at 0x083dfd88 and no
+      predicated incoming BLs. The caller has already decremented the back
+      cursor and element count. Retreat back slot, free its former segment,
+      then reanchor the back iterator at the previous segment end, or clear
+      both iterators and free the map when count is zero. Count and map
+      metadata remain unchanged. Use eleven target-width words, wrapping
+      end arithmetic, existing capacity/deallocator ports, inline iterator
+      stores and count predicate. The sole caller ignores restored r0-r3;
+      Ghidra's undefined8 return is not a semantic return contract. Host
+      tests cover count 0/1/2/MAX, NULL segment base and end wraparound;
+      exported API smoke covers both branches with an observing allocator.
+      match.py reports 30 versus 41 instructions: same slot retreat, delete,
+      count branch, reanchor or eight-word clear/map delete; helper calls and
+      dead allocator arguments are optimized away, map delete is a tail call.
   - address: 0x083e0990
     ghidra: FUN_083e0990
     name: vector_head_swap
