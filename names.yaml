@@ -65189,6 +65189,46 @@ functions:
       is disabled element-array-0 tracker instrumentation. Target builds use
       naked A32 assembly to preserve the exact one-word body; host builds
       return the observed r0 pass-through. No deliberate deviations.
+  - address: 0x083d3d88
+    ghidra: FUN_083d3d88
+    name: element_array0_expand
+    size: 120
+    sig: "void element_array0_expand(u32 *array)"
+    module: app/element_array0_expand
+    status: ported
+    vars:
+      param_1: array
+      iVar3: expanded_capacity
+      iVar1: resized_storage
+      "array+0x00": storage
+      "array+0x04": capacity
+      "array+0x08": used
+      "array+0x0c": options
+      "array+0x10": growth_factor
+      "array+0x14": diagnostic_name
+      FUN_0802edec: realloc
+      thunk_EXT_FUN_2200027c: memzero_aligned_iram_veneer
+      FUN_083d3cec: element_array0_tracker_diagnostic_noop
+    notes: >-
+      Raw A32 extent is 0x083d3d88..0x083d3e00 (120 bytes), followed by
+      60 bytes of strings before the next function at 0x083d3e3c.
+      Zero inbound plain BLs; one inbound BLEQ at 0x083d3d38. Three outgoing
+      plain BLs at 0x083d3da4 to realloc 0x0802edec, 0x083d3dc4 to the
+      zero-fill veneer 0x08037db8, and 0x083d3df8 to the ported diagnostic
+      0x083d3cec; no outgoing predicated BLs. Multiply capacity by growth
+      modulo 2^32, publish realloc's pointer including NULL, zero the added
+      tail on success, then commit capacity. Failure preserves capacity and
+      metadata. Reuse element_tracker_array_expand with target-width header
+      words and volatile ported helper pointers. Deliberately omit diagnostic
+      arguments and the verified bx-lr no-op at 0x083d3cec; its returned r0
+      is not consumed. Host tests cover tail boundaries, relocation,
+      unchanged capacity, zero-growth failure and overflow. Real-allocator
+      smoke confirmed zero growth preserves capacity and metadata with NULL
+      storage. ARM build passed. match.py resolved the export: 22 Rust versus
+      30 original instructions, preserving multiply, NULL publication,
+      success-only tail clear and capacity commit; diagnostic removal and
+      indirect BLX explain the diff. LLVM may intentionally fold identical
+      tracker expansion bodies.
   - address: 0x083d3e8c
     ghidra: FUN_083d3e8c
     name: element_array0_construct
