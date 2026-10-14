@@ -29105,6 +29105,37 @@ functions:
       real 0x083ddffc port; host tests seed every target field dirty and verify
       all are cleared and the input pointer returns. match.py structural review
       is recorded against this worktree's ARM archive.
+  - address: 0x083de1b0
+    ghidra: FUN_083de1b0
+    name: deque_clear_elem12
+    size: 44
+    sig: "void *deque_clear_elem12(void *deque)"
+    module: heap/deque_clear_elem12
+    status: ported
+    renames:
+      param_1/r0: deque
+      r4: deque
+      FUN_083d75c0: container_is_empty
+      FUN_083de03c: pop_front_path_record
+    notes: >-
+      Raw A32 establishes 0x083de1b0..0x083de1dc exclusive, followed by
+      an independent push prologue. Full-image aligned BL decoding finds
+      one inbound plain BL at 0x081efa50, zero predicated inbound BL.
+      Two outbound plain BLs call pop at 0x083de03c and the empty
+      predicate at 0x083d75c0; zero predicated outbound BL. Checks count
+      at +0x20 before each pop and returns the original deque pointer.
+      Reuses the equivalent Rust container_is_empty. The unported pop
+      destroys the record's owned string, advances front by 12, decrements
+      count, and retires blocks and the map; it remains a fixed-address
+      device boundary with an explicit host implementation slot.
+      Host tests cover empty storage preservation, single and multiple
+      records, wrapping cursor arithmetic, return identity, and repeated clear.
+      Host suite and ARM release build pass. Executable host smoke confirms
+      the loop observes the count changed by pop and skips pop when empty.
+      match.py reports 16 Rust instructions versus 11 original instructions:
+      LLVM adds a frame pointer and an initial predicate check, uses BLX
+      through the verified 0x083de03c literal, and preserves the recheck loop
+      and original-pointer return; predicate calls are archive relocations.
   - address: 0x083e0c54
     ghidra: FUN_083e0c54
     name: refcounted_body_range_release
