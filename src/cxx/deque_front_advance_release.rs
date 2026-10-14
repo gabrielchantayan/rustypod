@@ -41,7 +41,7 @@ pub unsafe extern "C" fn deque_front_advance_release(deque: *mut u32) {
     );
 }
 
-unsafe fn deque_front_advance_release_with<R, D>(
+pub(super) unsafe fn deque_front_advance_release_with<R, D>(
     deque: *mut u32,
     mut release: R,
     mut deallocate: D,
