@@ -257258,3 +257258,36 @@ functions:
       smoke passed. match.py reviewed: 47 original versus 50 Rust instructions;
       LLVM uses BLX for virtual dispatch, branches around deletion rather
       than BLNE, and separate stores rather than STM. No device execution.
+  - address: 0x083d8468
+    ghidra: FUN_083d8468
+    name: ostream_prepare_output
+    size: 176
+    sig: "u32 *ostream_prepare_output(u32 *stream)"
+    module: cxx/ostream_prepare_output
+    status: ported
+    vars: {param_1: stream, r4: stream, piVar4: buffer}
+    notes: >-
+      Raw A32 establishes [0x083d8468,0x083d8518), including three
+      literals after the return at 0x083d8508; the next real PUSH is
+      at 0x083d8518. Executable size is 164 bytes. Whole-image decoding
+      finds one inbound plain BL at 0x083d8400 and no predicated inbound
+      calls. Body has three plain BLs, one BLNE, and virtual BLX at
+      0x083d8500. Flushes the tied ostream from adjusted basic_ios+56,
+      not the receiver; conditionally flushes FILE 0x08b2f864 for the
+      active object or FILE 0x08b2f8a8 for a secondary standard stream
+      when byte 0x08a0fbc8 enables synchronization. Reloads the adjusted
+      buffer at +52 after those calls. A nonnull buffer with mode bit
+      zero set receives virtual slot +16 with an eight-byte result area,
+      offset zero and direction two. Result discarded; receiver returned.
+      Existing ostream_flush, object_matches_active_context,
+      secondary_standard_stream_subobject and fflush ports are reused.
+      Ghidra's extra parameters and u64 result are incidental saved
+      registers, not the caller's pointer ABI. Host dependency hooks and
+      native-width vtable slots are deliberate host-only deviations.
+      Host tests cover synchronization priority, null buffer, mode bits
+      and tied-flush buffer replacement; actual-source standalone smoke
+      covers negative base adjustment and virtual seek. Full host suite
+      passed 16025 tests. ARM release build passed. match.py structural
+      diff reviewed: LLVM branches around the tied flush and inlines
+      fflush's nonnull path into the existing stream-sync hook; virtual
+      seek and post-call buffer reload retained. No device execution.
