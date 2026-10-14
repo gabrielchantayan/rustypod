@@ -259554,3 +259554,33 @@ functions:
       extract_metadata, configure_shared_payload_kind and
       notify_calendar_change are undefined. The new host test exercises
       the actual exported function and real COW destructor successfully.
+
+  - address: 0x083c58d8
+    ghidra: FUN_083c58d8
+    name: red_black_tree_payload_16_assign
+    size: 164
+    sig: "RedBlackTreePayload16 *red_black_tree_payload_16_assign(RedBlackTreePayload16 *destination, const RedBlackTreePayload16 *source)"
+    module: cxx/red_black_tree_payload_16_assign
+    status: ported
+    confidence: high
+    arg_renames:
+      param_1: destination
+      param_2: source
+    notes: >-
+      Raw A32 extent ends with pop {r1-r5,pc} at 0x083c5978;
+      the next real function begins at 0x083c597c. Four unconditional
+      outbound BLs, no predicated BLs; one inbound BL at 0x081dfa84.
+      Erases destination via retail range erase 0x083c53c8, clones the
+      source with the existing 0x083c5628 port, rebuilds header root and
+      extrema, copies count, and returns destination. Self-assignment
+      accesses no object fields. Ghidra's extra arguments and undefined8
+      return are artifacts: saved r1 is restored, not a second result.
+      The verified leftmost loop at 0x083b6ae8 is identical to the reused
+      0x083b6a80 port; rightmost uses the existing 0x083b6ad4 port.
+      Target-width pointer fields preserve layout on hosts. Host coverage
+      exercises self-assignment, empty trees, and a branched clone with
+      the real pool and subtree port; range erase uses an empty-tree-only
+      model. All 16123 host tests pass; ARM release build succeeds.
+      match.py reports 43 versus 41 instructions (exit 1): frame setup,
+      register allocation and an indirect retail erase call differ;
+      self guard, clone, empty branch, extrema and count stores agree.
