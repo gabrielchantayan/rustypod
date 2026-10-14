@@ -873,6 +873,7 @@ pub mod red_black_tree_word_node_pool_acquire;
 pub mod red_black_tree_word_node_pool_acquire_with_payload;
 pub mod red_black_tree_word_subtree_clone;
 pub mod red_black_tree_payload_24_node_pool_acquire;
+pub mod event_list_tree_node_clone;
 pub mod red_black_tree_payload_24_construct;
 pub mod red_black_tree_rotate_right;
 pub mod red_black_tree_rotate_right_second;

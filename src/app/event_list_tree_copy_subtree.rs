@@ -13,9 +13,8 @@
 //! clones its left child. It iterates down right links and terminates the
 //! final right link with null.
 //!
-//! Deliberate deviations: the type-specialized allocation and payload-copy
-//! helper at 0x083c1580 remains unported. ARM calls that verified target;
-//! host tests inject it into the algorithm.
+//! Deliberate deviations: host subtree tests inject a node-clone model;
+//! production uses the ported event-list node/payload constructor.
 
 #[inline(always)]
 unsafe fn word(pointer: *const u8, offset: usize) -> u32 {
@@ -56,18 +55,13 @@ unsafe fn clone_subtree_with(
     first_clone
 }
 
-#[cfg(target_arch = "arm")]
 #[inline(always)]
 unsafe fn clone_node(tree: *mut u8, source_payload: *const u8) -> u32 {
-    let retail_clone_node: unsafe extern "C" fn(*mut u8, *const u8) -> u32 =
-        unsafe { core::mem::transmute(0x083c_1580usize) };
-    unsafe { retail_clone_node(tree, source_payload) }
-}
-
-#[cfg(not(target_arch = "arm"))]
-#[inline(always)]
-unsafe fn clone_node(_tree: *mut u8, _source_payload: *const u8) -> u32 {
-    panic!("event_list_tree_copy_subtree requires 0x083c1580")
+    unsafe {
+        crate::cxx::event_list_tree_node_clone::event_list_tree_node_clone(
+            tree.cast(), source_payload,
+        ) as usize as u32
+    }
 }
 
 /// Clones `source_root` and all descendants below `destination_header`.
