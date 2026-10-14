@@ -259783,3 +259783,40 @@ functions:
       ARM release builds. match.py reports a structural diff (exit 1): five
       calls and the construction sequence remain, while LLVM removes spills,
       combines stores and replaces the final shift pair with a low-bit mask.
+
+  - address: 0x083c023c
+    ghidra: FUN_083c023c
+    name: word_key_set_find
+    size: 156
+    sig: "void word_key_set_find(WordKeySetNode **out, const WordKeySet *tree, const u32 *key)"
+    module: cxx/word_key_set_find
+    status: ported
+    renames:
+      param_1/r0/r8: out
+      param_2/r1/r5: tree
+      param_3/r2/r9: key
+      iVar3/r4: node
+      iVar5/r6: candidate
+      FUN_083d74c4: less_unsigned_alias_74c4
+      FUN_083b6a2c: word_key_set_node_key
+    notes: >-
+      Raw osos.dec establishes the 156-byte A32 extent 0x083c023c..0x083c02d8,
+      ending with pop at 0x083c02d4 before the next independently linked push.
+      Independent whole-image aligned branch decoding finds one inbound plain
+      BL at 0x08257da0 and zero predicated inbound BLs. The body contains three
+      outbound plain BLs at 0x083c026c, 0x083c02a0 and 0x083c02b0, and zero
+      predicated BLs. Caller 0x08257d7c consumes only the output iterator and
+      compares it with the header before erasing. Performs unsigned lower-bound
+      traversal and reverse comparison, returning the first equal node or header
+      through out. Reuses WordKeySet/WordKeySetNode and less_unsigned_alias_74c4.
+      Deliberate deviations: typed fields widen on hosts; the trivial node+16
+      accessor is folded into field addressing; dead spills and restored scratch
+      register values are omitted, including Ghidra's spurious u64 return.
+      Host regression covers empty trees without query access, duplicate first
+      match, gaps, unsigned high-bit boundaries and unchanged node links/keys.
+      Required host suite passes; ARM release build succeeds. Isolated API smoke
+      prints miss/hit/miss for 0, 0x80000000 and 0xffffffff against one high-bit
+      node. match.py reports a structural diff (exit 1), 39 versus 30 instructions:
+      lower-bound loop, sentinel guard, reverse comparator and output store remain;
+      LLVM removes spills, the accessor call and unused stateless comparator
+      argument, and selects the child with an indexed load.

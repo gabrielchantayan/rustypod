@@ -956,6 +956,7 @@ pub mod word_key_set;
 pub mod word_key_set_node_key;
 pub mod opaque_tree_node_pool;
 pub mod word_key_set_count;
+pub mod word_key_set_find;
 pub mod owner_callback_dispatch;
 pub mod timer_stop_then_clear_bit_set;
 pub mod transition_addon;
