@@ -8,8 +8,8 @@
 //! to the recycle chain at tree word 1 using header word 3, then release
 //! the pool through 0x083bf5a0. A null header skips all cleanup. Return tree.
 //! Deliberate deviations: Rust locals replace stack iterator slots; target
-//! pointer fields remain u32 on hosts. Unported helpers remain verified
-//! retail address seams, with private injected operations for host tests.
+//! pointer fields remain u32 on hosts. The unported erase helper remains a
+//! verified retail address seam, with private injected operations for tests.
 //! Ghidra's extra arguments and u64 return are stack-save artifacts: the
 //! original restores r1-r3 and returns the input in r0.
 
@@ -21,19 +21,11 @@ unsafe extern "C" fn erase_range(out: *mut u32, tree: *mut u32, first: *mut u32,
     let erase: EraseRange = unsafe { core::mem::transmute(0x083b_fa44usize) };
     unsafe { erase(out, tree, first, last) }
 }
-#[cfg(target_os = "none")]
-unsafe extern "C" fn release_pool(tree: *mut u32) {
-    let release: ReleasePool = unsafe { core::mem::transmute(0x083b_f5a0usize) };
-    unsafe { release(tree) }
-}
 #[cfg(not(target_os = "none"))]
 unsafe extern "C" fn erase_range(_: *mut u32, _: *mut u32, _: *mut u32, _: *mut u32) -> *mut u32 {
     panic!("word_key_tree_pool_destruct requires retail erase operation")
 }
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn release_pool(_: *mut u32) {
-    panic!("word_key_tree_pool_destruct requires retail pool operation")
-}
+use super::word_key_tree_pool_release::word_key_tree_pool_release as release_pool;
 
 /// Destroys the tree's contents and pool, returning its original address.
 ///

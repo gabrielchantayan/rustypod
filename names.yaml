@@ -16,6 +16,32 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083bf5a0
+    ghidra: FUN_083bf5a0
+    name: word_key_tree_pool_release
+    size: 68
+    sig: "void word_key_tree_pool_release(uint32_t *pool)"
+    module: cxx/word_key_tree_pool_release
+    status: ported
+    vars:
+      param_1/r0/r5: pool
+      puVar1/r4: chunk
+      "chunk[0]": next
+      "chunk[1]": payload_count
+      "chunk[2]": payload
+    renames: {FUN_08266f2c: cxx_array_dealloc}
+    notes: >-
+      Raw A32 extent 0x083bf5a0..0x083bf5e4 is 68 bytes; the next
+      independent PUSH starts at 0x083bf5e4. Two outgoing plain BLs at
+      0x083bf5c0 and 0x083bf5d0, one incoming plain BL at 0x082a8464,
+      no predicated BLs. Pop each chunk from pool word 0 before releasing
+      its payload with (payload, count, 0), then the chunk with (chunk, 1, 0).
+      Reload the head after both calls; empty pools are unchanged. Reuses
+      ported cxx_array_dealloc; the destructor now calls this port directly.
+      Host deviation: pointer fields remain u32 with injected deallocation
+      for ownership/order tests. ARM match: 17 original versus 16 Rust
+      instructions; LLVM removes dead count/elem setup, calls operator_delete
+      twice, and retains unlink-before-free and head reload with an FP frame.
   - address: 0x083cff30
     ghidra: FUN_083cff30
     name: indexed_element_array_erase_at
@@ -26057,7 +26083,7 @@ functions:
       local_14: begin_iterator
       uStack_10: erased_iterator
       FUN_083bfa44: type_specific_erase_range_address_seam
-      FUN_083bf5a0: pool_release_address_seam
+      FUN_083bf5a0: word_key_tree_pool_release
     notes: >-
       Raw ARM establishes 88 bytes through the return at 0x082a846c;
       the next function starts at 0x082a8470. Two outbound plain BLs,
@@ -26067,8 +26093,8 @@ functions:
       prepend the header via its word 3 to tree word 1, then release the
       pool. A null header preserves all fields and skips both calls.
       Return the original tree pointer; Ghidra's extra arguments and u64
-      return are artifacts of saved/restored r1-r3. Verified unported
-      runtime helpers remain address seams, not guessed Rust callees.
+      return are artifacts of saved/restored r1-r3. The unported erase
+      helper remains an address seam; pool release now calls its Rust port.
       Deviations: Rust iterator locals and target-width u32 fields.
       Host tests cover null-header preservation, post-erase header and
       chain reloads, cleanup ordering, and terminal pool state.
