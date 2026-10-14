@@ -16,6 +16,34 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083da7e4
+    ghidra: FUN_083da7e4
+    name: wide_filebuf_set_unbuffered
+    size: 24
+    sig: "void wide_filebuf_set_unbuffered(u32 *buffer, i32 enabled)"
+    module: cxx/wide_filebuf_set_unbuffered
+    status: ported
+    vars: {param_1/r0: buffer, param_2/r1: enabled, r2: mode_test, r1_after_load: flags}
+    notes: >-
+      Raw extent [0x083da7e4, 0x083da7fc) is six A32 words ending in
+      MOV PC,LR; the next real function starts with PUSH. Whole-image
+      decoding finds one incoming plain BL at 0x083d9af8, zero predicated
+      BLs and zero outgoing BLs. MOVS tests the entire mode word; LDR
+      reads object +0x10; BICEQ/ORRNE clears/sets bit 2; STR writes it
+      back, preserving other bits. Caller 0x083d9a64 enables the flag for
+      a null buffer with nonpositive capacity and disables it for positive
+      capacity, whose allocation holds two-byte characters. This is the
+      wide file-buffer unbuffered-mode flag, not streambuf flags at +4.
+      No callee seams or behavioral deviations. Aligned u32 word indexing
+      preserves the target offset on hosts. Tests cover zero, positive,
+      negative and extreme mode values, both initial bit states, high and
+      unrelated bits, neighboring words and repeated mode transitions.
+      Executable actual-source smoke confirms negative enable followed by
+      zero disable while preserving neighboring object storage.
+      Host cargo test and build-std ARM release pass. match.py resolves
+      the exported symbol: LLVM emits eight instructions versus six,
+      adding a frame and unconditionally clearing bit 2 before ORRNE;
+      the same +0x10 load/store, zero test and bit-preserving result remain.
   - address: 0x083da7fc
     ghidra: FUN_083da7fc
     name: wide_streambuf_put
