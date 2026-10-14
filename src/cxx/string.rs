@@ -2179,6 +2179,50 @@ fn strstreambuf_set_frozen_preserves_adjacent_words_and_flag_bits() {
     }
 }
 
+/// `strstreambuf_set_dynamic` — original: `FUN_083da588` @ load address
+/// **0x083da588** (24 bytes, exclusive end 0x083da5a0).
+///
+/// Raw words are MOVS r2,r1; LDR r1,[r0,#0x10]; BICEQ r1,r1,#4;
+/// ORRNE r1,r1,#4; STR r1,[r0,#0x10]; MOV pc,lr. The next independent
+/// function at 0x083da5a0 returns zero. Whole-image aligned ARM decoding
+/// finds one inbound plain BL at 0x083d9144, zero predicated BLs, zero
+/// tail branches and zero outbound BLs.
+///
+/// Sets bit 2 of the strstream buffer's ownership word (word index 4)
+/// for any nonzero `dynamic`, otherwise clears it, preserving all other
+/// bits. Caller 0x083d90b0 enables this flag for the zero-capacity/no-buffer
+/// case and disables it for a supplied or newly allocated fixed-size buffer.
+/// No deliberate behavioral deviations; u32 preserves the raw full-word
+/// truth test rather than restricting the ABI to bool.
+///
+/// # Safety
+///
+/// `this` must address writable, u32-aligned storage through byte 0x13.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", unsafe(link_section = ".text.strstreambuf_set_dynamic"))]
+#[inline(never)]
+pub unsafe extern "C" fn strstreambuf_set_dynamic(this: *mut u8, dynamic: u32) {
+    let ownership = this.cast::<u32>().add(4);
+    let flags = ownership.read();
+    ownership.write(if dynamic == 0 { flags & !4 } else { flags | 4 });
+}
+
+#[cfg(test)]
+#[test]
+fn strstreambuf_set_dynamic_preserves_flags_and_neighboring_words() {
+    for initial_flags in [0, 4, 3, 7, 0xffff_fffb, u32::MAX, 0x8123_4567] {
+        let mut words = [0xfeed_face, 0xa5a5_a5a5, 0x1020_3040,
+                         0x5060_7080, initial_flags, 0x1122_3344, 0x5566_7788];
+        let mut expected = words;
+        for dynamic in [0, 1, 2, 0, 0x100, 0x8000_0000, u32::MAX, 0, 0] {
+            // Independent bit-field reference, including repeated transitions.
+            expected[4] = (expected[4] & 0xffff_fffb) + u32::from(dynamic != 0) * 4;
+            unsafe { strstreambuf_set_dynamic(words.as_mut_ptr().cast(), dynamic) };
+            assert_eq!(words, expected, "initial {initial_flags:#x}, dynamic {dynamic:#x}");
+        }
+    }
+}
+
 /// Target ABI for the stream buffer's virtual underflow callback.
 type StreambufUnderflow = unsafe extern "C" fn(*mut Streambuf) -> i32;
 

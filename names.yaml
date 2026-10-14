@@ -16,6 +16,33 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083da588
+    ghidra: FUN_083da588
+    name: strstreambuf_set_dynamic
+    size: 24
+    sig: "void strstreambuf_set_dynamic(u8 *this, u32 dynamic)"
+    module: cxx/string
+    status: ported
+    vars: {param_1/r0: this, param_2/r1: dynamic, r2: dynamic_test, r1_after_load: ownership_flags}
+    renames: {FUN_083da588: strstreambuf_set_dynamic, param_1: this, param_2: dynamic, uVar1: ownership_flags}
+    notes: >-
+      Raw extent [0x083da588, 0x083da5a0) is six A32 words ending in
+      MOV PC,LR; next independent function returns zero. Whole-image aligned
+      B/BL decoding finds one incoming plain BL at 0x083d9144, zero predicated
+      BLs, zero incoming tail branches and zero outgoing BLs. MOVS tests the
+      entire dynamic word; LDR reads object +0x10; BICEQ/ORRNE clears/sets
+      bit 2; STR preserves all other flags. Caller 0x083d90b0 enables the
+      flag for a null buffer with nonpositive capacity and disables it for
+      positive fixed capacity. No callee seams or behavioral deviations.
+      Existing cxx/string module and aligned u32 word indexing are reused.
+      Host tests cover both initial bit states, unrelated bits, full-word
+      nonzero values, neighboring words and repeated transitions. Host cargo
+      test and build-std ARM release pass. Actual-source executable smoke
+      enables with 0x80000000 then disables with zero, preserving neighbors.
+      match.py resolves the export and exits 1 with eight versus six
+      instructions: LLVM adds a frame, uses CMP and unconditional BIC before
+      ORRNE, retaining the +0x10 load/store and full-word truth test.
+      No device execution.
   - address: 0x083da7b4
     ghidra: FUN_083da7b4
     name: wide_filebuf_set_owned
