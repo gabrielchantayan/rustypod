@@ -14,6 +14,14 @@
 //! PC-relative displacement. Both addresses use this export, without a
 //! redundant wrapper. The caller recycles its header with release_value=0.
 //!
+//! Also ports `FUN_083c228c` @ load `0x083c228c`: true size 40 bytes,
+//! through pop at 0x083c22b0, before the independent left rotation at
+//! 0x083c22b4. Full aligned raw decoding finds one inbound plain BL at
+//! 0x082a80a4 and no predicated inbound BLs; the body has zero plain BLs
+//! and one BLNE at 0x083c22a8 to `cxx_string_release` @ 0x083d8b04.
+//! All nine non-call words match this port's original; only the call
+//! displacement differs. Its destructor caller also passes zero.
+//!
 //! Copy pool+4 into node+12, optionally release the string at node+16 for
 //! any nonzero flag, then publish the node at pool+4. Other node fields,
 //! including the second payload word, remain untouched.
@@ -101,5 +109,18 @@ mod tests {
             assert_eq!(node.add(3).read(), node as usize as u32);
             assert_eq!(node.add(4).read(), 0);
         }
+    }
+
+    #[test]
+    fn overlapping_pool_and_node_preserve_read_before_publish_order() {
+        // pool+4 and node+12 coincide: publishing must follow the link copy.
+        let mut words = [0xaaaa_aaaa, 0xbbbb_bbbb, 0xcccc_cccc,
+                         0x1234_5678, 0xeeee_eeee];
+        let node = words.as_mut_ptr();
+        unsafe {
+            string_pair_tree_node_pool_recycle(node.add(2), node, 0);
+        }
+        assert_eq!(words, [0xaaaa_aaaa, 0xbbbb_bbbb, 0xcccc_cccc,
+                           node as usize as u32, 0xeeee_eeee]);
     }
 }

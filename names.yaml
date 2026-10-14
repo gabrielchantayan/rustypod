@@ -259663,3 +259663,40 @@ functions:
       Host tests cover null/non-null free heads, arbitrary nonzero flags,
       real shared COW refcount transition from one to zero without freeing,
       untouched fields, and a four-word header with no string slot.
+
+  - address: 0x083c228c
+    ghidra: FUN_083c228c
+    name: string_pair_tree_node_pool_recycle_083c228c_copy
+    size: 40
+    sig: "void string_pair_tree_node_pool_recycle(u32 *pool, u32 *node, u32 release_value)"
+    module: cxx/string_pair_tree_node_pool_recycle
+    status: ported
+    renames:
+      param_1/r0/r5: pool
+      param_2/r1/r4: node
+      param_3/r2: release_value
+      pool_plus_4: free_list_head
+      node_plus_12: next_free_node
+      node_plus_16: string
+      FUN_083d8b04: cxx_string_release
+    notes: >-
+      Raw osos.dec establishes ten A32 words (40 bytes), from push at
+      0x083c228c through pop at 0x083c22b0; the next independent function
+      is the left rotation at 0x083c22b4. Full aligned raw BL decoding
+      finds one inbound plain BL at 0x082a80a4 and no predicated inbound BLs.
+      The body has zero plain BLs and one BLNE at 0x083c22a8 targeting
+      cxx_string_release at 0x083d8b04, already ported in cxx/string.
+      Copies pool+4 to node+12, optionally releases the COW string at
+      node+16 for every nonzero flag, then publishes node at pool+4.
+      The destructor at 0x082a8060 passes zero to recycle its header.
+      All nine non-call words match 0x083c5a34 and 0x083c369c; their
+      call displacements resolve to the same callee. Hook symbol is
+      string_pair_tree_node_pool_recycle, reusing its registered module
+      and implementation without a duplicate wrapper. Deliberate
+      deviations: host storage retains target-width words and widens
+      the string into a temporary slot for the non-slot-mutating
+      destructor; ARM passes the real slot. Rust branches replace
+      predication. Tests exercise absent string slots with zero flags,
+      null/non-null free heads, arbitrary nonzero flags, actual shared
+      COW refcount transitions, untouched payloads, and overlapping
+      pool/node storage with read-before-publish ordering.
