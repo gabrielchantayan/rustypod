@@ -69,6 +69,13 @@ mod tests {
             }
             let saved = HEAP_OPS;
             HEAP_OPS.realloc = relocate;
+            words[..2].copy_from_slice(&[11, 22]);
+            let mut full = [slab as usize as u32, 2, 2, 7, 2, 9];
+            let before = full;
+            // A duplicate in a full array must not expand or relocate storage.
+            assert_eq!(element_array3_insert(full.as_mut_ptr(), 22), -1);
+            assert_eq!(full, before);
+            assert_eq!(&words[..2], &[11, 22]);
             words.fill(0xdead_beef);
             words[..2].copy_from_slice(&[11, 22]);
             let mut header = [slab as usize as u32, 2, 2, 7, 2, 9];
