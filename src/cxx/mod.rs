@@ -3,6 +3,7 @@
 //! 0x083c0000-0x083dffff block of osos (~1000 functions), separate from
 //! the ARM ADS C runtime.
 pub mod payload_list_destruct;
+pub mod payload_16_tree_construct;
 pub mod region_list_destruct;
 pub mod word_pair_list_clear;
 pub mod polymorphic_owner_range_destroy;

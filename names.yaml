@@ -16,6 +16,35 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083db10c
+    ghidra: FUN_083db10c
+    name: payload_16_tree_construct
+    size: 88
+    sig: "Payload16Tree *payload_16_tree_construct(Payload16Tree *tree, const u8 *comparator)"
+    module: cxx/payload_16_tree_construct
+    status: ported
+    vars: {param_1/r4: tree, param_2/r1: comparator, r5: zero, r0: header}
+    renames: {FUN_083b9f4c: red_black_tree_payload_16_node_pool_acquire_083b9f4c}
+    notes: >-
+      Raw extent [0x083db10c, 0x083db164) is 88 bytes, through POP at
+      0x083db160; the next PUSH begins another function. One outgoing plain
+      BL at 0x083db140 to the canonical ported pool acquire 0x083b9f4c.
+      Whole-image A32 decoding finds one incoming plain BL at 0x081e0be4;
+      no incoming or outgoing predicated BLs. Caller 0x081e0bac constructs
+      this embedded tree with a zero comparator byte; entry r2 is unused.
+      Clear pool, header, count and state; copy comparator byte; acquire
+      a 32-byte header, clear parent and self-link children; return tree.
+      Reuse canonical Rust pool acquire, preserve u32 pointer fields, and
+      use ordered volatile initialization to preserve selector alias behavior.
+      Padding and header payload remain untouched. Host tests exercise all
+      256 selector values, aliases cleared before/after the read, empty-tree
+      links, pool allocation state, padding, payload and neighboring storage.
+      Host suite and build-std ARM release pass. Standalone actual-source
+      executable smoke verifies selector 255, self-links and padding using
+      a low-address allocation boundary; no device execution.
+      match.py exits 1 with 21 Rust versus 22 retail instructions: same
+      initialization and one BL, parent clear, self-links and tree return;
+      redundant header reloads omitted, frame/register scheduling differs.
   - address: 0x083dc640
     ghidra: FUN_083dc640
     name: payload_list_destruct
