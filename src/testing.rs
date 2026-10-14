@@ -3670,6 +3670,8 @@ pub mod hints {
     // mappings never unmap, so no other port may share these hints.
     pub const RED_BLACK_TREE_COW_PAIR_SUBTREE_CLONE: usize = 0x7710_0000;
     pub const RED_BLACK_TREE_COW_PAIR_SUBTREE_CLONE_NULL: usize = 0x7720_0000;
+    // Dedicated to the COW-pair assignment target-layout tree fixture.
+    pub const RED_BLACK_TREE_COW_PAIR_ASSIGN: usize = 0x6010_0000;
     // 0x7730_0000: dedicated to cxx/red_black_tree_node_cow_pair_clone's
     // target-width node and COW-string fixture; mappings never unmap.
     pub const RED_BLACK_TREE_NODE_COW_PAIR_CLONE: usize = 0x7730_0000;
