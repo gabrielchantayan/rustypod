@@ -256391,3 +256391,42 @@ functions:
       empty-before-removal, iteration, and return-self. A direct debugger
       smoke call to the host export returns its input and preserves the
       sentinel cursor on an empty deque.
+  - address: 0x083df574
+    ghidra: FUN_083df574
+    name: deque_back_retire_segment
+    size: 164
+    module: cxx/deque_back_retire_segment
+    status: ported
+    sig: "void deque_back_retire_segment(uint32_t *deque)"
+    renames:
+      param_1/r4: deque
+      puVar1/r0: old_slot
+      uVar4/r5: retired_segment
+      local_20: initialized_back_iterator
+      FUN_083da3dc: deque_seg_capacity
+      FUN_083d7620: container_is_empty_alias_7620
+      FUN_083da3e4: deque_iter_init_elem4_alias_a3e4
+      FUN_08266f2c: cxx_array_dealloc
+    notes: >-
+      Raw A32 extent is 0x083df574..0x083df618, fixed by the next independent
+      PUSH. Seven outgoing plain BLs at 0x083df58c, 0x083df59c, 0x083df5a4,
+      0x083df5c0, 0x083df5e4, 0x083df5ec and 0x083df600; zero predicated BLs.
+      Whole-image word decoding finds one inbound plain BL at 0x0825d2e8,
+      zero predicated inbound BLs. Every non-BL instruction matches the
+      already ported 0x083df8e4 body; differing helper targets are verified
+      registered equivalents. Intentionally reuse its existing Rust export,
+      not a redundant wrapper or new firmware seam. Retreat back map slot,
+      free retired segment, then reanchor at previous segment end; for zero
+      count clear both iterators and free map. Preserve count/map metadata.
+      The sole caller already decrements cursor/count and ignores restored
+      r0-r3; Ghidra's undefined8 return and extra arguments are not contracts.
+      Deliberate deviations: inline target-width iterator stores and empty
+      predicate; reuse capacity/deallocator ports and wrapping end arithmetic.
+      Host tests cover zero/one/multiple/MAX counts, NULL retired segment,
+      high-bit count, end wrap and preserved metadata. Host gate reports
+      15989 passed; ARM release build passes. Standalone actual-source smoke
+      exercises both exported branches with a null-only observing deallocator,
+      not the hardware allocator. match.py exits 1: 30 versus 41 instructions;
+      slot retreat, delete, count branch, reanchor and clear/map delete remain.
+      LLVM removes helper calls/dead allocator arguments and tail-calls map
+      delete. No device execution performed.

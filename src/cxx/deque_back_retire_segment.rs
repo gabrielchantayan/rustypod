@@ -7,6 +7,12 @@ use crate::heap::veneers::cxx_array_dealloc;
 /// True size: 164 bytes, 0x083df8e4..0x083df988 (next real prologue).
 /// Raw A32: seven outgoing plain BLs, zero predicated BLs; one incoming
 /// plain BL at 0x083dfd88, zero predicated incoming BLs.
+/// Also ports `FUN_083df574` @ 0x083df574: true size 164 bytes through
+/// 0x083df618, seven outgoing plain BLs and zero predicated BLs. Whole-image
+/// decoding finds one incoming plain BL at 0x0825d2e8, no predicated calls.
+/// Every non-BL instruction is identical to the 0x083df8e4 body; its distinct
+/// capacity, empty-predicate and iterator-init targets are verified equivalent.
+/// The existing export intentionally serves both addresses, with no wrapper.
 ///
 /// Retreats the back map slot and frees its former segment. The caller has
 /// already decremented the element cursor and count. If count is zero, clears
@@ -105,5 +111,26 @@ mod tests {
         }
         assert_eq!(deque, [0, 0, 0, 0, 0, 0, 0, 0, 0, 0x8000, 13]);
         assert_eq!(frees, [(0x7000, 32, 0), (0x8000, 13, 0)]);
+    }
+
+    #[test]
+    fn retired_null_segment_does_not_clear_a_nonempty_deque() {
+        let Some(slab) = try_map_u32_slab(hints::DEQUE_BACK_RETIRE_SEGMENT_NULL, 4096) else {
+            return;
+        };
+        let slots = slab.cast::<u32>();
+        unsafe {
+            slots.write(0xffff_ff80);
+            slots.add(1).write(0);
+        }
+        let slot = unsafe { slots.add(1) } as usize as u32;
+        let mut deque = [11, 22, 33, 44, 0, 0, 0, slot, 0x8000_0000, 0x6000, 9];
+        let mut frees = std::vec::Vec::new();
+        unsafe {
+            deque_back_retire_segment_with(deque.as_mut_ptr(), |p, n, e| frees.push((p, n, e)));
+        }
+        assert_eq!(deque, [11, 22, 33, 44, 0, 0xffff_ff80, 0, slot - 4,
+            0x8000_0000, 0x6000, 9]);
+        assert_eq!(frees, [(0, 32, 0)]);
     }
 }
