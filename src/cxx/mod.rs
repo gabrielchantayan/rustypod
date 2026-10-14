@@ -202,6 +202,7 @@ pub mod observable_array_release_virtual_cells;
 pub mod observable_array_release_elements;
 pub mod observable_array_release_elements_083d119c;
 pub mod observable_array_release_string_objects;
+pub mod owned_string_object_array_erase_at;
 pub mod container_first_node;
 pub mod container_first_node_083dbeb4;
 pub mod container_first_node_083dbdd4;
