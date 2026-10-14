@@ -260005,3 +260005,34 @@ functions:
       with nine original and nine Rust instructions: LLVM adds a frame
       pointer and removes the dead r5 copy; allocation size, both BLs,
       zero constructor argument, payload store and pointer return remain.
+
+  - address: 0x083b6bd0
+    ghidra: FUN_083b6bd0
+    name: embedded_allocation_owner_destroy
+    size: 24
+    sig: "FirstWordOwner *embedded_allocation_owner_destroy(FirstWordOwner *owner)"
+    module: heap/first_word_owner_destroy
+    status: ported
+    vars: {param_1/r0: owner, r4: saved_owner}
+    renames: {FUN_082aad14: operator_delete_tag3}
+    notes: >-
+      Raw osos.dec words e92d4010 e1a04000 e5900000 ebfbd04c e1a00004
+      e8bd8010 establish the 24-byte extent [0x083b6bd0,0x083b6be8),
+      followed by an independent PUSH. Whole-image aligned A32 decoding
+      finds one plain inbound BL at 0x082670b0 and no predicated inbound
+      BLs. The body has one plain BL at 0x083b6bdc to the existing port
+      operator_delete_tag3 at 0x082aad14 and no predicated BLs. Load the
+      owner's first allocation pointer, delete it, and return the owner
+      without clearing the dangling pointer or deleting the owner itself.
+      Caller 0x0826709c passes object+8 and subtracts eight from the result.
+      Reuses FirstWordOwner and the existing tag-3 allocator; no new seam.
+      Deliberate deviation: repr(C) pointer widens on hosts only. Identical
+      bodies may fold with first_word_owner_destroy; the assigned symbol
+      remains present. match.py exits 1: seven Rust instructions versus six
+      original instructions, adding a frame pointer and saving sl/fp; the
+      load, delete BL, owner return and absence of stores are preserved.
+      Host tests cover NULL and live allocation, retained owner field,
+      adjacent sentinels and tag-3 release. Required host suite and ARM
+      release build pass. Standalone real-source smoke releases a real
+      host allocation and verifies embedded pointer return and sentinels.
+      Device execution is not tested.
