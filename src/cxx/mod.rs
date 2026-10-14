@@ -3,6 +3,7 @@
 //! 0x083c0000-0x083dffff block of osos (~1000 functions), separate from
 //! the ARM ADS C runtime.
 pub mod tracked_slot_array_construct;
+pub mod tracked_opaque_owner_remove;
 pub mod string_id_tracker_remove;
 pub mod scoped_context_tracker_remove;
 pub mod opaque_observable_array_cell_value;
