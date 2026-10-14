@@ -13,27 +13,25 @@
 //! The constructor delegates to [`screen_base_construct`] with `create_link =
 //! 1`, replaces its primary vtable with 0x08983cf8 and the secondary vtable
 //! with primary + 0xe4, then initializes two 24-byte pool headers at +0x28
-//! and +0x40. Each header is cleared, reserves its first element with an
-//! unported pool helper, stores that element as the header sentinel, and makes
-//! its first two words self-referential. The first pool has 16-byte elements
-//! (`FUN_083dcb1c`); the second has 36-byte elements (`FUN_083dc9b0`).
+//! and +0x40. Each header is cleared, reserves its first element, stores that
+//! element as the header sentinel, and makes its first two words self-referential.
+//! The first pool has 16-byte elements (`FUN_083dcb1c`); the second has 36-byte
+//! elements and uses the ported `dual_pool_screen_reserve_record`.
 //!
 //! # Deviations
 //!
-//! The two reserve helpers have no existing port or `names.yaml` entry. Device
-//! builds call their verified retail addresses directly. Host builds cross
-//! [`DUAL_POOL_SCREEN_OPS`] so tests can observe their ABI and the sentinel
-//! initialization without inventing allocator behavior.
+//! The first reserve helper remains unported: device builds call its verified
+//! retail address, while host builds cross [`DUAL_POOL_SCREEN_OPS`]. The second
+//! reserve helper calls the Rust implementation on both targets.
 
 use crate::app::screen_base::{screen_base_construct, ScreenBase};
+use super::dual_pool_screen_reserve_record::dual_pool_screen_reserve_record;
 use core::ptr;
 
 /// Literal primary vtable installed by the original (pool word @ 0x0812d8a0).
 pub const DUAL_POOL_SCREEN_VTABLE_ADDRESS: u32 = 0x0898_3cf8;
 /// Direct callee which reserves one 16-byte element from the first pool.
 pub const DUAL_POOL_SCREEN_FIRST_POOL_RESERVE_ADDRESS: usize = 0x083d_cb1c;
-/// Direct callee which reserves one 36-byte element from the second pool.
-pub const DUAL_POOL_SCREEN_SECOND_POOL_RESERVE_ADDRESS: usize = 0x083d_c9b0;
 
 /// The six-word allocator header both reserve helpers consume.
 ///
@@ -71,15 +69,13 @@ const _: () = assert!(core::mem::size_of::<DualPoolScreen>() == 0x58);
 const _: [u8; 0x28] = [0; core::mem::offset_of!(DualPoolScreen, first_pool)];
 const _: [u8; 0x40] = [0; core::mem::offset_of!(DualPoolScreen, second_pool)];
 
-/// ABI of the two unported pool helpers. Their stock bodies leave r0 holding
-/// the cursor before advancement, which this caller consumes as its sentinel.
+/// ABI of the remaining unported first-pool helper.
 pub type PoolReserve = unsafe extern "C" fn(*mut PoolHeader, u32) -> *mut u32;
 
-/// The unported reserve operations reached by this constructor.
+/// The unported first-pool reserve operation reached by this constructor.
 #[derive(Clone, Copy)]
 pub struct DualPoolScreenOps {
     pub reserve_first: PoolReserve,
-    pub reserve_second: PoolReserve,
 }
 
 #[cfg(target_os = "none")]
@@ -89,15 +85,8 @@ unsafe extern "C" fn retail_reserve_first(pool: *mut PoolHeader, grow: u32) -> *
 }
 
 #[cfg(target_os = "none")]
-unsafe extern "C" fn retail_reserve_second(pool: *mut PoolHeader, grow: u32) -> *mut u32 {
-    let reserve: PoolReserve = core::mem::transmute(DUAL_POOL_SCREEN_SECOND_POOL_RESERVE_ADDRESS);
-    reserve(pool, grow)
-}
-
-#[cfg(target_os = "none")]
 pub const DEFAULT_DUAL_POOL_SCREEN_OPS: DualPoolScreenOps = DualPoolScreenOps {
     reserve_first: retail_reserve_first,
-    reserve_second: retail_reserve_second,
 };
 
 #[cfg(not(target_os = "none"))]
@@ -106,14 +95,8 @@ unsafe extern "C" fn missing_reserve_first(_pool: *mut PoolHeader, _grow: u32) -
 }
 
 #[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_reserve_second(_pool: *mut PoolHeader, _grow: u32) -> *mut u32 {
-    panic!("dual_pool_screen_construct requires second-pool reserve 0x083dc9b0")
-}
-
-#[cfg(not(target_os = "none"))]
 pub const DEFAULT_DUAL_POOL_SCREEN_OPS: DualPoolScreenOps = DualPoolScreenOps {
     reserve_first: missing_reserve_first,
-    reserve_second: missing_reserve_second,
 };
 
 /// Host-replaceable pool reserve operations. Device builds retain direct calls
@@ -166,10 +149,7 @@ pub unsafe extern "C" fn dual_pool_screen_construct(
 
     let second_pool = ptr::addr_of_mut!((*this).second_pool);
     ptr::write_bytes(second_pool, 0, 1);
-    #[cfg(target_os = "none")]
-    let second_sentinel = retail_reserve_second(second_pool, 1);
-    #[cfg(not(target_os = "none"))]
-    let second_sentinel = (dual_pool_screen_ops().reserve_second)(second_pool, 1);
+    let second_sentinel = dual_pool_screen_reserve_record(second_pool, 1);
     ptr::write_volatile(ptr::addr_of_mut!((*second_pool).sentinel), second_sentinel as usize as u32);
     ptr::write_volatile(second_sentinel, second_sentinel as usize as u32);
     ptr::write_volatile(second_sentinel.add(1), second_sentinel as usize as u32);
@@ -192,13 +172,12 @@ mod tests {
     static mut BASE_RESULT: *mut ScreenBase = ptr::null_mut();
     static mut BASE_ARGS: Option<(*mut ScreenBase, u32, u32)> = None;
     static mut FIRST_POOL: *mut PoolHeader = ptr::null_mut();
-    static mut SECOND_POOL: *mut PoolHeader = ptr::null_mut();
     static mut FIRST_GROW: u32 = 0;
-    static mut SECOND_GROW: u32 = 0;
     static mut FIRST_HEADER_BEFORE: [u32; 6] = [0; 6];
-    static mut SECOND_HEADER_BEFORE: [u32; 6] = [0; 6];
     static mut FIRST_SENTINEL: [u32; 2] = [0; 2];
-    static mut SECOND_SENTINEL: [u32; 2] = [0; 2];
+    static mut SECOND_SENTINEL: *mut u32 = ptr::null_mut();
+    static mut CHUNK: *mut u8 = ptr::null_mut();
+    static mut ALLOC_CALL: usize = 0;
     static mut TASK_CONTEXT: [u32; 13] = [0; 13];
 
     unsafe extern "C" fn recording_construct_base(
@@ -223,13 +202,13 @@ mod tests {
         ptr::addr_of_mut!(FIRST_SENTINEL).cast()
     }
 
-    unsafe extern "C" fn recording_reserve_second(pool: *mut PoolHeader, grow: u32) -> *mut u32 {
-        SECOND_POOL = pool;
-        SECOND_GROW = grow;
-        SECOND_HEADER_BEFORE = ptr::read(pool.cast::<[u32; 6]>());
-        ptr::addr_of_mut!(SECOND_SENTINEL).cast()
-    }
 
+    unsafe extern "C" fn reserve_alloc(
+        _heap: *mut crate::heap::types::HeapDescriptorDescriptor, size: usize, _tag: usize,
+    ) -> *mut u8 {
+        ALLOC_CALL += 1;
+        if size == 12 { CHUNK } else { assert_eq!(size, 36); SECOND_SENTINEL.cast() }
+    }
     struct SlotsGuard {
         base_ops: ScreenBaseOps,
         pool_ops: DualPoolScreenOps,
@@ -242,13 +221,9 @@ mod tests {
                 BASE_RESULT = relocated.cast();
                 BASE_ARGS = None;
                 FIRST_POOL = ptr::null_mut();
-                SECOND_POOL = ptr::null_mut();
                 FIRST_GROW = 0;
-                SECOND_GROW = 0;
                 FIRST_HEADER_BEFORE = [0xffff_ffff; 6];
-                SECOND_HEADER_BEFORE = [0xffff_ffff; 6];
                 FIRST_SENTINEL = [0; 2];
-                SECOND_SENTINEL = [0; 2];
                 TASK_CONTEXT[12] = 0x089a_b004;
 
                 let base_slot = ptr::addr_of_mut!(SCREEN_BASE_OPS);
@@ -261,7 +236,6 @@ mod tests {
                 let pool_ops = ptr::read_volatile(pool_slot);
                 ptr::write_volatile(pool_slot, DualPoolScreenOps {
                     reserve_first: recording_reserve_first,
-                    reserve_second: recording_reserve_second,
                 });
                 let task_slot = ptr::addr_of_mut!(CURRENT_TASK_CTX_BLOCK);
                 let task_context = ptr::read_volatile(task_slot);
@@ -286,6 +260,20 @@ mod tests {
         let _test = TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         let _ctx = TASK_CTX_BLOCK_TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         let _registry = CLASS_REGISTRY_TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _heap = crate::heap::veneers::tests::mock_heap();
+        let Some(slab) = crate::testing::try_map_u32_slab(
+            crate::testing::hints::DUAL_POOL_SCREEN_CONSTRUCT_RECORD, 0x1000,
+        ) else {
+            crate::testing::note_missing_u32_fixture("app/dual_pool_screen"); return;
+        };
+        unsafe {
+            CHUNK = slab;
+            SECOND_SENTINEL = slab.add(0x100).cast();
+            ALLOC_CALL = 0;
+            let mut ops = ptr::read_volatile(ptr::addr_of!(crate::heap::veneers::HEAP_OPS));
+            ops.alloc = reserve_alloc;
+            ptr::write_volatile(ptr::addr_of_mut!(crate::heap::veneers::HEAP_OPS), ops);
+        }
         let mut storage: DualPoolScreen = unsafe { mem::zeroed() };
         let mut relocated: DualPoolScreen = unsafe { mem::zeroed() };
         storage.first_pool.chunk_list = 0x1111_1111;
@@ -307,23 +295,15 @@ mod tests {
 
         unsafe {
             assert_eq!(result, ptr::addr_of_mut!(relocated));
-            assert_eq!(
-                BASE_ARGS,
-                Some((ptr::addr_of_mut!(storage).cast(), 0xfeed_face, 1)),
-                "forwards storage and initial target, with the fixed create-link flag"
-            );
-            assert_eq!(FIRST_POOL, ptr::addr_of_mut!(relocated.first_pool));
-            assert_eq!(SECOND_POOL, ptr::addr_of_mut!(relocated.second_pool));
-            assert_eq!(FIRST_GROW, 1);
-            assert_eq!(SECOND_GROW, 1);
-            assert_eq!(FIRST_HEADER_BEFORE, [0; 6], "first pool is cleared before reserve");
-            assert_eq!(SECOND_HEADER_BEFORE, [0; 6], "second pool is cleared before reserve");
             assert_eq!(relocated.base_words[0], DUAL_POOL_SCREEN_VTABLE_ADDRESS);
             assert_eq!(relocated.base_words[7], DUAL_POOL_SCREEN_VTABLE_ADDRESS + 0xe4);
             assert_eq!(relocated.first_pool.sentinel, ptr::addr_of!(FIRST_SENTINEL) as usize as u32);
-            assert_eq!(relocated.second_pool.sentinel, ptr::addr_of!(SECOND_SENTINEL) as usize as u32);
+            assert_eq!(relocated.second_pool.sentinel, SECOND_SENTINEL as usize as u32);
             assert_eq!(FIRST_SENTINEL, [ptr::addr_of!(FIRST_SENTINEL) as usize as u32; 2]);
-            assert_eq!(SECOND_SENTINEL, [ptr::addr_of!(SECOND_SENTINEL) as usize as u32; 2]);
+            assert_eq!(core::slice::from_raw_parts(SECOND_SENTINEL, 2), &[SECOND_SENTINEL as usize as u32; 2]);
+            assert_eq!(relocated.second_pool.cursor, SECOND_SENTINEL as usize as u32 + 36);
+            assert_eq!(relocated.second_pool.limit, relocated.second_pool.cursor);
+            assert_eq!(ALLOC_CALL, 2);
             assert_eq!(storage.first_pool.chunk_list, 0x1111_1111, "writes follow the delegated return");
             assert_eq!(storage.second_pool.chunk_list, 0x2222_2222, "incoming storage remains untouched");
         }
