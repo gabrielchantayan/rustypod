@@ -4,6 +4,7 @@
 //! the ARM ADS C runtime.
 pub mod element_array_remove_value;
 pub mod observable_array_remove_value;
+pub mod attached_observable_array_remove_value;
 pub mod owned_element_array_erase_at;
 pub mod owned_cell_array_erase_at;
 pub mod tracked_refcounted_handle_remove;

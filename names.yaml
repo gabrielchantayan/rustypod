@@ -259148,3 +259148,31 @@ functions:
       17 original instructions: frame-pointer setup and explicit branch around
       the indirect release replace predication; the accessor call and base
       tail branch remain. No new firmware seams are introduced.
+
+  - address: 0x083d0d38
+    ghidra: FUN_083d0d38
+    name: attached_observable_array_remove_value
+    size: 64
+    sig: "int32_t attached_observable_array_remove_value(ElementArrayRemoveValue *this, uint32_t value)"
+    module: cxx/attached_observable_array_remove_value
+    vars: {param_1: this, param_2: value, iVar1: index, uStack_14: value_copy}
+    status: ported
+    notes: >-
+      Raw osos.dec contains sixteen A32 words in [0x083d0d38,0x083d0d78);
+      the next real function begins with push {r4,lr} at 0x083d0d78.
+      Whole-image word scan finds one inbound plain BL at 0x082100d8 and
+      zero predicated BLs. No outbound direct BLs; BLX at 0x083d0d50 uses
+      virtual slot +0x4c and BLXNE at 0x083d0d6c uses virtual slot +0x2c.
+      Lookup receives a writable stack copy of value; unless the result is
+      exactly -1, reload the vtable and erase that index. Return lookup result,
+      ignoring erase return. Concrete slot targets remain unresolved; no new
+      address seams. Reuse the identical element_array_remove_value algorithm.
+      Native pointers widen on hosts; ARM slots remain four bytes apart.
+      Ghidra extra arguments are incidental register/spilled-stack residue.
+      Host tests cover absent values, duplicates, zero, UINT_MAX and empty.
+      Full host suite and release ARM build passed. Export smoke preserved an
+      absent item, erased a match and returned -1 on empty. match.py shows a
+      four-instruction tail wrapper; the shared implementation has 21 versus
+      16 instructions, preserving both slot loads, vtable reload, exact -1
+      test and saved return. LLVM adds a stack store/frame and replaces
+      predicated erase with a conditional branch.
