@@ -16,6 +16,34 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083d7350
+    ghidra: FUN_083d7350
+    name: word_slot_not_equal
+    size: 16
+    sig: "u32 word_slot_not_equal(const u32 *left, const u32 *right)"
+    module: cxx/word_slot_not_equal
+    status: ported
+    vars:
+      param_1/r0: left
+      param_2/r1: right
+      return/r0: unequal
+    renames:
+      FUN_083d7338: word_slot_equal
+    notes: >-
+      Raw words e52de004 ebfffff7 e2200001 e49df004 prove the complete
+      16-byte extent [0x083d7350,0x083d7360), followed by an independent
+      PUSH. One outgoing plain BL at 0x083d7354 calls the already ported
+      word_slot_equal at 0x083d7338; zero outgoing predicated BLs.
+      Whole-image aligned A32 decoding finds one incoming plain BL at
+      0x083d92d4 and zero incoming predicated BLs. Forward both aligned
+      slot pointers and XOR the canonical equality result with 1.
+      Only the first word participates, not trailing words or pointed-to
+      data. The caller supplies two stack-local pairs; Ghidra incorrectly
+      omits the arguments. No deliberate behavioral deviations.
+      Host edge tests and a direct ABI smoke pass. ARM match.py preserves
+      the BL and XOR 1, with LLVM adding a frame-pointer prologue.
+      R_ARM_CALL resolves the displayed relocatable BL to word_slot_equal;
+      match.py exit 1 is the reviewed structural diff, not a test failure.
   - address: 0x083d8dbc
     ghidra: FUN_083d8dbc
     name: filebuf_finish_conversion
