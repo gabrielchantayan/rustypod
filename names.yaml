@@ -16,6 +16,41 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083d53f0
+    ghidra: FUN_083d53f0
+    name: tracked_string_chain_remove
+    size: 76
+    sig: "void tracked_string_chain_remove(TrackedSlotArray *array, i32 index)"
+    module: cxx/tracked_string_chain_remove
+    status: ported
+    vars:
+      param_1/r4: array
+      param_2/r5: index
+      array_plus_0x00: data
+      array_plus_0x04: slots
+      array_plus_0x08: used
+      FUN_081ee900: string_chain_clear
+      FUN_082aad24: operator_delete
+    notes: >-
+      Raw A32 establishes [0x083d53f0,0x083d543c), 76 bytes ending in
+      POP before the next independent constructor PUSH. Ghidra's 48-byte
+      extent is truncated by its erroneous noreturn delete annotation.
+      Whole-image aligned BL decoding finds one incoming BLNE at
+      0x081ee44c and zero incoming plain BLs; two outgoing plain BLs at
+      0x083d5418 and 0x083d541c, zero outgoing predicated BLs. Reject
+      negative indices and indices greater than or equal to signed slots;
+      NULL slots are inert. Drain the selected StringChain with the existing
+      string_chain_clear port, tag-2 delete its returned owner, reload data,
+      clear the selected slot, and decrement the reloaded used count modulo
+      2^32. No new fixed-address seams. Native pointer fields widen on hosts,
+      while slot storage stays u32. Tests cover signed bounds, every occupied
+      position including the last, repeated removal, lifecycle-induced
+      storage/count changes, count wraparound, and real empty-chain clearing
+      followed by owner unmapping before the slot/count update. Host suite:
+      16048 passed. ARM release build passed. Default match.py uses the
+      incorrect 48-byte extent; explicit --size 76 shows the full update
+      sequence. LLVM retains two BLs and storage/count reloads, replaces
+      predication with branches, changes registers, and adds a frame pointer.
   - address: 0x083d59ec
     ghidra: FUN_083d59ec
     name: vtable_089a66c0_destruct

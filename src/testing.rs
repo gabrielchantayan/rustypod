@@ -39,6 +39,7 @@ extern crate std;
 /// six files. Each region is at most 0x0100_0000 wide, so neighbours cannot
 /// overlap.
 pub mod hints {
+    pub const TRACKED_STRING_CHAIN_REMOVE: usize = 0x53f3_0000;
     pub const VIRTUAL_INDEXED_PAYLOAD_LENGTH: usize = 0x436e_0000;
     pub const SIGNED_KEY_TREE_EQUAL_RANGE: usize = 0x6104_0000;
     pub const UNSIGNED_KEY_TREE_EQUAL_RANGE: usize = 0x6105_0000;
