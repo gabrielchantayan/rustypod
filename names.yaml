@@ -257291,3 +257291,30 @@ functions:
       diff reviewed: LLVM branches around the tied flush and inlines
       fflush's nonnull path into the existing stream-sync hook; virtual
       seek and post-call buffer reload retained. No device execution.
+
+  - address: 0x083d8428
+    ghidra: FUN_083d8428
+    name: ostream_sentry_cleanup
+    size: 64
+    sig: "u32 *ostream_sentry_cleanup(u32 *sentry)"
+    module: cxx/ostream_sentry_cleanup
+    status: ported
+    vars: {param_1: sentry, r4: sentry, r0: stream, r1: adjusted_flags}
+    notes: >-
+      Raw osos.dec establishes [0x083d8428,0x083d8468): 60 executable
+      bytes and literal 0x08a0fbc8 at 0x083d8464; the next real function
+      starts with PUSH at 0x083d8468. Raw A32 decoding independently finds
+      zero plain outgoing BLs and one BLNE at 0x083d8458 to the existing
+      secondary_standard_stream_subobject port at 0x083d6ec4. Inbound calls:
+      one plain BL at 0x083b5408 and zero predicated BLs. Load the stream
+      from sentry word zero, apply its signed vtable adjustment at -12,
+      and test adjusted basic_ios flags at +4. Bit 0x2000 suppresses even
+      the synchronization-byte read; otherwise nonzero byte 0x08a0fbc8
+      triggers stream classification. Discard the result, perform no flush
+      or mutation, and return the sentry. Host-only operations replace
+      firmware RAM and classification; target calls the existing Rust port.
+      Volatile aligned flags access preserves the original word-read width.
+      Host tests cover signed adjustments, unrelated flags, short-circuit
+      access and nonboolean synchronization bytes. Standalone host smoke
+      exercises the masked path without installed operations. ARM codegen
+      uses branches and shrink-wrapped saves instead of BLNE. No device run.
