@@ -16,6 +16,35 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083d5c60
+    ghidra: FUN_083d5c60
+    name: vtable_089a6720_destruct
+    size: 44
+    sig: "u32 *vtable_089a6720_destruct(u32 *this)"
+    module: cxx/vtable_089a6720_destruct
+    status: ported
+    vars: {param_1/r4: this, DAT_083d5c8c: VTABLE_089A6720, "this+0x14": owned_payload, FUN_0802edc8: free}
+    notes: >-
+      Raw osos.dec proves eleven ARM instructions at 0x083d5c60..0x083d5c8c,
+      ending with pop at 0x083d5c88. The literal at 0x083d5c8c is 0x089a6720;
+      next real function begins at 0x083d5c90. Whole-image aligned immediate
+      branch decoding finds one inbound plain BL at 0x082845b0, zero inbound
+      predicated BLs and no inbound tail B. Body has zero plain BLs and one
+      BLNE at 0x083d5c78 to the canonical ported free at 0x0802edc8. Install
+      vtable, conditionally free the u32 owned pointer at +0x14, clear that
+      word and return this. Caller 0x082845a4 NULL-guards then tail-calls
+      operator_delete at 0x082aad24. Class identity remains unresolved.
+      No new fixed-address seams. Deliberate codegen deviations: internal
+      noinline release wrapper preserves a direct BL; LLVM changes register
+      allocation and replaces BLNE with a conditional skip. Tests verify NULL,
+      high-bit pointers, install-before-free and clear-after-free ordering,
+      neighboring words, returned this and no double release. Host suite and
+      build-std ARM release pass. Standalone actual-source smoke verifies
+      null payload, installed vtable and returned this; no device execution.
+      match.py exits 1 with 11 original versus 16 Rust instructions including
+      the literal: same vtable installation, +20 load/test, conditional direct
+      release, +20 clear and returned this. LLVM delays saving registers until
+      the nonzero branch and uses an explicit return.
   - address: 0x083d5fd4
     ghidra: FUN_083d5fd4
     name: container_element_at_alias_5fd4
