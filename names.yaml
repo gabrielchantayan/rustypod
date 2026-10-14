@@ -16,6 +16,36 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083dcdbc
+    ghidra: FUN_083dcdbc
+    name: region_list_destruct
+    size: 212
+    sig: "u32 *region_list_destruct(u32 *list)"
+    module: cxx/region_list_destruct
+    status: ported
+    vars: {param_1/r4: list, r5: chunk, local_18: cursor}
+    renames: {FUN_083d6f5c: not_equal_deref, FUN_083dcd38: region_list_erase_recycle, FUN_08266f2c: cxx_array_dealloc}
+    notes: >-
+      Raw extent 0x083dcdbc..0x083dce90 is 212 bytes; next independent PUSH
+      starts at 0x083dce90. Four outgoing plain BLs at 0x083dce04,
+      0x083dce18, 0x083dce54, and 0x083dce64; no predicated BLs.
+      Whole-image decoding finds one inbound plain BL at 0x081a801c.
+      Erase nodes until cursor reaches sentinel, cache the reloaded sentinel,
+      unlink each chunk before freeing its arena (capacity, 0) then record
+      (1, 0), and clear free/next/end. Null sentinel leaves state untouched.
+      Returns list; pointer fields remain target-width words.
+      Comparison is inlined. Erase deliberately calls retail 0x083dcd38:
+      its existing Rust port is not faithful. Raw code saves successor at
+      0x083dcd60 and returns it at 0x083dcdb0; destructor BL is at
+      0x083dcd9c to 0x082804fc, not delete veneer 0x082804f8.
+      Reusing that Rust port would prevent cursor progress and destroy the
+      wrong object. No new callee identity is inferred.
+      Host suite and ARM release build pass. Standalone host smoke verifies
+      null-sentinel preservation and owner return. match.py reports 45 Rust
+      versus 53 retail instructions: same sentinel guard, erase loop, chunk
+      unlink/free loop, three reset stores and owner return. Comparison is
+      inlined, erase is BLX to the literal 0x083dcd38, and unused deallocation
+      count/element arguments disappear in the canonical allocator port.
   - address: 0x083dcf40
     ghidra: FUN_083dcf40
     name: word_pair_list_pool_release
