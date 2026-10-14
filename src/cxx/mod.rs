@@ -540,6 +540,7 @@ pub mod magic_tagged_object_destroy;
 pub mod magic_tagged_object_reset;
 pub mod vtable_owned_payload_destruct;
 pub mod vtable_089a6720_destruct;
+pub mod vtable_089a66f0_destruct;
 pub mod vtable_089a57f0_destruct;
 pub mod vtable_089a3990_destruct;
 pub mod vtable_089a38b8_destruct;
