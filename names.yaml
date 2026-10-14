@@ -257492,3 +257492,34 @@ functions:
       output stores remain. LLVM removes stack copies and dead comparator
       arguments and reuses the loaded root for the second walk; less_unsigned
       is read-only. No device execution.
+  - address: 0x083d6644
+    ghidra: FUN_083d6644
+    name: signed_key_tree_equal_range
+    size: 204
+    sig: "void signed_key_tree_equal_range(u32 *out, const SignedKeyTree *tree, const i32 *key)"
+    module: cxx/signed_key_tree_find
+    status: ported
+    vars: {param_1: out, param_2: tree, param_3: key, iVar3: node, iVar4: lower, iVar1: upper}
+    notes: >-
+      Raw A32 body spans 0x083d6644..0x083d6710, returning at 0x083d670c;
+      the next real entry begins with push at 0x083d6710. Whole-image
+      decoding counts one incoming plain BL at 0x083d730c, zero predicated
+      incoming BLs, and two outgoing plain BLs at 0x083d667c and 0x083d66b8
+      to the existing less_signed port at 0x083d7580, zero predicated
+      outgoing BLs. Comparator raw words use signed movge/movlt; this is
+      signed lower/upper bound traversal, despite the caller's older
+      unsigned-word description. Header at tree+16, root at header+4,
+      left/right links at node+8/+12, signed key at node+16. Candidate
+      updates retain the current node before following its left child,
+      unlike Ghidra's erroneous assignment of the child. Output is two
+      four-byte iterator words, with the header as end. Dead fourth and
+      stack comparator arguments and redundant stack copies are omitted.
+      Existing SignedKeyTree layout and less_signed are reused; no new seam.
+      Host tests cover duplicate keys, signed MIN/MAX, absent keys, empty
+      trees and output canaries. All 16032 host tests and ARM release build
+      pass. Actual-source standalone smoke exercises singleton lower/equal/
+      greater queries and empty bounds. match.py exits 1 with an expected
+      51-to-35 instruction structural diff: both walks, candidate updates,
+      comparator calls and output stores remain. Object relocations verify
+      both BLs target less_signed. LLVM reuses the root and removes dead
+      comparator context and stack traffic. No device execution.

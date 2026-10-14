@@ -114,6 +114,96 @@ pub struct SignedKeyTree {
 
 const _: [u8; 0x10] = [0; core::mem::offset_of!(SignedKeyTree, header)];
 const _: [u8; 0x14] = [0; core::mem::size_of::<SignedKeyTree>()];
+/// Signed-key equal range — `FUN_083d6644` @ load address `0x083d6644`.
+///
+/// True extent: 204 bytes, `0x083d6644..0x083d6710` (next entry's push).
+/// Raw A32 decoding finds one incoming plain BL at 0x083d730c, zero
+/// predicated incoming BLs, and two outgoing plain BLs to `less_signed`
+/// @ 0x083d7580 (0x083d667c and 0x083d66b8), zero predicated outgoing BLs.
+/// Independently walks lower and upper bounds from header+4, recording the
+/// current node before descending left. Writes two target-width iterator
+/// words; the header denotes end. Ghidra incorrectly records the child.
+/// Deliberate deviations: omit dead fourth/stack comparator arguments and
+/// redundant stack copies. Reuse the verified signed comparator port.
+///
+/// # Safety
+/// Tree storage extends through +0x19; header and reachable nodes have valid
+/// aligned u32 links at +4/+8/+12 and i32 keys at +16. `key` is readable;
+/// `out` has two writable u32 words. Malformed trees remain unchecked.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn signed_key_tree_equal_range(
+    out: *mut u32,
+    tree: *const SignedKeyTree,
+    key: *const i32,
+) {
+    let header = (*tree).header;
+    let comparator = tree.cast::<u8>().add(0x19);
+    let mut lower = header;
+    let mut node = (header as usize as *const u32).add(1).read();
+    while node != 0 {
+        let words = node as usize as *const u32;
+        if crate::cxx::templates::less_signed(comparator, words.add(4).cast(), key) == 0 {
+            lower = node;
+            node = words.add(2).read();
+        } else {
+            node = words.add(3).read();
+        }
+    }
+    let mut upper = header;
+    node = (header as usize as *const u32).add(1).read();
+    while node != 0 {
+        let words = node as usize as *const u32;
+        if crate::cxx::templates::less_signed(comparator, key, words.add(4).cast()) != 0 {
+            upper = node;
+            node = words.add(2).read();
+        } else {
+            node = words.add(3).read();
+        }
+    }
+    out.write(lower);
+    out.add(1).write(upper);
+}
+
+#[cfg(test)]
+mod equal_range_tests {
+    #[test]
+    fn duplicates_signed_extremes_absences_and_empty() {
+        let Some(slab) = crate::testing::try_map_u32_slab(
+            crate::testing::hints::SIGNED_KEY_TREE_EQUAL_RANGE, 0x1000,
+        ) else { return; };
+        unsafe {
+            let words = slab.cast::<u32>();
+            let header = slab as usize as u32;
+            let offsets = [0x40usize, 0x60, 0x80, 0xa0, 0xc0];
+            let keys = [i32::MIN, -1, -1, 0, i32::MAX];
+            let nodes = offsets.map(|offset| slab.add(offset) as usize as u32);
+            // A duplicate-spanning tree: root index 2, equal key on its left.
+            let left = [0, nodes[0], nodes[1], 0, 0];
+            let right = [0, 0, nodes[3], nodes[4], 0];
+            for index in 0..5 {
+                let node = slab.add(offsets[index]).cast::<u32>();
+                node.add(2).write(left[index]);
+                node.add(3).write(right[index]);
+                node.add(4).write(keys[index] as u32);
+            }
+            words.add(1).write(nodes[2]);
+            let tree = slab.add(0x200).cast::<super::SignedKeyTree>();
+            tree.write(super::SignedKeyTree { opaque_prefix: [0; 4], header });
+            for query in [i32::MIN, i32::MIN + 1, -2, -1, 0, 1, i32::MAX] {
+                let lower = keys.iter().position(|&key| key >= query).map_or(header, |i| nodes[i]);
+                let upper = keys.iter().position(|&key| key > query).map_or(header, |i| nodes[i]);
+                let mut output = [0xdead_beef, 0, 0, 0xfeed_face];
+                super::signed_key_tree_equal_range(output.as_mut_ptr().add(1), tree, &query);
+                assert_eq!(output, [0xdead_beef, lower, upper, 0xfeed_face], "query {query}");
+            }
+            words.add(1).write(0);
+            let mut output = [0; 2];
+            super::signed_key_tree_equal_range(output.as_mut_ptr(), tree, &-1);
+            assert_eq!(output, [header; 2]);
+        }
+    }
+}
 
 /// signed_key_tree_find_node_f8a8_copy — original: `FUN_083db84c` @
 /// `0x083db84c` (168 bytes, `0x083db84c..0x083db8f0`; `0x083db8f4` begins
