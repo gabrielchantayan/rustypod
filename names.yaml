@@ -258148,3 +258148,32 @@ functions:
       LLVM eliminates the empty destructor BL, uses branches instead of
       predication and a different frame, while retaining delete, reloaded slots,
       slot clear and wrapping decrement. No device execution was exercised.
+
+  - address: 0x083d4bf4
+    ghidra: FUN_083d4bf4
+    name: element_array7_expand
+    size: 120
+    sig: "void element_array7_expand(void *array)"
+    module: app/element_array7_expand
+    status: ported
+    vars: {param_1: array, iVar3: expanded_capacity, iVar1: resized_storage, FUN_0802edec: realloc, thunk_EXT_FUN_2200027c: memzero_aligned, FUN_083d4b58: element_array7_tracker_diagnostic_no_op}
+    notes: >-
+      Raw A32 code ends at 0x083d4c6c after pop at 0x083d4c68; 60 bytes
+      of inline strings follow before the next push at 0x083d4ca8. Whole-image
+      word decoding finds one inbound BLEQ at 0x083d4ba4 and no inbound plain
+      BL. Three outbound plain BLs at 0x083d4c10, 0x083d4c30, 0x083d4c64
+      target existing realloc, IRAM memzero_aligned veneer and array-7 disabled
+      diagnostic ports; no predicated outbound BL. Multiplies capacity by
+      growth modulo 2^32, publishes realloc result even on failure, clears
+      the grown tail and commits capacity only on success. Migrates array-7
+      insertion from a stock-address call to the Rust port. Host header and
+      pointer slots use native word strides consistent with element_table;
+      target retains four-byte fields and wrapped byte arithmetic. Tests
+      cover relocated growth, prefix and tail guards, unchanged capacity,
+      zero capacity, factor one and failed wrapped allocation sizes.
+      Full host suite and ARM release build passed. Exported zero-capacity
+      smoke observed NULL storage and unchanged header. match.py exits 1:
+      30 original versus 24 Rust instructions, retaining multiply, realloc,
+      null branch, tail zero and success-only capacity commit. Volatile
+      helper pointers become BLX; disabled diagnostic becomes a tail branch
+      and unused diagnostic argument preparation is eliminated. No device run.
