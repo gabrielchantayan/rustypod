@@ -258432,3 +258432,45 @@ functions:
       Host suite and ARM release build pass. match.py reports equivalent
       bounds/NULL checks, word-seven BLX, storage reload and clear/decrement,
       with LLVM early branches and a different register save/return sequence.
+  - address: 0x083d4250
+    ghidra: FUN_083d4250
+    name: element_array1_expand
+    size: 120
+    sig: "void element_array1_expand(u32 *array)"
+    module: app/element_array1_expand
+    status: ported
+    vars: {param_1: array, iVar3: expanded_slots, iVar1: resized_storage, pcVar2: diagnostic_result}
+    renames:
+      "array+0x00": storage
+      "array+0x04": allocated
+      "array+0x08": used
+      "array+0x0c": initial_capacity
+      "array+0x10": growth_factor
+      "array+0x14": diagnostic_name
+      FUN_0802edec: realloc
+      thunk_EXT_FUN_2200027c: memzero_aligned_iram_veneer
+      FUN_083d41b4: element_array1_tracker_diagnostic_noop
+    notes: >-
+      Raw A32 words establish the 120-byte code body [0x083d4250,0x083d42c8),
+      ending in pop {r1-r5,pc}. Sixty bytes of diagnostic strings follow
+      through the next real push at 0x083d4304: occupied extent 180 bytes.
+      Independent whole-image aligned-word scan finds zero inbound plain BLs
+      and one BLEQ at 0x083d4200; three outbound plain BLs at 0x083d426c
+      (realloc 0x0802edec), 0x083d428c (zero-fill veneer 0x08037db8), and
+      0x083d42c0 (diagnostic 0x083d41b4), with no predicated outbound BLs.
+      Multiply allocated by growth modulo 2^32, request expanded * 4 bytes,
+      publish realloc's result even on failure, clear only the added tail on
+      success, then commit allocated. Failure preserves all other words.
+      Reuse element_tracker_array_expand's identical algorithm and existing
+      allocator/zero-fill ports. The verified veneer targets 0x2200027c,
+      the IRAM mirror of osos memzero_aligned at 0x0800027c. Deliberately
+      omit diagnostic preparation and its call: 0x083d41b4 is exactly bx lr
+      and its return is unused. Headers retain four-byte strides on hosts.
+      Exported-entry tests cover relocated storage, unchanged capacity,
+      exact tail clearing, failure mutation, and wrapped allocation sizes.
+      Host suite and ARM release build pass. Isolated source smoke observes
+      preserved prefix, four cleared slots, capacity six, and intact sentinel.
+      match.py resolves this export and prints 22 versus 30 instructions:
+      multiply, unconditional pointer publication, failure branch, tail clear,
+      and capacity commit remain; volatile helper loads use BLX and LLVM
+      removes the inert diagnostic tail.
