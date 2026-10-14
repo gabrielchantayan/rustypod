@@ -257523,3 +257523,40 @@ functions:
       comparator calls and output stores remain. Object relocations verify
       both BLs target less_signed. LLVM reuses the root and removes dead
       comparator context and stack traffic. No device execution.
+
+  - address: 0x083d6578
+    ghidra: FUN_083d6578
+    name: unsigned_key_tree_equal_range
+    size: 204
+    sig: "void unsigned_key_tree_equal_range(u32 *out, const UnsignedKeyTree *tree, const u32 *key)"
+    module: cxx/unsigned_key_tree_equal_range
+    status: ported
+    renames:
+      param_1/r0: out
+      param_2/r1: tree
+      param_3/r2: key
+      r4: node
+      r6: candidate
+      r9: out
+      r10: key
+    notes: >-
+      Raw osos.dec verifies the 204-byte extent 0x083d6578..0x083d6644,
+      ending in pop before the next function's push. Independent A32
+      B/BL-immediate decoding finds one incoming plain BL at 0x081b5cb4,
+      zero predicated incoming BLs, and two outgoing plain BLs at
+      0x083d65b0 and 0x083d65ec to the existing less_unsigned_alias_7568
+      port at 0x083d7568, with no predicated outgoing BLs. The caller
+      queries a u32 key in the tree at object+0x204. Header at tree+16,
+      root at header+4, left/right links at node+8/+12, unsigned key at
+      node+16. Independent lower/upper-bound walks retain the current
+      node before descending left, unlike Ghidra's erroneous child
+      assignment. Output is two four-byte iterator words; header means
+      end. Unused fourth and stack comparator arguments and redundant
+      stack copies are omitted. No new seam. Host suite and ARM release
+      build pass. Tests cover duplicate keys, unsigned extremes, absent
+      keys, empty and singleton trees, and output canaries. Actual-source
+      smoke verifies singleton below/equal/above bounds and empty bounds.
+      match.py exits 1 with a reviewed 51-to-35 instruction diff: both
+      walks, candidate updates, comparator calls and output stores remain.
+      LLVM reuses the root and drops unused comparator context and stack
+      copies. No device execution.

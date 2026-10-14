@@ -15,6 +15,7 @@ pub mod polymorphic_owner_range_destroy;
 pub mod three_word_swap;
 pub use three_word_swap::*;
 pub mod return_zero;
+pub mod unsigned_key_tree_equal_range;
 pub mod red_black_tree_range_count;
 pub mod red_black_tree_range_count_083e7c14;
 pub mod red_black_tree_range_count_083e7b78;
