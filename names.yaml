@@ -80965,6 +80965,28 @@ functions:
       reads target word index 12 and normalizes nonzero to bool; no
       deviations.
 
+  - address: 0x083d6f30
+    ghidra: FUN_083d6f30
+    name: wide_filebuf_is_open
+    size: 16
+    sig: "bool wide_filebuf_is_open(const u32 *filebuf)"
+    module: cxx/filebuf_is_open
+    status: ported
+    vars: {param_1/r0: filebuf, r0: handle_then_open}
+    notes: >-
+      Raw words e5900030 e3500000 13a00001 e1a0f00e implement
+      ldr r0,[r0,#0x30]; cmp r0,#0; movne r0,#1; mov pc,lr.
+      True extent is [0x083d6f30,0x083d6f40); the independent
+      dereferenced-word comparison starts at 0x083d6f40. Whole-image
+      aligned ARM B/BL immediate decoding finds one incoming plain BL
+      at 0x083d9b54, zero predicated BLs, and zero outgoing BLs.
+      Caller 0x083d9b20 writes two-byte characters using the handle at
+      +0x30, identifying the wide-character basic_filebuf is_open
+      variant. Reads target word index 12 without dereferencing the
+      handle and normalizes all nonzero words to bool. No behavioral
+      deviations or new callee seams. A dedicated text section prevents
+      folding with identical predicates so match.py can locate the body.
+
   - address: 0x083d6f0c
     ghidra: FUN_083d6f0c
     name: cxx_string_empty
