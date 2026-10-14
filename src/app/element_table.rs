@@ -1210,18 +1210,12 @@ pub unsafe extern "C" fn element_array7_insert_unique(this: *mut u8, element: *m
     -1
 }
 
-/// Calls the retail array-6 expansion member at `0x083d4994`.
-///
-/// This separately linked sibling is semantically identical to the array-7
-/// expansion member: it grows the slot buffer by `growth * slots`, clears the
-/// tail, and records the new capacity. Keeping its own fixed entry preserves
-/// this template instance's retailOS call edge.
+/// Calls the ported array-6 expansion member with its target-width header.
+/// Host insertion tests retain a pointer-width fixture adapter.
 #[cfg(target_os = "none")]
 #[inline(always)]
 unsafe fn element_array6_expand_for_insert(this: *mut u8) {
-    let retail_expand: unsafe extern "C" fn(*mut u8) =
-        core::mem::transmute(0x083d_4994usize);
-    retail_expand(this);
+    super::element_array6_expand::element_array6_expand(this.cast());
 }
 
 #[cfg(all(not(target_os = "none"), test))]
@@ -1245,7 +1239,7 @@ unsafe fn element_array6_expand_for_insert(this: *mut u8) {
 #[cfg(all(not(target_os = "none"), not(test)))]
 #[inline(always)]
 unsafe fn element_array6_expand_for_insert(_this: *mut u8) {
-    panic!("element_array6_insert_unique requires retailOS expansion member")
+    panic!("element_array6_insert_unique requires a target-width expansion adapter on hosts")
 }
 
 /// element_array6_insert_unique — original: `FUN_083d48fc` @ **0x083d48fc**
@@ -1260,16 +1254,16 @@ unsafe fn element_array6_expand_for_insert(_this: *mut u8) {
 ///
 /// Scans every signed-valid slot for the exact pointer first, returning `-1`
 /// without mutation for a duplicate (including a NULL argument in an empty
-/// table). If the live count equals capacity, it expands through the retail
+/// table). If the live count equals capacity, it calls the ported expansion
 /// sibling. It then rescans for the first NULL slot; if one exists, it stores
 /// the pointer, increments `used` with ARM wrapping semantics, and returns
 /// that index. A full table whose `used` does not equal capacity still returns
 /// `-1`; the scan, not `used`, decides vacancy.
 ///
-/// Device deviation: none. The target directly calls the unported retail
-/// expansion sibling. Host unit tests install that one call as a volatile
-/// seam; pointer slots remain pointer-width on the host while retaining the
-/// target's four-byte stride on ARM.
+/// Device deviation: none. The target directly calls the ported expansion
+/// sibling. Host insertion tests retain a volatile fixture adapter because
+/// their pointer-width headers differ from the expansion port's u32 words.
+/// Target storage retains its four-byte stride.
 ///
 /// # Safety
 ///

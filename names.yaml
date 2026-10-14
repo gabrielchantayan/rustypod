@@ -65789,7 +65789,7 @@ functions:
     module: app/element_table
     status: ported
     vars: {param_1: this, param_2: element, iVar1: index, iVar2: slots, iVar3: used}
-    renames: {FUN_083d4994: element_array6_expand_for_insert}
+    renames: {FUN_083d4994: element_array6_expand}
     notes: >-
       Raw ARM extent is exactly 0x083d48fc..0x083d4994; the separately linked
       expansion sibling begins at 0x083d4994. Complete decoding of every
@@ -65801,11 +65801,48 @@ functions:
       then rescans for the first NULL slot. A found slot stores the element,
       wrapping-increments used, and returns its index; a full table whose
       used count disagrees with capacity returns -1. Device deviation: none:
-      the Rust port preserves the fixed 0x083d4994 retail expansion edge.
-      Host tests install that unported call through a volatile seam. The
+      the Rust port now calls the ported element_array6_expand.
+      Host insertion tests retain a pointer-width fixture adapter. The
       152-byte insertion body is instruction-identical to
       element_array7_insert_unique at 0x083d4b5c apart from its relinked
       predicated expansion call; each instance retains its own expansion seam.
+  - address: 0x083d4994
+    ghidra: FUN_083d4994
+    name: element_array6_expand
+    size: 120
+    sig: "void element_array6_expand(u32 *array)"
+    module: app/element_array6_expand
+    status: ported
+    vars: {param_1: array, iVar3: expanded_slots, iVar1: storage}
+    renames:
+      "array+0x00": storage
+      "array+0x04": allocated
+      "array+0x10": growth_factor
+      FUN_0802edec: realloc
+      thunk_EXT_FUN_2200027c: memzero_aligned
+      FUN_083d48f8: inert_tracker_diagnostic
+    notes: >-
+      Raw A32 decoding establishes code [0x083d4994,0x083d4a0c), 120
+      bytes, followed by 60 bytes of diagnostic strings through the next
+      real function at 0x083d4a48: true occupied extent 180 bytes.
+      Independent whole-image word scan finds zero inbound plain BLs and
+      one inbound BLEQ at 0x083d4944. Three outbound plain BLs at
+      0x083d49b0, 0x083d49d0 and 0x083d4a04; zero predicated outbound BLs.
+      Grow capacity by wrapping u32 multiplication with the growth factor;
+      request capacity * 4 bytes from the existing ported realloc and
+      unconditionally publish its returned pointer, including NULL on failure.
+      On success zero the added tail via ported memzero_aligned and commit
+      capacity; failure leaves capacity and all other header words unchanged.
+      The raw zero-fill veneer at 0x08037db8 is ldr pc,[pc,#-4] targeting
+      0x2200027c, the IRAM mirror of ported 0x0800027c. Share the identical
+      element_tracker_array_expand algorithm, retaining four-byte header words
+      on hosts. Deliberately omit the diagnostic call and its arguments:
+      0x083d48f8 is exactly bx lr. Host tests exercise moved storage, empty
+      and unchanged capacity, exact tail clearing, allocation failure and
+      wrapped allocation sizes. ARM match.py shows equivalent multiply,
+      unconditional pointer publication, failure branch, tail clear and
+      capacity commit; volatile helper loads use BLX instead of direct BL
+      and LLVM drops the inert diagnostic tail.
   - address: 0x083d4a94
     ghidra: FUN_083d4a94
     name: element_array6_construct

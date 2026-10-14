@@ -14,7 +14,7 @@ const STORAGE: usize = 0;
 const ALLOCATED: usize = 1;
 const GROWTH_FACTOR: usize = 4;
 
-unsafe fn expand_with_realloc(
+pub(super) unsafe fn expand_with_realloc(
     array: *mut u32,
     reallocate: unsafe extern "C" fn(*mut u8, usize) -> *mut u8,
 ) {
