@@ -257422,3 +257422,36 @@ functions:
       the zero test and reuses the receiver across the known identity-return
       callee; initial load, post-call state reload and byte store retained.
       No device execution.
+  - address: 0x083d6998
+    ghidra: FUN_083d6998
+    name: opaque_observable_array_cell_value
+    size: 24
+    sig: "uint32_t opaque_observable_array_cell_value(uint32_t *this, int32_t index)"
+    module: cxx/opaque_observable_array_cell_value
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1: index
+      vtable_plus_0x40/r2: cell_at
+      puVar1/r0: cell
+    notes: >-
+      Raw osos.dec words e92d4010 e5902000 e5922040 e12fff32 e5900000
+      e8bd8010 establish a 24-byte A32 body through return at 0x083d69ac.
+      The independent attached-object getter starts at 0x083d69b0 with
+      ldr r1,[r0,#0x14] and ends with bx lr at 0x083d69c0.
+      Independent whole-image branch decoding finds one inbound plain BL
+      at 0x083d08ac and zero predicated inbound BLs. The body has zero
+      plain direct BLs, zero predicated direct BLs, and one virtual BLX
+      at 0x083d69a4. Dispatch slot +0x40 with this and signed index, then
+      return the first aligned u32 of the returned cell without checks.
+      Ghidra omits the index argument; raw r1 preservation and the caller
+      establish it. Reuses the existing pre-destructor cell accessor ABI
+      and host representation; no new callee identity or address seam.
+      Host pointers widen deliberately; ARM pointers and vtable words
+      remain four bytes. Host edge cases cover signed index extremes,
+      zero and full-width values, and mutation during accessor dispatch.
+      Host suite and ARM release build passed. Actual-source host smoke
+      exercised five signed-index boundary cases. match.py preserves all
+      four operational instructions exactly: two vtable loads, BLX r2,
+      and the returned-cell load. LLVM adds mov fp,sp and saves fp rather
+      than r4; no semantic codegen deviation. No device execution.
