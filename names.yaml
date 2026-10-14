@@ -16,6 +16,34 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083da7b4
+    ghidra: FUN_083da7b4
+    name: wide_filebuf_set_owned
+    size: 24
+    sig: "void wide_filebuf_set_owned(u32 *buffer, i32 enabled)"
+    module: cxx/wide_filebuf_set_owned
+    status: ported
+    vars: {param_1/r0: buffer, param_2/r1: enabled, r2: ownership_test, r1_after_load: flags}
+    notes: >-
+      Raw extent [0x083da7b4, 0x083da7cc) is six A32 words ending in
+      MOV PC,LR; the next independent function sets bit 1 with the same
+      structure. Whole-image aligned raw decoding finds one incoming plain
+      BL at 0x083d9ac0, zero predicated BLs and zero outgoing BLs.
+      MOVS tests the entire enabled word; LDR reads object +0x10;
+      BICEQ/ORRNE clears/sets bit 0 and STR preserves all other flags.
+      Caller 0x083d9a64 enables ownership when allocating a two-byte-character
+      buffer, disables ownership for a supplied buffer, and tests the old
+      bit before freeing the previous buffer. No callee seams or deliberate
+      behavioral deviations. Aligned u32 word indexing preserves the target
+      offset on hosts. Tests cover both bit states, zero, positive, negative,
+      extreme and non-low-byte enabled values, unrelated flags, neighboring
+      storage and repeated transitions. Executable actual-source smoke
+      verifies negative enable followed by zero disable with unrelated flags
+      and neighboring storage preserved. Host cargo test and build-std ARM
+      release pass. match.py exits 1 with a structural diff: LLVM emits
+      eight instructions versus six, adding a frame and clearing bit 0
+      unconditionally before ORRNE; the +0x10 load/store, full-word zero
+      test and bit-preserving result remain. No device execution.
   - address: 0x083da7cc
     ghidra: FUN_083da7cc
     name: wide_filebuf_set_write_mode
