@@ -20,6 +20,14 @@ use crate::heap::veneers::cxx_array_dealloc;
 /// 32, empty predicate 0x083d75f0 tests count == 0, and initializer 0x083da26c
 /// builds the same four-word iterator. This export deliberately serves the
 /// copy without a wrapper; the raw caller ignores restored r0-r3.
+/// Also ports `FUN_083de838` @ 0x083de838: true size 164 bytes through
+/// 0x083de8dc (next independent PUSH). Raw decoding verifies seven outgoing
+/// plain BLs, one incoming plain BL at 0x0815b8bc, and no predicated BLs.
+/// All non-BL words match 0x083df8e4. Capacity @ 0x083da1a8 is 32,
+/// empty predicate @ 0x083d75e0 tests count == 0, and iterator initializer
+/// @ 0x083da1d4 builds the same four-word iterator. This export deliberately
+/// serves the copy without a wrapper, inlines its predicate and initializer,
+/// and omits the restored r0-r3 values that its sole caller ignores.
 ///
 /// Retreats the back map slot and frees its former segment. The caller has
 /// already decremented the element cursor and count. If count is zero, clears
@@ -101,6 +109,19 @@ mod tests {
             let end = base.wrapping_add(128);
             assert_eq!(deque, [11, 22, 33, 44, end, base, end, slot - 4, count, 0x6000, 9]);
             assert_eq!(frees, [(0x5000, 32, 0)]);
+        }
+        // The previous segment must be read after the allocator callback:
+        // a callback may change the slot while releasing the retired segment.
+        unsafe {
+            slots.write(0x4000);
+            let slot = slots.add(1) as usize as u32;
+            let mut deque = [11, 22, 33, 44, 0x5000, 0x5000, 0x5080, slot, 1, 0x6000, 9];
+            deque_back_retire_segment_with(deque.as_mut_ptr(), |p, n, e| {
+                assert_eq!((p, n, e), (0x5000, 32, 0));
+                slots.write(0x9000);
+            });
+            assert_eq!(deque, [11, 22, 33, 44, 0x9080, 0x9000, 0x9080,
+                slot - 4, 1, 0x6000, 9]);
         }
     }
 
