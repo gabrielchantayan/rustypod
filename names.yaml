@@ -256948,3 +256948,48 @@ functions:
       scratch, and a literal-address BLX instead of the original BL;
       the key/zero pair, one insertion call, and node+20 return remain.
       Full x86_64 host tests and the release ARM build passed.
+
+  - address: 0x083db3d0
+    ghidra: FUN_083db3d0
+    name: command_map_value_slot
+    size: 76
+    sig: "u32 *command_map_value_slot(void *map, char *const *key)"
+    module: cxx/command_map_value_slot
+    status: ported
+    vars:
+      param_1/r0: map
+      r1: key
+      auStack_1c: pair
+      local_14: result
+    renames:
+      FUN_083d8c30: cxx_string_copy_ctor
+      FUN_083d8b04: cxx_string_release
+      FUN_083c28a8: command_map_insert_retail
+    notes: >-
+      Raw osos.dec establishes 19 A32 words from 0x083db3d0 through the
+      POP at 0x083db418; the next real function starts with PUSH at
+      0x083db41c. Three outgoing unconditional plain BLs, no predicated
+      BLs. Independent whole-image aligned-word decoding finds one
+      inbound plain BL at 0x08290570 and no predicated inbound BLs.
+      Raw caller instructions supply map in r0 and key in r1, then store
+      a table value through the returned pointer; Ghidra omitted r1.
+      COW-copies the key, zero-initializes the mapped word, invokes
+      0x083c28a8, releases the temporary, and returns node+0x14.
+      The callee's duplicate and insertion branches establish tree
+      insertion semantics; raw tail stores node at result+0 and flag
+      at result+4. Neither assigned address nor insertion callee had
+      a canonical address entry before this port. The unported callee
+      remains a fixed-address device boundary, not a guessed replacement.
+      Typed repr(C) scratch supports wider host pointers. Host tests
+      cover retained COW ownership, empty singleton, zero insertion,
+      stable duplicate slots and preservation of existing mapped values.
+      Full host suite passed (16010 tests); release ARM build passed.
+      Standalone actual-port-source smoke with modeled string/tree
+      boundaries verified zero insertion and stable existing values.
+      A host rlib smoke attempt exposed unrelated missing host helpers
+      in prepare_entry_metadata, shared_payload_select_kind and
+      calendar_schedule; no unrelated code was changed. match.py exits
+      1: 19 original instructions versus 21 Rust instructions, retaining
+      the three call boundaries and node+20 return, with initialized
+      result scratch and different frame/register allocation. The
+      insertion wrapper uses a literal-address BLX. No device run.
