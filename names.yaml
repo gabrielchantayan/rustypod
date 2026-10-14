@@ -259278,3 +259278,40 @@ functions:
       surrounding words. ARM match confirms virtual slot +0x1c, direct release,
       and base tail branch; LLVM uses an explicit null branch instead of
       predication and a larger frame. Both direct target callees are reused.
+  - address: 0x083d06fc
+    ghidra: FUN_083d06fc
+    name: observable_array_cells_attached_destruct
+    size: 60
+    sig: "uint32_t *observable_array_cells_attached_destruct(uint32_t *this)"
+    module: cxx/observable_array_cells_attached_destruct
+    status: ported
+    vars:
+      param_1/r0/r4: this
+      DAT_083d0734: derived_vtable_089a42d8
+      this_plus_0x14: attached_object
+      virtual_0x1c: release_attached_object
+      FUN_083d0654: observable_array_release_cells_083d0654
+      FUN_08271d2c: observable_array_destruct
+    notes: >-
+      Raw osos.dec establishes [0x083d06fc,0x083d0738), 60 bytes:
+      thirteen A32 instructions through tail B at 0x083d0730, then literal
+      0x089a42d8 at 0x083d0734. The next real function starts with push at
+      0x083d0738. Ghidra's 56 bytes omit the literal; its C incorrectly folds
+      the base destructor into this function. Independent raw branch decoding
+      finds one body plain BL at 0x083d0724 to ported cell release, zero
+      predicated BLs, and one indirect BLXNE at 0x083d071c through the
+      attachment's vtable slot +0x1c. Whole-image decoding finds one inbound
+      plain BL at 0x0826b508 and zero predicated BL callers. That caller
+      null-guards this, destroys it, and tail-calls operator_delete. Install
+      the derived vtable, release a non-null attachment at +0x14, release
+      enabled owned cells, then tail-chain to the ported base destructor and
+      return this. Host seams replace virtual and cell release because their
+      native layouts differ from target words; ARM reuses both existing Rust
+      callees. Rust deliberately uses ordinary control flow for predication
+      and tail chaining. Host tests verify null guarding, ordering, release
+      side-effect visibility, base cleanup, return identity, and preserved
+      fields. Standalone host smoke passes both attachment cases. ARM build
+      and all 16115 host tests pass. match.py shows the same virtual slot,
+      direct release and base tail call; LLVM adds a frame and explicit null
+      branch instead of predication. Its default original extent omits the
+      literal, which was verified independently from raw bytes.
