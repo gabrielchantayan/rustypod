@@ -408,6 +408,7 @@ pub mod pair_range_fill_after_cursor;
 pub mod strided_record_remove_selector;
 pub mod record_40_copy_construct_range;
 pub mod record_40_list_node_pool_acquire;
+pub mod record_40_list_construct;
 pub mod segmented_iter_post_increment;
 pub mod linked_buffer_cursor_advance;
 pub mod decoder_end_batch;

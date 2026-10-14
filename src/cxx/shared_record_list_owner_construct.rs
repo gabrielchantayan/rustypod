@@ -9,15 +9,16 @@
 //! marker to -1, set header bit 26, self-link the header, and assign the source
 //! shared handle. Return the original owner. No NULL guard or cleanup on failure.
 //!
-//! Deliberate deviations: inline the verified three zero stores at 0x0814d8d0
-//! and the list-constructor stores at 0x083dc968, reusing its ported node pool.
+//! Deliberate deviations: inline the verified three zero stores at 0x0814d8d0.
+//! Reuse the ported list constructor at 0x083dc968.
 //! Omit the unused stack-word address passed in r1 to that list constructor.
 //! Native shared-handle pointers widen on hosts; repr(C) keeps members disjoint.
 //! Ring and pool links retain target-width words and require low-address storage.
 //! The existing recursive-mutex port supplies its documented host model; initial
 //! scratch r2/r3 are immaterial after mutex attribute initialization.
 
-use super::record_40_list_node_pool_acquire::{record_40_list_node_pool_acquire, Record40ListNodePool};
+use super::record_40_list_node_pool_acquire::Record40ListNodePool;
+use super::record_40_list_construct::{record_40_list_construct, Record40List};
 use super::recursive_mutex::cxx_recursive_mutex_construct;
 use super::shared_cell::{shared_cell_construct_tertiary, shared_cell_assign_direct_secondary, SharedCell};
 use core::ptr::{addr_of_mut, null_mut};
@@ -45,14 +46,7 @@ pub unsafe extern "C" fn shared_record_list_owner_construct(
 ) -> *mut SharedRecordListOwner {
     shared_cell_construct_tertiary(addr_of_mut!((*owner).handle), null_mut());
     addr_of_mut!((*owner).header).write([0; 3]);
-    addr_of_mut!((*owner).pool).write(Record40ListNodePool::default());
-    addr_of_mut!((*owner).sentinel).write(0);
-    addr_of_mut!((*owner).count).write(0);
-    let sentinel = record_40_list_node_pool_acquire(addr_of_mut!((*owner).pool), 1);
-    let sentinel_word = sentinel as usize as u32;
-    addr_of_mut!((*owner).sentinel).write(sentinel_word);
-    addr_of_mut!((*sentinel).next).write(sentinel_word);
-    addr_of_mut!((*sentinel).previous).write(sentinel_word);
+    record_40_list_construct(addr_of_mut!((*owner).pool).cast::<Record40List>());
     cxx_recursive_mutex_construct(addr_of_mut!((*owner).mutex).cast(), 0, 0, 0);
     addr_of_mut!((*owner).marker).write(u32::MAX);
     let header_word = addr_of_mut!((*owner).header) as usize as u32;
