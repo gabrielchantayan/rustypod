@@ -561,6 +561,7 @@ pub mod hints {
     // vector source, destination, and allocation fixtures; mappings never unmap.
     pub const VECTOR_WORD_COPY_CONSTRUCT: usize = 0x6d10_0000;
     pub const STRING_VECTOR_FLAG_COPY_CONSTRUCT: usize = 0x6d20_0000;
+    pub const EVENT_LIST_TREE_NODE_CLONE: usize = 0x6d30_0000;
     // 0x6e10_0000: dedicated to ui/tracked_object_register's raw-u32 object
     // fixture; mappings never unmap, so no other user may share this hint.
     pub const TRACKED_OBJECT_REGISTER: usize = 0x6e10_0000;

@@ -112544,9 +112544,9 @@ functions:
       word in osos.dec finds two unconditional direct callers at 0x083c1ee8
       and 0x083c217c. The routine clones a subtree in left-recursive,
       right-iterative order, preserving node color and parent/right links and
-      terminating the final right link. The unported type-specialized allocator
-      and payload copier at 0x083c1580 remains an ARM address seam; host tests
-      inject it and validate empty, left-recursive, and right-chain cases.
+      terminating the final right link. The type-specialized allocator and
+      payload copier at 0x083c1580 now calls the ported event_list_tree_node_clone;
+      host subtree tests inject a model for empty, left-recursive and right-chain cases.
 
   - address: 0x083c2130
     ghidra: FUN_083c2130
@@ -259744,3 +259744,42 @@ functions:
       sentinel guard, reverse comparator and output store agree. LLVM
       removes dead spills and the equality call, omits the stateless
       comparator argument and uses a frame pointer.
+
+  - address: 0x083c1580
+    ghidra: FUN_083c1580
+    name: event_list_tree_node_clone
+    size: 200
+    sig: "RedBlackTreePayload24Node *event_list_tree_node_clone(RedBlackTreePayload24NodePool *pool, const void *source)"
+    module: cxx/event_list_tree_node_clone
+    status: ported
+    renames:
+      param_1/r0: pool
+      param_2/r1/r4: source
+      iVar1/r8: node
+      piVar5/r4: destination_bounds
+      uVar6/r7: capacity
+      FUN_083c14c8: red_black_tree_payload_24_node_pool_acquire
+      FUN_083d8c30: cxx_string_copy_ctor
+      FUN_08266c70: operator_new_checked
+      FUN_083e8cb0: vector_copy_construct_range_elem16_alt
+    notes: >-
+      Raw osos.dec confirms the 200-byte extent 0x083c1580..0x083c1648,
+      bounded by the next push at 0x083c1648. Independent aligned A32 decoding
+      finds five outbound plain BLs at 0x083c1588, 0x083c159c, 0x083c15ac,
+      0x083c15fc and 0x083c1610, and no predicated BLs. Whole-image decoding
+      finds one inbound plain BL at 0x083c1ebc and no predicated inbound BLs.
+      Acquires a 40-byte node, copies two COW strings at payload+0/+4, clears
+      bounds at +8/+12/+16, allocates max(unsigned(signed(end-begin)>>4),32)
+      entries of 16 bytes, constructs the range, recomputes end, sets capacity
+      end and copies only the byte at payload+20. Returns the node, not payload.
+      Preserves the wrapping node+16 null guard. Dead r2/r3 spills are omitted;
+      host copies bridge four-byte string fields with native-pointer locals.
+      Reuses all existing callees and the established retail element-copy seam;
+      the subtree caller now uses this Rust port instead of its old ARM seam.
+      Host tests cover recycled nodes, both COW reference increments, minimum
+      reservation, untouched padding and signed/wrapping count boundaries.
+      Isolated runtime smoke exercised counts 0,31,32,33 with an installed
+      element-copy model; entry bytes, allocation size, bounds and flag agreed.
+      ARM release builds. match.py reports a structural diff (exit 1): five
+      calls and the construction sequence remain, while LLVM removes spills,
+      combines stores and replaces the final shift pair with a low-bit mask.
