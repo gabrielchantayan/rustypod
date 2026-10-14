@@ -16,6 +16,36 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083d17d8
+    ghidra: FUN_083d17d8
+    name: owned_string_member_array_erase_at
+    size: 68
+    sig: "i32 owned_string_member_array_erase_at(ObservableArray *this, i32 index)"
+    module: cxx/owned_string_member_array_erase_at
+    status: ported
+    vars:
+      param_1/r4: this
+      param_2/r5: index
+      this_plus_0x10: owns_elements
+      FUN_083d6b6c: container_element_at_alias_6b6c
+      FUN_0828a148: string_object_with_owned_member_destroy
+      FUN_082aad24: operator_delete
+      FUN_08271bec: observable_array_erase_at
+    notes: >-
+      Raw A32 extent [0x083d17d8,0x083d181c) is 68 bytes ending in a
+      tail B before an independent PUSH. Three outgoing plain BLs, zero
+      predicated BLs; whole-image aligned word decoding finds one incoming
+      plain BL at 0x0815bc00 and zero predicated BLs. Ownership byte +0x10
+      gates indexed lookup through virtual +0x40 and its cell load; a non-NULL
+      StringObjectWithOwnedMember is destroyed and tag-2-deleted before base
+      erase receives the unchanged index. Cleanup precedes index validation
+      and does not clear the cell. Ghidra incorrectly inlines base erase after
+      treating operator_delete as noreturn. All four callees reuse existing
+      ports; no new fixed-address seams. Host pointers widen and accessor
+      indices preserve target u32 bits. Host suite: 16103 passed. ARM release
+      build passed. match.py exits 1: 17 original versus 18 Rust instructions;
+      ownership and NULL guards, three BLs and final base tail B remain.
+      LLVM adds a frame pointer and changes register allocation.
   - address: 0x083d1b58
     ghidra: FUN_083d1b58
     name: owned_string_object_array_erase_at
