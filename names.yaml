@@ -257803,3 +257803,40 @@ functions:
       widen the host model. Host tests cover signed bounds, empty slots,
       lifecycle ordering, changed storage, wrapping and repeated removal.
       LLVM replaces predication with branches and uses a larger prologue.
+  - address: 0x083d543c
+    ghidra: FUN_083d543c
+    name: tracked_slot_array_construct
+    size: 196
+    sig: "TrackedSlotArray *tracked_slot_array_construct(TrackedSlotArray *array, u32 options, u32 slots, u32 growth)"
+    module: cxx/tracked_slot_array_construct
+    status: ported
+    vars: {param_1/r4: array, param_2/r1: options, param_3/r2: slots, param_4/r3: growth, iVar2/r5: tracker_name, uVar1/r6: copy_len}
+    renames: {FUN_0802edac: malloc, thunk_EXT_FUN_2200027c: memzero_aligned, FUN_082a7774: tracker_record_name, FUN_08392478: strlen, FUN_080310d4: strncpy, FUN_083d52a0: tracker_diagnostic_no_op}
+    notes: >-
+      Raw osos.dec establishes [0x083d543c,0x083d5500), 196 bytes:
+      160 instruction bytes, record literal at 0x083d54dc and diagnostic
+      text through 0x083d54ff. Next real entry starts with cmp r1,#0.
+      Whole-image aligned A32 BL decoding finds one incoming plain BL at
+      0x081ef170 and zero predicated incoming calls; nine outgoing plain
+      BLs and zero predicated outgoing calls. Caller constructs a separate
+      ten-slot array with options zero and growth two. Initialize six fields,
+      allocate wrapping u32 slots*4 bytes and zero them. Fetch name through
+      ported tracker_record_name from record 0x0897cc7c; allocate strlen
+      bytes, then strncpy that length from name+1 for length <=10 or name+2
+      otherwise. Zero padding terminates nonempty labels; empty labels
+      allocate zero bytes. No NULL guard, capacity default, or old-field free.
+      Reuses canonical malloc, memzero_aligned, strlen, strncpy and disabled
+      tracker diagnostic. IRAM veneer 0x08037db8 targets 0x2200027c, the
+      mirror of 0x0800027c, not ROM. Deviations: native host pointer layout,
+      host runtime-name source and allocation fixture; diagnostic arguments
+      reduced to the only observable r0. LLVM folds adjacent post-allocation
+      strlen calls and removes the inert diagnostic; volatile allocation,
+      zero and copy dispatch remain real call boundaries. Host suite passes
+      16044 tests, including lengths 0,1,10,11,14, zero/nonzero and wrapping
+      slot sizes, field initialization, padding and allocation boundaries.
+      ARM release build succeeds. match.py reports 40 original and 40 Rust
+      instructions with expected indirect calls, frame/store scheduling and
+      omitted inert diagnostic setup. Standalone host smoke runs the real
+      constructor and memory/string ports with a std allocator, checks ten
+      zeroed slots and the two-NUL label tail, and writes the last slot.
+      Device execution was not exercised.
