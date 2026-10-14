@@ -40,6 +40,7 @@ extern crate std;
 /// overlap.
 pub mod hints {
     pub const SIGNED_KEY_TREE_EQUAL_RANGE: usize = 0x6104_0000;
+    pub const UNSIGNED_KEY_TREE_EQUAL_RANGE: usize = 0x6105_0000;
     pub const WIDE_FILEBUF_SET_BUFFER: usize = 0x6a64_0000;
     pub const STRSTREAMBUF_SET_BUFFER: usize = 0x90b0_0000;
     pub const PAYLOAD_16_TREE_CONSTRUCT: usize = 0xb73c_0000;
