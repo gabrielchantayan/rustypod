@@ -168,6 +168,7 @@ pub mod indexed_string_element_array_destroy_083d14a0;
 pub mod indexed_element_array_release_elements;
 pub mod container_release_indexed_elements;
 pub mod container_release_erase_at;
+pub mod scoped_context_container_erase_at;
 pub mod indexed_element_array_destruct;
 pub mod indexed_element_array_attached_destruct;
 pub mod indexed_element_array_attached_destroy_destruct;
