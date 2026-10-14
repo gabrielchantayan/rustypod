@@ -16,6 +16,40 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083cff30
+    ghidra: FUN_083cff30
+    name: indexed_element_array_erase_at
+    size: 56
+    sig: "i32 indexed_element_array_erase_at(void *array, i32 index)"
+    module: cxx/indexed_element_array_release_elements
+    status: ported
+    renames:
+      param_1/r0/r4: array
+      param_2/r1/r5: index
+      "[array + 0x10]": enabled
+      FUN_083d6870: container_element_at_alias_6870
+      FUN_082aad24: operator_delete
+      tail_08271bec: observable_array_erase_at
+    notes: >-
+      Raw A32 extent [0x083cff30,0x083cff68) is fourteen words ending
+      in a tail B to base erase, before the next independent PUSH.
+      Whole-image aligned word decoding verifies one incoming plain BL
+      at 0x08284b5c, zero incoming predicated BLs, two outgoing plain BLs
+      at 0x083cff50 and 0x083cff54, and zero outgoing predicated BLs.
+      Caller passes its embedded collection at +0x28. When byte +0x10
+      is nonzero, fetch through the existing +0x40 virtual slot wrapper
+      and tag-2-delete the element, including NULL. Then erase the unchanged
+      signed index through the existing base port and return its result.
+      No validation or sentinel normalization before deletion, no element
+      destructor, and no slot clear. Ghidra incorrectly marks delete noreturn
+      and incorporates the base erase body. No new seams. Host tests cover
+      disabled/high-bit enable bytes, NULL/non-NULL, negative and empty-array
+      indices, and the last-element sentinel, verifying deletion before
+      rejection and preservation of the slot. Deliberate host deviation
+      uses the existing native-pointer layout. ARM match retains the byte
+      test, two direct calls, restored receiver/index and base tail branch;
+      LLVM shrink-wraps the prologue, adds a frame pointer and changes
+      register allocation (52 vs 56 bytes).
   - address: 0x083d1104
     ghidra: FUN_083d1104
     name: scoped_context_container_erase_at
