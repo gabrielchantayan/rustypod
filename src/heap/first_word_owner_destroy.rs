@@ -33,6 +33,27 @@ pub unsafe extern "C" fn first_word_owner_destroy(owner: *mut FirstWordOwner) ->
     owner
 }
 
+/// `embedded_allocation_owner_destroy` — `FUN_083b6bd0` @ 0x083b6bd0.
+///
+/// True size: 24 bytes, ending at the independent PUSH at 0x083b6be8.
+/// Raw A32: one plain inbound BL at 0x082670b0, one plain outbound BL
+/// to operator_delete_tag3 @ 0x082aad14, and zero predicated BLs.
+/// Deletes the first pointer field and returns the owner unchanged, without
+/// clearing the dangling pointer or deleting the owner. The caller passes
+/// its embedded owner at +8, then subtracts eight from the returned pointer.
+/// Deliberate deviation: repr(C) widens the pointer on hosts only. LLVM may
+/// fold this identical body with first_word_owner_destroy; both are real
+/// exported BL targets. No new callee seam.
+///
+/// # Safety
+/// Same live-owner and tag-3 allocation requirements as first_word_owner_destroy.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn embedded_allocation_owner_destroy(owner: *mut FirstWordOwner) -> *mut FirstWordOwner {
+    operator_delete_tag3((*owner).allocation);
+    owner
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -72,5 +93,35 @@ mod tests {
         assert_eq!(free_log(), (1, allocation, 3));
         assert_eq!(fixture.owner.allocation, allocation);
         assert_eq!(fixture.following, [0xabcdef01, 0x10203040]);
+    }
+
+    #[test]
+    fn embedded_empty_owner_keeps_enclosing_state() {
+        let _heap = mock_heap();
+        let mut fixture = Fixture {
+            owner: FirstWordOwner { allocation: core::ptr::null_mut() },
+            following: [0x13579bdf, 0x2468ace0],
+        };
+        let owner = &mut fixture.owner as *mut FirstWordOwner;
+        assert_eq!(unsafe { embedded_allocation_owner_destroy(owner) }, owner);
+        assert!(fixture.owner.allocation.is_null());
+        assert_eq!(fixture.following, [0x13579bdf, 0x2468ace0]);
+        assert_eq!(free_log().0, 0);
+    }
+
+    #[test]
+    fn embedded_allocation_release_leaves_owner_pointer_dangling() {
+        let _heap = mock_heap();
+        let mut payload = [0xa5u8; 32];
+        let allocation = payload.as_mut_ptr();
+        let mut fixture = Fixture {
+            owner: FirstWordOwner { allocation },
+            following: [0x11223344, 0x55667788],
+        };
+        let owner = &mut fixture.owner as *mut FirstWordOwner;
+        assert_eq!(unsafe { embedded_allocation_owner_destroy(owner) }, owner);
+        assert_eq!(free_log(), (1, allocation, 3));
+        assert_eq!(fixture.owner.allocation, allocation);
+        assert_eq!(fixture.following, [0x11223344, 0x55667788]);
     }
 }
