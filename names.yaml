@@ -16,6 +16,35 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083dec00
+    ghidra: FUN_083dec00
+    name: deque_back_retire_segment
+    size: 164
+    module: cxx/deque_back_retire_segment
+    status: ported
+    sig: "void deque_back_retire_segment(uint32_t *deque)"
+    renames:
+      param_1/r4: deque
+      puVar1/r0: old_slot
+      uVar4/r5: retired_segment
+      local_20: initialized_back_iterator
+      FUN_083da240: deque_seg_capacity
+      FUN_083d75f0: count_is_zero
+      FUN_083da26c: deque_iter_init_elem4_alias_a26c
+      FUN_08266f2c: cxx_array_dealloc
+    notes: >-
+      Raw extent 0x083dec00..0x083deca4 is 164 bytes, ending before the next
+      independent PUSH. Seven outgoing plain BLs at 0x083dec18, 0x083dec28,
+      0x083dec30, 0x083dec4c, 0x083dec70, 0x083dec78 and 0x083dec8c;
+      zero predicated outgoing BLs. Whole-image word decoding finds one
+      incoming plain BL at 0x081da680 and no predicated incoming calls.
+      Every non-BL word matches the existing 0x083df8e4 port. Capacity is
+      32; the raw empty predicate is true exactly for count zero; iterator
+      initialization sets cur/base/end/slot with a 128-byte segment extent.
+      Retreat back slot, free the retired segment, then reanchor at the
+      preceding segment end or clear both iterators and free the map.
+      Reuse the existing export without a wrapper or new seam. Inline pure
+      predicate/initializer stores; omit restored r0-r3, ignored by the caller.
   - address: 0x083df8e4
     ghidra: FUN_083df8e4
     name: deque_back_retire_segment
