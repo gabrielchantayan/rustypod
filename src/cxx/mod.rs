@@ -159,6 +159,7 @@ pub mod container_destroy_first_non_null_element;
 pub mod container_element_at_083d6818;
 pub mod indexed_element_array_destroy;
 pub mod owned_observable_array_erase_at;
+pub mod owned_nonnull_cell_array_erase_at;
 pub mod owned_string_member_array_erase_at;
 pub mod opaque_indexed_element_array_dispose;
 pub mod class_6280_owned_element_array_destruct;

@@ -259341,3 +259341,41 @@ functions:
       ARM directly reuses existing ports. Ordinary control flow replaces
       predication and tail chaining. Tests exercise both attachment cases,
       derived-stage ordering, real base cleanup, return identity and guards.
+
+  - address: 0x083d05b8
+    ghidra: FUN_083d05b8
+    name: owned_nonnull_cell_array_erase_at
+    size: 72
+    sig: "i32 owned_nonnull_cell_array_erase_at(ObservableArray *this, i32 index)"
+    module: cxx/owned_nonnull_cell_array_erase_at
+    status: ported
+    vars:
+      param_1/r0/r4: this
+      param_2/r1/r5: index
+      "[this + 0x10]": ownership_enabled
+      "[vtable + 0x40]": element_at
+      piVar2: cell
+      FUN_082aad24: operator_delete
+      tail_08271bec: observable_array_erase_at
+    notes: >-
+      Raw osos.dec establishes [0x083d05b8,0x083d0600), eighteen ARM words,
+      ending in tail B before the next independent PUSH. Independent aligned
+      whole-image decoding finds one incoming plain BL at 0x08264bdc and no
+      predicated incoming BLs. Outgoing: zero plain BLs, one BLNE at
+      0x083d05ec to existing tag-2 operator_delete, one virtual BLX through
+      +0x40 and tail B to existing observable_array_erase_at. Ghidra wrongly
+      marks delete nonreturning and folds base erase into this function.
+      If ownership byte +0x10 is nonzero, fetch the cell for the original
+      signed index and delete its allocation only when non-NULL. Then base
+      erase validates/normalizes the same index and supplies the return value.
+      No cell clear or element destructor. Caller 0x08264b10 repeatedly
+      consumes index zero while draining the collection. No new fixed-address
+      seams. Host tests cover disabled/high-bit ownership, NULL cells,
+      signed index boundaries, deletion-before-validation and cell retention;
+      real base rejection covers empty arrays. Full host suite: 16118 passed.
+      ARM release build succeeds. match.py shows 19 versus 18 instructions:
+      the same ownership/NULL guards, virtual BLX, predicated delete BL and
+      base tail B, with a frame pointer and different register allocation.
+      Host fixtures deliberately use native pointers. A standalone host API
+      smoke is blocked by pre-existing non-test host compile errors in
+      prepare_entry_metadata, shared_payload_select_kind and calendar_schedule.
