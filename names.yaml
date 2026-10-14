@@ -258252,3 +258252,35 @@ functions:
       null branch, tail zero and success-only capacity commit. Volatile
       helper pointers become BLX; disabled diagnostic becomes a tail branch
       and unused diagnostic argument preparation is eliminated. No device run.
+
+  - address: 0x083d4818
+    ghidra: FUN_083d4818
+    name: element_tracker_array_construct
+    size: 196
+    sig: "TrackedSlotArray *element_tracker_array_construct(TrackedSlotArray *this, uint32_t options, uint32_t capacity, uint32_t growth)"
+    module: cxx/element_tracker_array_construct
+    status: ported
+    vars: {param_1/r4: this, param_2/r1: options, param_3/r2: capacity, param_4/r3: growth, iVar2/r5: tracker_name, uVar1: allocation, uVar3: tracker_name_length, iVar4: source_offset}
+    renames: {FUN_0802edac: malloc, thunk_EXT_FUN_2200027c: memzero_aligned, FUN_082a7774: tracker_record_name, FUN_08392478: strlen, FUN_080310d4: strncpy, FUN_083d4678: disabled_tracker_diagnostic}
+    notes: >-
+      Raw A32 extent [0x083d4818,0x083d48dc) is 196 bytes: 160 instruction
+      bytes plus 36 literal bytes, before the next cmp r1,#0 entry.
+      Whole-image aligned BL decoding finds one incoming plain BL at
+      0x080edb58, nine outgoing plain BLs, and zero predicated BLs either way.
+      Caller allocates 24 bytes and passes options=0, capacity=10, growth=2.
+      Initialize six fields, allocate wrapping capacity<<2 bytes and zero them.
+      Runtime record 0x0897bff0 supplies its name through the aligned +4 word.
+      Allocate exactly strlen(name) bytes; strncpy that many from name+1 for
+      length<=10, otherwise name+2, retaining trailing NUL padding. No failure
+      checks or extra terminator allocation. Deviations: combine stable-name
+      scans, inline record accessor, omit diagnostic and arguments because
+      raw 0x083d4678 is exactly bx lr. Reuse native-pointer TrackedSlotArray;
+      ARM fields remain four bytes apart. Volatile memory-helper dispatch
+      prevents builtin substitution; private providers isolate host fixtures.
+      Host regression covers zero/wrapping capacity, exact storage and label
+      boundaries, empty names and lengths 10/11. Public-entry smoke loads the
+      fixed runtime record, zeroes ten slots and retains the padded label.
+      Host suite and ARM release build pass. match.py reports a structural
+      diff: equivalent initialization, allocations, zero/copy and return;
+      LLVM uses heap dispatch and BLX memory helpers, one strlen scan, and
+      removes the inert diagnostic.
