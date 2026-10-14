@@ -11,6 +11,9 @@
 //! Deliberate deviations: native pointer fields widen on hosts; slot words
 //! remain u32. LLVM may replace predication with branches. Internal generic
 //! lifecycle injection tests storage/count changes without new firmware seams.
+//! Host integration coverage drains a real empty StringChain and unmaps its
+//! owner before checking the slot/count update. ARM retains both BLs and the
+//! storage/count reloads, but adds a frame pointer and changes registers.
 
 use super::tracked_slot_array_construct::TrackedSlotArray;
 use super::string_chain_clear::{string_chain_clear, StringChain};
@@ -71,6 +74,51 @@ mod tests {
                     assert_eq!(owner.used, 7);
                     assert_eq!(owner.options, 0x1234);
                 }
+            }
+        }
+    }
+
+    #[test]
+    fn empty_chain_owner_is_disposed_before_slot_is_cleared() {
+        let Some(storage) = crate::testing::try_map_u32_slab(
+            crate::testing::hints::TRACKED_STRING_CHAIN_REMOVE, 4096,
+        ) else {
+            crate::testing::note_missing_u32_fixture("tracked_string_chain_remove");
+            return;
+        };
+        unsafe {
+            let chain = storage.cast::<StringChain>();
+            chain.write(StringChain { head: core::ptr::null_mut(), scratch: chain.cast() });
+            let mut slots = [chain as usize as u32];
+            let mut owner = array(&mut slots, 1);
+            let pointer = &mut owner as *mut TrackedSlotArray;
+            remove_with(pointer, 0, |chain| string_chain_clear(chain), |returned| {
+                assert!((*returned.cast::<StringChain>()).head.is_null());
+                assert_eq!((*returned.cast::<StringChain>()).scratch, chain.cast());
+                assert_eq!((*pointer).data.read(), chain as usize as u32);
+                assert_eq!((*pointer).used, 1);
+                extern "C" { fn munmap(address: *mut u8, length: usize) -> i32; }
+                assert_eq!(munmap(returned, 4096), 0);
+            });
+            assert_eq!(slots, [0]);
+            assert_eq!(owner.used, 0);
+        }
+    }
+
+    #[test]
+    fn every_populated_slot_is_removed_once_including_capacity_minus_one() {
+        for index in 0..3 {
+            let mut slots = [11, 22, 33];
+            let mut owner = array(&mut slots, 3);
+            unsafe {
+                remove_with(&mut owner, index, |chain| chain, |_| {});
+                let mut expected = [11, 22, 33];
+                expected[index as usize] = 0;
+                assert_eq!(slots, expected);
+                assert_eq!(owner.used, 2);
+                remove_with(&mut owner, index, |_| panic!("cleared twice"), |_| panic!("deleted twice"));
+                assert_eq!(slots, expected);
+                assert_eq!(owner.used, 2);
             }
         }
     }
