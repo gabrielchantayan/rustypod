@@ -616,6 +616,7 @@ pub mod opaque_observable_array_dispose_elements_destruct;
 pub mod opaque_observable_array_parse_diagnostics_cleanup;
 pub mod opaque_observable_array_dispose_items;
 pub mod owned_element_array_release;
+pub mod owned_element_array_attached_destruct;
 pub mod owned_element_array_dispose;
 pub mod indexed_element_array_release;
 pub mod owned_element_array_delete_cells;

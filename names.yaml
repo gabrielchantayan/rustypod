@@ -35041,6 +35041,32 @@ functions:
       host fixtures deliberately replace both direct calls and widen the vtable
       pointer because native callback pointers and fixture allocations cannot
       occupy retailOS u32 words.
+  - address: 0x083d1d00
+    ghidra: FUN_083d1d00
+    name: owned_element_array_attached_destruct
+    size: 60
+    sig: "u32 *owned_element_array_attached_destruct(u32 *this)"
+    module: cxx/owned_element_array_attached_destruct
+    status: ported
+    renames:
+      param_1/r4: this
+      param_1+20/r0: attached_object
+      DAT_083d1d38: OWNED_ELEMENT_ARRAY_ATTACHED_VTABLE
+      FUN_083d1bf0: owned_element_array_release
+      FUN_08271d2c: observable_array_destruct
+    notes: >-
+      Raw osos.dec establishes 60 bytes: fourteen instruction words at
+      0x083d1d00..0x083d1d37 plus vtable literal 0x089a5568 at 0x083d1d38;
+      the next real function starts at 0x083d1d3c. There is one plain direct
+      BL to owned_element_array_release, zero predicated BLs, one BLXNE
+      through attached-object vtable slot +0x1c, and a tail B to
+      observable_array_destruct. Whole-image branch decoding finds one
+      incoming plain BL at 0x0826b718 and zero predicated BL callers. That
+      caller null-checks and then deletes the returned pointer. Install the
+      derived vtable, release non-NULL attachment +0x14, release owned
+      elements, and destroy the base, returning this. Host operations replace
+      virtual dispatch and the existing cleanup port's widened host layout;
+      ARM invokes the actual virtual slot and both ported direct callees.
   - address: 0x083d1d3c
     ghidra: FUN_083d1d3c
     name: opaque_observable_array_dispose_items
