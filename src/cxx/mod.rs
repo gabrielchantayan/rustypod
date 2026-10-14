@@ -4,6 +4,7 @@
 //! the ARM ADS C runtime.
 pub mod tracked_slot_array_construct;
 pub mod string_id_tracker_remove;
+pub mod scoped_context_tracker_remove;
 pub mod opaque_observable_array_cell_value;
 pub use opaque_observable_array_cell_value::*;
 pub mod ostream_prepare_output;

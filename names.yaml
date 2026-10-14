@@ -258118,3 +258118,33 @@ functions:
       instructions: both scans, conditional expansion, bounds call and
       predicated count/store remain; LLVM hoists storage loads and uses
       branches instead of BLEQ. No device execution was exercised.
+
+  - address: 0x083d4ca8
+    ghidra: FUN_083d4ca8
+    name: scoped_context_tracker_remove
+    size: 76
+    sig: "void scoped_context_tracker_remove(ScopedContextTracker *tracker, int32_t index)"
+    module: cxx/scoped_context_tracker_remove
+    status: ported
+    vars: {param_1/r4: tracker, param_2/r5: index, tracker_0: slots, tracker_4: capacity, tracker_8: live_count, FUN_08270414: scoped_context_destroy, FUN_082aad24: operator_delete}
+    notes: >-
+      Raw osos.dec establishes [0x083d4ca8,0x083d4cf4), 76 bytes through
+      pop before the next independent push. Ghidra's 48-byte extent truncates
+      the post-delete slot clear and live-count decrement. Whole-image aligned
+      A32 BL decoding finds zero incoming plain BLs and one incoming BLNE at
+      0x081061e8; two outgoing plain BLs at 0x083d4cd0 and 0x083d4cd4,
+      zero outgoing predicated BLs. Reject negative or signed out-of-capacity
+      indices; skip NULL slots. Destroy and delete the token, reload slots,
+      clear the indexed slot, and decrement the current count modulo 2^32.
+      Raw destructor 0x08270414 is exactly BX LR, preserving r0 for delete;
+      raw 0x082aad24 is the existing NULL-guarded tag-2 operator_delete.
+      Reuses both ported callees without new fixed-address seams. Native-width
+      repr(C) pointers widen the host model. Host tests cover signed bounds,
+      NULL slots, deletion-before-clear, changed storage, wrapping current
+      count and repeated removal. Host suite and ARM release build passed.
+      Isolated public-entry smoke through the existing heap callback seam
+      observed tag-2 deletion, slot clearing, count decrement and repeat/bounds
+      no-ops. match.py --size 76 exits 1: 19 original versus 23 Rust instructions;
+      LLVM eliminates the empty destructor BL, uses branches instead of
+      predication and a different frame, while retaining delete, reloaded slots,
+      slot clear and wrapping decrement. No device execution was exercised.
