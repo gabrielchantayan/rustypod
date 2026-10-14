@@ -28393,6 +28393,43 @@ functions:
       LLVM retains the fixed-address destroy call as a literal-loaded blx and
       uses a larger prologue, while preserving the enabled guard, signed loop,
       virtual access, null guard, and destroy-before-delete order.
+  - address: 0x083d0bec
+    ghidra: FUN_083d0bec
+    name: observable_cell_array_remove_value
+    size: 64
+    sig: "int32_t observable_cell_array_remove_value(ElementArrayRemoveValue *this, uint32_t value)"
+    module: cxx/observable_cell_array_remove_value
+    status: ported
+    renames:
+      param_1/r0/r4: this
+      param_2/r1: value
+      uStack_14: temporary_value
+      iVar1/r5: index
+      vtable_plus_0x4c: index_of
+      vtable_plus_0x2c: erase_at
+    notes: >-
+      Raw A32 decoding establishes sixteen instruction words, 64 bytes from
+      0x083d0bec through pop at 0x083d0c28; the independent push at
+      0x083d0c2c starts the next function. Full-image branch decoding finds
+      one inbound plain BL at 0x081fb54c and zero predicated inbound BLs.
+      No outbound plain or predicated direct BLs; BLX at 0x083d0c04 invokes
+      virtual lookup at +0x4c and BLXNE at 0x083d0c20 invokes erase at +0x2c.
+      Lookup receives a writable stack copy; erase runs for every result
+      except exactly -1 through the reloaded vtable. Return the saved lookup
+      result regardless of erase's result. Caller FUN_081fb52c supplies its
+      observable-array subobject at +0x1c. Reuses the identical ported
+      element_array_remove_value algorithm without inventing concrete virtual
+      callee identities. Host pointers/slots widen naturally, retaining ARM
+      layout. Ghidra's extra arguments are register and stack residue.
+      Host suite and ARM release build pass. Standalone smoke verifies -1,
+      -2, signed extremes and zero: only -1 skips erase, and erase's return
+      never replaces lookup's result. LLVM intentionally folds this export
+      with attached_observable_array_remove_value: objdump confirms both
+      names share section, value and 16-byte size. match.py cannot find the
+      alias label; comparison using the shared label reports a four-instruction
+      tail wrapper. The shared 21-instruction removal body preserves slot
+      loads, vtable reload, exact -1 guard and saved result, using BEQ rather
+      than predicated erase.
   - address: 0x083d0c2c
     ghidra: FUN_083d0c2c
     name: attached_observable_array_construct
