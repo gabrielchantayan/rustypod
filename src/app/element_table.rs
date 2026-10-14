@@ -1024,6 +1024,49 @@ pub unsafe extern "C" fn element_array8_at(index: i32) -> *mut u8 {
     element_array_at(8, index)
 }
 
+/// element_array0_remove — `FUN_083d3e3c` @ **0x083d3e3c**.
+/// True extent: 80 bytes, [0x083d3e3c, 0x083d3e8c); the next
+/// constructor begins with an independent push at 0x083d3e8c.
+/// Whole-image raw A32 decoding finds zero inbound plain BLs and one
+/// BLNE at 0x08106410. No outbound plain or predicated BLs; one register
+/// BLX at 0x083d3e6c invokes vtable word seven (+0x1c).
+///
+/// Reject negative indices and indices >= signed capacity. For a non-NULL
+/// element, dispatch with the element as `this`, reload the slot buffer,
+/// clear the selected slot, and decrement the reloaded used count modulo
+/// 2^32. Empty slots leave the count unchanged. The specific virtual method
+/// identity is unproven, so no fixed callee seam is introduced.
+///
+/// Deliberate deviation: host pointer, header and vtable strides widen
+/// following this module's convention; scalar fields remain u32.
+/// ARM retains the original four-byte layout and behavior. LLVM may fold
+/// this identical implementation with the other array removal exports.
+///
+/// # Safety
+/// For nonnegative indices, `this` must expose a readable capacity word.
+/// In-range storage must be readable. Non-NULL elements must have a valid
+/// vtable with an `unsafe extern "C" fn(*mut u8)` at word seven.
+/// The header and current selected slot must remain writable after dispatch.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn element_array0_remove(this: *mut u8, index: i32) {
+    if index < 0 || array_slots(this) <= index {
+        return;
+    }
+    let element = array_data(this).add(index as usize).read();
+    if element.is_null() {
+        return;
+    }
+    let vtable = (element as *const *const usize).read();
+    let remove: unsafe extern "C" fn(*mut u8) =
+        core::mem::transmute(vtable.add(7).read());
+    remove(element);
+    let data = array_data(this) as *mut *mut u8;
+    data.add(index as usize).write(core::ptr::null_mut());
+    let used = this.add(ARRAY_USED_INDEX * WORD) as *mut u32;
+    used.write(used.read().wrapping_sub(1));
+}
+
 /// element_array1_remove — `FUN_083d4304` @ **0x083d4304**.
 /// True extent: 80 bytes, through the pop at 0x083d4350; the next
 /// constructor starts at 0x083d4354. Whole-image raw A32 decoding finds
@@ -1192,14 +1235,14 @@ mod array_remove_tests {
 
     #[test]
     fn signed_bounds_empty_slots_and_repeated_removal() {
-        for remove in [element_array1_remove, element_array2_remove] {
+        for remove in [element_array0_remove, element_array1_remove, element_array2_remove] {
             check_bounds_and_repeated_removal(remove);
         }
     }
 
     #[test]
     fn reloads_storage_and_count_after_virtual_call() {
-        for remove in [element_array1_remove, element_array2_remove] {
+        for remove in [element_array0_remove, element_array1_remove, element_array2_remove] {
             check_reload_after_dispatch(remove);
         }
     }

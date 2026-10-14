@@ -258503,3 +258503,38 @@ functions:
       multiply, unconditional pointer publication, failure branch, tail clear,
       and capacity commit remain; volatile helper loads use BLX and LLVM
       removes the inert diagnostic tail.
+  - address: 0x083d3e3c
+    ghidra: FUN_083d3e3c
+    name: element_array0_remove
+    size: 80
+    sig: "void element_array0_remove(u8 *this, i32 index)"
+    module: app/element_table
+    status: ported
+    renames:
+      param_1/r4: this
+      param_2/r5: index
+      r0: element
+      "this+0x00": data
+      "this+0x04": slots
+      "this+0x08": used
+    notes: >-
+      Raw A32 words establish [0x083d3e3c,0x083d3e8c), 80 bytes;
+      the next constructor starts with an independent push at 0x083d3e8c.
+      Whole-image aligned decoding finds zero inbound plain BLs and one
+      BLNE at 0x08106410. Overlapping Ghidra caller entries describe this
+      same destructor call twice. No outbound plain or predicated BLs;
+      one BLX at 0x083d3e6c invokes element vtable word seven (+0x1c).
+      The specific virtual method identity is unproven; no callee seam added.
+      Reject negative indices and index >= signed capacity; ignore NULL
+      slots. Dispatch with element as this, reload data, clear the selected
+      slot, then decrement the reloaded used word modulo 2^32.
+      Host pointer/header/vtable strides follow element_table conventions;
+      scalar fields remain u32. No deliberate device behavior deviation.
+      Existing shared regression helpers now exercise this export for signed
+      bounds, NULL/repeated removal, ordering, callback replacement of data
+      and used, and count underflow. Host suite and ARM release build pass.
+      Isolated source smoke observes one dispatch, NULL slot and zero used.
+      match.py resolves this symbol and reports 25 versus 20 instructions;
+      signed bounds, NULL guard, word-seven BLX, data reload, clear and count
+      decrement remain. LLVM replaces predication with early branches and
+      changes register saves/returns; identical removal exports may fold.
