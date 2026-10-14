@@ -34527,6 +34527,36 @@ functions:
       parent and child links. The 0x083bf4dc helper's payload copy is performed
       directly after the existing ported pool acquisition seam; deliberate
       deviations: no extra helper seam is introduced.
+  - address: 0x083c0034
+    ghidra: FUN_083c0034
+    name: red_black_tree_word_copy_construct
+    size: 168
+    sig: "RedBlackTreeWord *red_black_tree_word_copy_construct(RedBlackTreeWord *destination, const RedBlackTreeWord *source, u8 ownership)"
+    module: cxx/red_black_tree_word_copy_construct
+    status: ported
+    renames:
+      param_1/r0/r4: destination
+      param_2/r1/r5: source
+      param_3/r2: ownership
+      "[tree + 0x10]": header
+      "[tree + 0x14]": count
+      "[tree + 0x19]": comparison
+      puVar1: header_node
+      iVar2: cloned_root
+      iVar3: rightmost
+    notes: >-
+      Raw osos.dec verifies the 168-byte extent 0x083c0034..0x083c00dc,
+      ending with pop at 0x083c00d8 before the separately called function
+      at 0x083c00dc. Whole-image aligned A32 decoding finds one inbound
+      plain BL at 0x0819ed28 and no predicated inbound BLs. The body has
+      four plain BLs at 0x083c0070, 0x083c008c, 0x083c00b0, and
+      0x083c00c4, to the existing word-node pool acquire, subtree clone,
+      leftmost-descendant, and rightmost-descendant ports respectively;
+      no predicated BLs. Constructs a fresh pool and red sentinel, copies
+      count and comparison byte, stores the requested ownership byte,
+      clones the source root, and caches extrema or self-links for an
+      empty tree. Target pointer fields remain u32 on hosts and trailing
+      object padding is untouched. Deliberate behavioral deviations: none.
   - address: 0x083c64b4
     ghidra: FUN_083c64b4
     name: red_black_tree_node_pool_release_refcounted

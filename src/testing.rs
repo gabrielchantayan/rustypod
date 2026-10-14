@@ -3025,6 +3025,8 @@ pub mod hints {
     // target-width source and cloned-tree fixture; mappings never unmap, so
     // no other user may share this hint.
     pub const RED_BLACK_TREE_WORD_SUBTREE_CLONE: usize = 0x3700_0000;
+    // Dedicated target-width tree copy-constructor fixture.
+    pub const RED_BLACK_TREE_WORD_COPY_CONSTRUCT: usize = 0x3800_0000;
     // 0x3300_0000: dedicated to cxx/red_black_tree_payload_24_construct's
     // recycled sentinel-node fixture; mappings never unmap, so no other user
     // may share this hint.
