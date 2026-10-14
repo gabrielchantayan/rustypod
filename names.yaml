@@ -256811,3 +256811,45 @@ functions:
       list owner now calls this port instead of inlining its stores.
       Host tests cover dirty and zero storage, empty-ring and exhausted-pool
       invariants, untouched payload, and adjacent storage boundaries.
+
+  - address: 0x083dc714
+    ghidra: FUN_083dc714
+    name: list_node_pool_list_assign_payload
+    size: 208
+    module: cxx/list_node_pool_list_assign_payload
+    status: ported
+    sig: "ListNodePoolList *list_node_pool_list_assign_payload(ListNodePoolList *destination, const ListNodePoolList *source)"
+    vars:
+      param_1: destination
+      param_2: source
+      local_c: destination_cursor
+      local_1c: destination_sentinel
+      puVar1: source_cursor
+      puVar2: source_sentinel
+    notes: >-
+      Raw A32 extent [0x083dc714,0x083dc7e4), ending in pop at
+      0x083dc7e0 before the next independent push. Two outbound plain BLs
+      at 0x083dc7c0 (retail range erase 0x083dc484) and 0x083dc7d4
+      (ported list_node_pool_list_insert_payload_range 0x083dc544);
+      no predicated outbound BLs. Whole-image aligned word decoding finds
+      one inbound plain BL at 0x081f0bb0 and no predicated inbound BLs.
+      Self-assignment is a no-op. Copy payload words at offsets 12 and 16
+      over the common prefix, preserving node tags and links, then erase
+      excess destination nodes or append remaining source nodes before the
+      destination sentinel. Return destination. The raw r2/r3 values at
+      the insertion call establish the source remainder/end ABI omitted
+      by Ghidra. Deliberate deviations: Rust locals replace stack iterators;
+      reuse the existing insertion port and retain the verified retail
+      range-erase address with a replaceable host seam. Target pointers
+      remain u32. Host behavioral tests cover all source/destination lengths
+      zero through three, prefix identity/tag preservation, appended tags,
+      reverse recycling order, source preservation and self-assignment with
+      an invalid sentinel. Retail payload destruction is not executed on host.
+      Host cargo test gate passes (16004 tests in the main suite); ARM
+      release build passes. Standalone actual-source smoke proves prefix
+      copying, source/tag preservation and self-return without allocation.
+      match.py exits 1 with a structural diff: 52 original instructions
+      versus 41 Rust instructions, retaining self-check, two-field copy loop,
+      range-end branch and both helper paths. LLVM simplifies the loop
+      predicates and uses BLX through literal 0x083dc484 for range erase.
+      No device execution performed.
