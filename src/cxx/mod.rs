@@ -262,6 +262,7 @@ pub mod byte_key_tree_equal_range;
 pub mod byte_key_tree_erase_key;
 pub mod byte_key_tree_recycle_subtree;
 pub mod resource_value_map_lookup_or_insert;
+pub mod command_map_value_slot;
 pub mod string_value_map_lookup_or_insert;
 pub mod string_vector_map_lookup_or_insert;
 pub mod string_vector_key_construct;
