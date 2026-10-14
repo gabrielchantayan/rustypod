@@ -257164,3 +257164,34 @@ functions:
       the three call boundaries and node+20 return, with initialized
       result scratch and different frame/register allocation. The
       insertion wrapper uses a literal-address BLX. No device run.
+
+  - address: 0x083d9a64
+    ghidra: FUN_083d9a64
+    name: wide_filebuf_set_buffer
+    size: 188
+    sig: "u32 *wide_filebuf_set_buffer(u32 *buffer, u16 *storage, i32 capacity)"
+    module: cxx/wide_filebuf_set_buffer
+    status: ported
+    vars: {param_1: buffer, param_2: storage, param_3: capacity, r7: previously_owned}
+    renames: {FUN_082aad74: operator_new_tag3, FUN_082aad14: operator_delete_tag3, FUN_083da7b4: wide_filebuf_set_owned, FUN_083da7e4: wide_filebuf_set_unbuffered}
+    notes: >-
+      Raw osos.dec establishes [0x083d9a64,0x083d9b20), 47 A32 words;
+      the next real function starts with PUSH. Whole-image aligned branch
+      decoding finds one incoming plain BL at 0x083d9e10, no predicated
+      incoming BLs. Outgoing calls are three plain BLs and BLNE to delete,
+      plus virtual MOV PC,R1 through vtable +0x34. No guessed virtual callee.
+      Preflight failure returns NULL unchanged. Positive signed capacity
+      allocates wrapping capacity*2 bytes only for NULL storage, updates
+      ownership before freeing old owned storage, installs storage/capacity,
+      and disables unbuffered mode. Nonpositive capacity rejects non-NULL
+      storage; NULL enables unbuffered mode without releasing old storage
+      or changing capacity/ownership. Success clears words 5 through 10.
+      Existing tag-3 heap and flag ports are reused without new seams.
+      Target object fields remain four-byte words; host vtable function
+      slots widen to native pointers. No target behavioral deviations.
+      Host tests cover rejection, signed boundaries, ownership transfer,
+      allocation-size wrap, flag preservation, and cursor reset. Full host
+      suite and ARM release build passed. Standalone unbuffered-transition
+      smoke passed. match.py reviewed: 47 original versus 50 Rust instructions;
+      LLVM uses BLX for virtual dispatch, branches around deletion rather
+      than BLNE, and separate stores rather than STM. No device execution.
