@@ -28810,6 +28810,34 @@ functions:
       one node when single is nonzero, otherwise 32 initially and
       max(capacity + 32, capacity + capacity/2 + capacity/8). Deliberate
       deviations: none; target pointer fields remain u32 words.
+  - address: 0x083dcbcc
+    ghidra: FUN_083dcbcc
+    name: two_word_list_node_pool_list_clear
+    size: 180
+    sig: "TwoWordListNode *two_word_list_node_pool_list_clear(TwoWordListNodePoolList *list)"
+    module: cxx/two_word_list_node_pool_list_clear
+    status: ported
+    renames:
+      param_1/r0: list
+      local_8: current
+      piVar1: sentinel
+      piVar2: next
+      "list+0x04": free
+      "list+0x10": sentinel
+      "list+0x14": state
+    notes: >-
+      Raw osos.dec establishes 180 bytes from 0x083dcbcc through bx lr at
+      0x083dcc7c; the next real function starts with push at 0x083dcc80.
+      Independent whole-image A32 decoding finds zero outgoing plain BLs,
+      zero outgoing predicated BLs, one inbound plain BL at 0x0812d954,
+      and no inbound predicated BLs. The body is byte-identical to 0x083dca68.
+      Unlinks each live node in the two-word intrusive ring, decrements the
+      live count modulo 2^32, and prepends it to the free list. Preserves
+      payload words and pool allocation state; returns the sentinel in r0,
+      unlike Ghidra's void signature. Reuses the existing target-width
+      TwoWordListNode and TwoWordListNodePoolList layouts. Deliberate
+      deviations: removes dead stack-local iterator stores and the
+      unreachable sentinel-removal branch for a valid exclusive ring.
   - address: 0x083dcc80
     ghidra: FUN_083dcc80
     name: app_block_manager_node_pool_acquire
