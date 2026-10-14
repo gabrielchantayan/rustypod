@@ -259700,3 +259700,47 @@ functions:
       null/non-null free heads, arbitrary nonzero flags, actual shared
       COW refcount transitions, untouched payloads, and overlapping
       pool/node storage with read-before-publish ordering.
+
+  - address: 0x083c1730
+    ghidra: FUN_083c1730
+    name: string_key_tree_find_1730_copy
+    size: 168
+    sig: "void string_key_tree_find_1730_copy(StringKeyTreeNode **out, StringKeyTree *map, const char **key)"
+    module: cxx/string_map
+    status: ported
+    renames:
+      param_1/r0/r8: out
+      param_2/r1/r5: map
+      param_3/r2/r9: key
+      r4: node
+      r6: lower_bound
+      FUN_083d74f4: cxx_string_less
+      FUN_083cf7d0: equal_deref_f7d0_copy
+    notes: >-
+      Raw osos.dec verifies 42 A32 words, from push at 0x083c1730 through
+      pop at 0x083c17d4; the next independent function begins at 0x083c17d8.
+      Whole-image aligned immediate decoding finds one inbound plain BL
+      at 0x0829af3c and no predicated inbound BLs. Three outbound plain BLs
+      at 0x083c1760, 0x083c1790 and 0x083c17b0 target cxx_string_less,
+      equal_deref_f7d0_copy and cxx_string_less respectively; no predicated
+      outbound BLs. Descends from header.parent, retaining the least node
+      not less than the query, then rejects a strictly greater candidate
+      with a reverse comparison. Writes the matching node or header to out.
+      All 39 non-call words equal the existing 0x083c4ebc copy; comparator
+      targets agree and both equality helpers implement the same word
+      comparison. Hook symbol is string_key_tree_find_4ebc_copy, reusing
+      the registered cxx/string_map implementation without a wrapper.
+      Deliberate deviations: equality is expressed directly; native host
+      pointer fields widen together; dead stack scratch and incidental
+      restored registers are omitted. Ghidra's extra argument and
+      undefined8 return are not semantic results; caller 0x0829af28 reads
+      only out and converts the header to null or node+0x14 to a value slot.
+      Host coverage includes empty trees, exact matches, below-minimum,
+      between-node and above-maximum misses, strict prefixes, embedded NUL
+      keys, duplicate-key lower-bound selection and unchanged tree links.
+      Required host suite passes 16127 tests; ARM release build succeeds.
+      match.py resolves the reused symbol and reports 28 versus 42
+      instructions (exit 1): the lower-bound loop, child selection,
+      sentinel guard, reverse comparator and output store agree. LLVM
+      removes dead spills and the equality call, omits the stateless
+      comparator argument and uses a frame pointer.

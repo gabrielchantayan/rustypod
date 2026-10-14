@@ -273,6 +273,17 @@ pub unsafe extern "C" fn string_key_tree_find(
 /// one-word comparison directly. Both raw calls to `cxx_string_less` @
 /// 0x083d74f4 retain the `pair_string_less` seam.
 ///
+/// Also ports `FUN_083c1730` @ 0x083c1730: true size 168 bytes, ending
+/// at 0x083c17d4 before the next function at 0x083c17d8. Raw decoding
+/// verifies three outbound plain BLs, zero predicated BLs, and one inbound
+/// plain BL at 0x0829af3c. All 39 non-call words match the 0x083c4ebc copy;
+/// both string calls target 0x083d74f4, and its equality call targets the
+/// equivalent `equal_deref_f7d0_copy` @ 0x083cf7d0. Hook this copy to
+/// `string_key_tree_find_4ebc_copy` without a redundant wrapper.
+/// Additional deliberate deviations: native host pointer fields widen
+/// together, preserving field separation; dead stack scratch and incidental
+/// restored registers are not results. The caller consumes only `*out`.
+///
 /// # Safety
 /// `out` must be writable, `map` must be a live [`StringKeyTree`], and
 /// `key` must point at a live COW string word. Every reachable node must have
@@ -1434,6 +1445,69 @@ mod tests {
                 let mut copy_found = core::ptr::null_mut();
                 string_key_tree_find_4ebc_copy(&mut copy_found, &mut tree, &query);
                 assert_eq!(copy_found, expected);
+            }
+        }
+    }
+
+    #[test]
+    fn find_shared_1730_copy_handles_empty_prefix_nul_and_duplicate_keys() {
+        unsafe {
+            let mut header = test_header();
+            let header_ptr = core::ptr::addr_of_mut!(header);
+            let mut tree = test_tree(header_ptr);
+            let mut empty = FakeString {
+                rep: StringRep { refcount: 0, capacity: 0, length: 0 },
+                data: [0; 8],
+            };
+            let empty_query = empty.data.as_mut_ptr();
+            let mut found = core::ptr::null_mut();
+            string_key_tree_find_4ebc_copy(&mut found, &mut tree, &empty_query);
+            assert_eq!(found, header_ptr);
+
+            let mut short = FakeString {
+                rep: StringRep { refcount: 0, capacity: 1, length: 1 },
+                data: [b'a', 0, 0, 0, 0, 0, 0, 0],
+            };
+            let mut embedded = FakeString {
+                rep: StringRep { refcount: 0, capacity: 3, length: 3 },
+                data: [b'a', 0, b'b', 0, 0, 0, 0, 0],
+            };
+            let mut gap = FakeString {
+                rep: StringRep { refcount: 0, capacity: 2, length: 2 },
+                data: [b'a', 0, 0, 0, 0, 0, 0, 0],
+            };
+            let mut above = FakeString {
+                rep: StringRep { refcount: 0, capacity: 1, length: 1 },
+                data: [b'z', 0, 0, 0, 0, 0, 0, 0],
+            };
+            let mut root = test_node();
+            let mut left = test_node();
+            let mut duplicate = test_node();
+            let root_ptr = core::ptr::addr_of_mut!(root);
+            let left_ptr = core::ptr::addr_of_mut!(left);
+            let duplicate_ptr = core::ptr::addr_of_mut!(duplicate);
+            root.key.key = embedded.data.as_mut_ptr();
+            left.key.key = short.data.as_mut_ptr();
+            duplicate.key.key = embedded.data.as_mut_ptr();
+            header.parent = root_ptr;
+            root.parent = header_ptr;
+            root.left = left_ptr;
+            root.right = duplicate_ptr;
+            left.parent = root_ptr;
+            duplicate.parent = root_ptr;
+            for (query, expected) in [
+                (empty_query, header_ptr),
+                (short.data.as_mut_ptr(), left_ptr),
+                (gap.data.as_mut_ptr(), header_ptr),
+                (embedded.data.as_mut_ptr(), root_ptr),
+                (above.data.as_mut_ptr(), header_ptr),
+            ] {
+                found = duplicate_ptr;
+                string_key_tree_find_4ebc_copy(&mut found, &mut tree, &query);
+                assert_eq!(found, expected);
+                assert_eq!(header.parent, root_ptr);
+                assert_eq!(root.left, left_ptr);
+                assert_eq!(root.right, duplicate_ptr);
             }
         }
     }
