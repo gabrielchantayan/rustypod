@@ -3611,6 +3611,8 @@ pub mod hints {
     // 0x5350_0000: dedicated to cxx/object_matches_active_context's target-width
     // adjusted-object and active-context fixture; mappings never unmap.
     pub const CXX_OBJECT_MATCHES_ACTIVE_CONTEXT: usize = 0x5350_0000;
+    // Dedicated target-width ostream sentry fixture; mapping never unmaps.
+    pub const OSTREAM_PREPARE_OUTPUT: usize = 0x0199_0000;
     // 0x5360_0000: dedicated to cxx/u32_key_tree_equal_range's target-width
     // tree header and node fixture; mappings never unmap.
     pub const U32_KEY_TREE_EQUAL_RANGE: usize = 0x5360_0000;
