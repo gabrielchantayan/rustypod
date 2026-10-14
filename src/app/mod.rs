@@ -748,6 +748,7 @@ pub mod tracker_table_expand;
 pub mod element_tracker_array_expand;
 pub mod tracker_array_diagnostic_noop;
 pub mod element_array0_tracker_diagnostic_noop;
+pub mod element_array0_expand;
 pub mod element_array1_tracker_diagnostic_noop;
 pub mod element_array2_tracker_diagnostic_noop;
 pub mod element_array1_expand;
