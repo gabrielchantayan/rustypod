@@ -16,6 +16,35 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083b6d00
+    ghidra: FUN_083b6d00
+    name: red_black_tree_payload_12_node_pool_acquire_083b6d00
+    size: 184
+    sig: "RedBlackTreePayload12Node083b73f0 *red_black_tree_payload_12_node_pool_acquire_083b6d00(RedBlackTreePayload12NodePool083b73f0 *pool)"
+    module: cxx/red_black_tree_payload_12_node_pool_acquire_083b6d00
+    status: ported
+    vars: {param_1/r4: pool, r0: node, r5: chunk, r6: capacity, r7: zero}
+    renames: {FUN_08266c70: operator_new_checked}
+    notes: >-
+      Raw extent [0x083b6d00,0x083b6db8) is 184 bytes, ending in POP;
+      next function begins with LDR at 0x083b6db8. Two outgoing plain BLs
+      at 0x083b6d64 and 0x083b6d78 target canonical checked new; no predicated
+      BLs. Whole-image aligned decoding finds one incoming plain BL at
+      0x08212220 and no incoming predicated BLs. Caller 0x08212154 consumes
+      r0 as a sentinel node, disproving Ghidra void. Pop the right-link free
+      list before advancing the 28-byte arena; allocate 12-byte linked chunks
+      with initial capacity 32, growing by max(old+32, old+old/2+old/8)
+      with wrapping unsigned arithmetic. Clear color and three links,
+      preserving padding and 12-byte payload. Deliberate deviation: reuse
+      the identical existing 0x083b73f0 algorithm and target-width types
+      rather than duplicate its body; omit the dead allocator r1 argument.
+      Host suite and ARM release pass. Tests cover free-list precedence,
+      unchanged cursor, arena bump, growth 32/64/104, chunk chaining and
+      untouched padding/payload. Actual-source executable smoke verifies
+      initial arena, bump, reuse, growth and payload preservation; no device
+      execution. match.py exits 1: 46 original versus four Rust instructions,
+      an FP frame and tail B. R_ARM_JUMP24 confirms delegation to the port
+      red_black_tree_payload_12_node_pool_acquire_083b73f0.
   - address: 0x083bf5a0
     ghidra: FUN_083bf5a0
     name: word_key_tree_pool_release
