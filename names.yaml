@@ -16,6 +16,35 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083dcf40
+    ghidra: FUN_083dcf40
+    name: word_pair_list_pool_release
+    size: 84
+    sig: "void word_pair_list_pool_release(u8 *list)"
+    module: cxx/word_pair_list_pool_release
+    status: ported
+    vars: {param_1/r5: list, puVar1/r4: chunk}
+    renames: {FUN_08266f2c: cxx_array_dealloc}
+    notes: >-
+      Raw extent 0x083dcf40..0x083dcf94 is 84 bytes; the next function starts
+      at 0x083dcf94. Two outgoing plain BLs at 0x083dcf60 and 0x083dcf70
+      call the registered cxx_array_dealloc; no predicated BLs. Whole-image
+      A32 decoding finds one inbound plain BL at 0x083dd19c and no predicated
+      calls. Unlink each 12-byte chunk via word zero before freeing its
+      arena (word two, capacity from word one, zero) and then the record
+      (count one, zero). Clear list words one through three after draining;
+      preserve the sentinel at word four and later state. Aligned u32
+      accesses retain the target layout on hosts. No algorithm deviations.
+      The existing list_release_chain_destroy default now calls this port.
+      match.py reports 20 Rust versus 21 retail instructions (exit 1):
+      unlink, arena delete, record delete, head reload, loop and three final
+      clears remain. LLVM omits count/elem setup because the registered
+      allocator discards them; frame-pointer setup differs.
+      Host gate: 15997 tests passed; ARM build-std release passes.
+      Standalone actual-source empty-path smoke clears cursors and preserves
+      the sentinel. Full non-test host library build is blocked by unrelated
+      missing prepare_metadata, extract_metadata, configure_shared_payload_kind,
+      and notify_calendar_change definitions; no device execution performed.
   - address: 0x083de838
     ghidra: FUN_083de838
     name: deque_back_retire_segment
@@ -176511,7 +176540,7 @@ functions:
     renames:
       param_1/r0/r4: this
       FUN_083dcf94: prepare_release_chain
-      FUN_083dcf40: release_chain
+      FUN_083dcf40: word_pair_list_pool_release
     notes: >-
       Raw osos.dec establishes the exact 60-byte extent
       0x083dd16c..0x083dd1a7: push {r4,lr} through pop {r4,pc}; the next
@@ -176521,12 +176550,11 @@ functions:
       BLNE call (0x083cadec). The body has exactly two plain BL calls and no
       predicated calls: when this+0x10 is nonzero, it calls unresolved
       FUN_083dcf94, reloads this+0x10 and this+4, stores the latter through
-      the former, stores the former at this+4, then calls unresolved
-      FUN_083dcf40 and returns this. Neither callee has an established
-      identity in names.yaml, so target builds retain verified direct-address
-      boundaries and host tests install recorders. Deliberate deviations:
-      those BL calls become dispatch-boundary BLX calls; behavior and reload
-      order are preserved.
+      the former, stores the former at this+4, then calls the ported
+      word_pair_list_pool_release and returns this. The preparer remains
+      a verified direct-address boundary; pool release now defaults to Rust.
+      Host tests may install recorders. Deliberate deviations: the calls use
+      dispatch boundaries; behavior and reload order are preserved.
   - address: 0x083dbc44
     ghidra: FUN_083dbc44
     name: red_black_tree_remove_node_wrapper
@@ -208586,7 +208614,7 @@ functions:
     renames:
       param_1/r0/r4: this
       FUN_083dcf94: prepare_release_chain
-      FUN_083dcf40: release_chain
+      FUN_083dcf40: word_pair_list_pool_release
     notes: >-
       Raw osos.dec establishes the exact 60-byte extent
       0x083dd16c..0x083dd1a7: push {r4,lr} through pop {r4,pc}; the next
@@ -208596,12 +208624,11 @@ functions:
       BLNE call (0x083cadec). The body has exactly two plain BL calls and no
       predicated calls: when this+0x10 is nonzero, it calls unresolved
       FUN_083dcf94, reloads this+0x10 and this+4, stores the latter through
-      the former, stores the former at this+4, then calls unresolved
-      FUN_083dcf40 and returns this. Neither callee has an established
-      identity in names.yaml, so target builds retain verified direct-address
-      boundaries and host tests install recorders. Deliberate deviations:
-      those BL calls become dispatch-boundary BLX calls; behavior and reload
-      order are preserved.
+      the former, stores the former at this+4, then calls the ported
+      word_pair_list_pool_release and returns this. The preparer remains
+      a verified direct-address boundary; pool release now defaults to Rust.
+      Host tests may install recorders. Deliberate deviations: the calls use
+      dispatch boundaries; behavior and reload order are preserved.
   - address: 0x083dbc44
     ghidra: FUN_083dbc44
     name: red_black_tree_remove_node_wrapper
