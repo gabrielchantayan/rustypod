@@ -259584,3 +259584,48 @@ functions:
       match.py reports 43 versus 41 instructions (exit 1): frame setup,
       register allocation and an indirect retail erase call differ;
       self guard, clone, empty branch, extrema and count stores agree.
+  # --- C++ COW-string-pair tree copy assignment ---
+  - address: 0x083c4c8c
+    ghidra: FUN_083c4c8c
+    name: red_black_tree_cow_pair_assign
+    size: 164
+    sig: "RedBlackTreeCowPair *red_black_tree_cow_pair_assign(RedBlackTreeCowPair *destination, const RedBlackTreeCowPair *source)"
+    module: cxx/red_black_tree_cow_pair_assign
+    status: ported
+    renames:
+      param_1/r4: destination
+      param_2/r5: source
+      local_18: last
+      local_14: first
+      uStack_10: erased_iterator
+      param_1_plus_0x10: header
+      param_1_plus_0x14: count
+      FUN_083c4698: cow_pair_tree_erase_range
+      FUN_083c4a10: red_black_tree_cow_pair_subtree_clone
+      FUN_083b6ab8: leftmost_descendant
+      FUN_083b6aa4: rightmost_descendant
+    notes: >-
+      Raw osos.dec verifies 41 A32 words, from push {r1-r5,lr} at
+      0x083c4c8c through pop {r1-r5,pc} at 0x083c4d2c; the next real
+      function begins at 0x083c4d30. Four outbound unconditional plain BLs
+      target 0x083c4698, 0x083c4a10, 0x083b6ab8 and 0x083b6aa4; no
+      predicated BLs. Whole-image immediate decoding finds one inbound plain
+      BL at 0x08101ec0 and no predicated inbound BLs. Raw firmware takes
+      precedence over Ghidra's caller attribution. Assignment guards aliasing,
+      erases the destination range through the retained retail seam, clones
+      source nodes with the existing COW-pair subtree port, rebuilds root and
+      extrema, copies count and returns destination. Saved r1 is restored:
+      Ghidra's undefined8 return and extra arguments are not ABI results.
+      Deliberate deviations are target-width pointer fields on hosts and
+      reuse of equivalent existing extrema walkers instead of the raw
+      0x083b6ab8/0x083b6aa4 copies. Host tests exercise self-assignment with
+      an invalid header, empty and singleton trees, and a branched tree with
+      real pool acquisition and COW reference-count increments; erase uses
+      an empty-destination-only model, not a substitute clone implementation.
+      Full corrected host suite passes. ARM release build succeeds.
+      match.py reports 43 versus 41 instructions (exit 1): stack frame,
+      register allocation and indirect range-erase call differ; the self
+      guard, clone, empty branch, extrema and count stores agree.
+      A standalone host executable is blocked by existing non-test missing
+      helpers in prepare_entry_metadata, shared_payload_select_kind and
+      calendar_schedule; behavioral execution uses the host test harness.
