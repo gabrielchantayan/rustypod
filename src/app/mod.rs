@@ -1,5 +1,6 @@
 //! retailOS application/UI framework glue — the global application
 //! context and the small helpers its view classes lean on.
+pub mod element_tracker_array_insert;
 pub mod dual_pool_screen_reserve_record;
 pub mod obfuscated_context_noop;
 pub mod obfuscated_word_noop;

@@ -257911,3 +257911,44 @@ functions:
       exercises the public entry with host realloc and the real zero-fill
       port, observing capacity 2 to 6 and preserved non-capacity fields.
       Device execution was not exercised.
+  - address: 0x083d52a4
+    ghidra: FUN_083d52a4
+    name: element_tracker_array_insert
+    size: 152
+    sig: "i32 element_tracker_array_insert(u32 *array, u32 element)"
+    module: app/element_tracker_array_insert
+    status: ported
+    vars:
+      param_1/r4: array
+      param_2/r5: element
+      iVar1/r0: slot_index
+      array_plus_0x00: storage
+      array_plus_0x04: allocated_slots
+      array_plus_0x08: used_slots
+    renames:
+      FUN_083d533c: element_tracker_array_expand
+    notes: >-
+      Raw aligned A32 extent [0x083d52a4,0x083d533c) is 152 bytes,
+      ending in POP before the next independent PUSH. Whole-image decoding
+      finds one incoming plain BL at 0x081ef430 and no predicated incoming
+      BLs. Outgoing calls: zero plain BLs, one BLEQ at 0x083d52ec to the
+      existing element_tracker_array_expand port. Reject duplicate words
+      before expansion, expand only when used equals allocated, reload
+      capacity and storage, fill the first zero slot, increment used modulo
+      2^32 and return its index; otherwise return -1. Capacity comparisons
+      are signed. Ghidra misdecodes the final CMPGE/GT sequence: slot zero
+      is valid. Zero insertion is rejected when any zero slot already exists.
+      Target-width header words preserve four-byte field spacing on hosts;
+      no new fixed-address seam or allocation-failure guard. Host edge tests
+      cover each hole, duplicate precedence when full, zero values, exhausted
+      storage, signed capacities, count wrap and relocated expansion storage.
+      Full host suite and ARM release build passed. Standalone public-entry
+      smoke observed slot zero insertion and duplicate rejection using real
+      port source and zero-fill, with host libc realloc at the allocation
+      boundary. A whole-crate non-test host smoke build was blocked by existing
+      missing prepare_metadata, extract_metadata, configure_shared_payload_kind
+      and notify_calendar_change definitions. ARM match.py reports 39 versus
+      38 instructions: both scans, signed capacity gates, conditional expansion,
+      duplicate return and count/store update remain; LLVM replaces predication
+      with branches and hoists invariant storage reads. Device execution was
+      not exercised.
