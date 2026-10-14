@@ -717,6 +717,7 @@ pub mod streambuf_slot_peek_byte;
 pub mod streambuf_slot_consume;
 pub mod wide_streambuf_put;
 pub mod wide_filebuf_set_unbuffered;
+pub mod wide_filebuf_set_write_mode;
 pub mod stream_parse_radix_segment;
 pub mod reverse_byte_cursor_pop;
 pub mod stream_read;

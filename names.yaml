@@ -16,6 +16,33 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083da7cc
+    ghidra: FUN_083da7cc
+    name: wide_filebuf_set_write_mode
+    size: 24
+    sig: "void wide_filebuf_set_write_mode(u32 *buffer, i32 enabled)"
+    module: cxx/wide_filebuf_set_write_mode
+    status: ported
+    vars: {param_1/r0: buffer, param_2/r1: enabled, r2: mode_test, r1_after_load: flags}
+    notes: >-
+      Raw extent [0x083da7cc, 0x083da7e4) is six A32 words ending in
+      MOV PC,LR; the next independent function sets bit 2 with the same
+      structure. Whole-image aligned raw decoding finds one incoming plain
+      BL at 0x083d9d4c, zero predicated BLs and zero outgoing BLs.
+      MOVS tests the entire mode word; LDR reads object +0x10;
+      BICEQ/ORRNE clears/sets bit 1 and STR writes the preserved flags.
+      Caller 0x083d9b20 enables this flag after wide-character output;
+      write-mode is a contextual name, with no additional behavior inferred.
+      No callee seams or deliberate behavioral deviations. Aligned u32
+      word indexing preserves the target offset on hosts. Tests cover both
+      bit states, zero, positive, negative, extreme and non-low-byte modes,
+      unrelated flags, neighboring storage and repeated transitions.
+      Actual-source executable smoke verifies negative enable followed by
+      zero disable while preserving the remaining object. Host cargo test
+      passes all 16018 tests; build-std ARM release passes. match.py exits 1:
+      LLVM emits eight versus six instructions, adding a frame and clearing
+      bit 1 unconditionally before ORRNE; the +0x10 load/store, whole-word
+      zero test and bit-preserving result remain. No device execution.
   - address: 0x083da7e4
     ghidra: FUN_083da7e4
     name: wide_filebuf_set_unbuffered
