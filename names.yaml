@@ -259315,3 +259315,29 @@ functions:
       direct release and base tail call; LLVM adds a frame and explicit null
       branch instead of predication. Its default original extent omits the
       literal, which was verified independently from raw bytes.
+
+  - address: 0x083d0618
+    ghidra: FUN_083d0618
+    name: owned_element_array_attached_delete_destruct
+    size: 60
+    sig: "void *owned_element_array_attached_delete_destruct(void *this)"
+    module: cxx/owned_element_array_attached_delete_destruct
+    status: ported
+    vars: {param_1/r4: this, DAT_083d0650: VTABLE_089A4200, "this+0x14": attached_object, FUN_083d0568: owned_element_array_delete_cells, FUN_08271d2c: observable_array_destruct}
+    notes: >-
+      Raw osos.dec proves 56 instruction bytes at 0x083d0618..0x083d064f
+      plus the 0x089a4200 literal at 0x083d0650; the next real function
+      begins at 0x083d0654, giving a true extent of 60 bytes. One inbound
+      plain BL at 0x0826b4f0, zero predicated BLs and zero inbound tail Bs
+      were independently counted by decoding whole-image ARM branches.
+      Caller NULL-guards, destroys and tail-calls operator_delete.
+      Body has one plain BL to canonical ported owned_element_array_delete_cells
+      at 0x083d0568, zero predicated BLs, one indirect BLXNE through the
+      attachment vtable slot +0x1c, and a tail B to ported observable_array_destruct.
+      Install derived vtable, release non-NULL +0x14 attachment, delete enabled
+      cells, destroy base, return this. Ghidra incorrectly folds the tail
+      callee into this function. Host seams replace virtual release and cell
+      cleanup because the latter's native fixture widens the vtable pointer;
+      ARM directly reuses existing ports. Ordinary control flow replaces
+      predication and tail chaining. Tests exercise both attachment cases,
+      derived-stage ordering, real base cleanup, return identity and guards.
