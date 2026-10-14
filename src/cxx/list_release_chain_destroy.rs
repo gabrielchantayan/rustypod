@@ -6,20 +6,19 @@
 //! `0x08213984`) and one predicated `blne` call (`0x083cadec`). The function
 //! skips an empty release chain; otherwise it calls the unresolved node-chain
 //! preparer, relinks the resulting chain head into the release sentinel, then
-//! calls the unresolved release-chain consumer. Deliberate deviations: the
-//! two direct callees have no established identities in `names.yaml`, so Rust
-//! retains them as explicit target-address dispatch boundaries.
+//! calls the ported word-pair list pool release. Deliberate deviations: the
+//! preparer remains an explicit target-address boundary; pool release uses
+//! the Rust port directly by default.
 
 const RELEASE_CHAIN_HEAD_WORD: usize = 1;
 const RELEASE_SENTINEL_WORD: usize = 4;
 
-/// Direct-callee boundary for the unresolved calls at `0x083dcf94` and
-/// `0x083dcf40` made by [`list_release_chain_destroy`].
+/// Direct-callee boundaries used by [`list_release_chain_destroy`].
 #[derive(Clone, Copy)]
 pub struct ListReleaseChainDestroyOps {
     /// `FUN_083dcf94(this)`: prepares the node chain for release.
     pub prepare_release_chain: unsafe extern "C" fn(*mut u8),
-    /// `FUN_083dcf40(this)`: consumes the prepared release chain.
+    /// Ported word-pair list pool release (`0x083dcf40`).
     pub release_chain: unsafe extern "C" fn(*mut u8),
 }
 
@@ -29,32 +28,21 @@ unsafe extern "C" fn firmware_prepare_release_chain(this: *mut u8) {
     unsafe { prepare(this) }
 }
 
-#[cfg(target_os = "none")]
-unsafe extern "C" fn firmware_release_chain(this: *mut u8) {
-    let release: unsafe extern "C" fn(*mut u8) = unsafe { core::mem::transmute(0x083d_cf40usize) };
-    unsafe { release(this) }
-}
-
 #[cfg(not(target_os = "none"))]
 unsafe extern "C" fn missing_prepare_release_chain(_this: *mut u8) {
     panic!("list_release_chain_destroy requires unresolved FUN_083dcf94")
 }
 
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_release_chain(_this: *mut u8) {
-    panic!("list_release_chain_destroy requires unresolved FUN_083dcf40")
-}
-
 #[cfg(target_os = "none")]
 pub const DEFAULT_LIST_RELEASE_CHAIN_DESTROY_OPS: ListReleaseChainDestroyOps = ListReleaseChainDestroyOps {
     prepare_release_chain: firmware_prepare_release_chain,
-    release_chain: firmware_release_chain,
+    release_chain: super::word_pair_list_pool_release::word_pair_list_pool_release,
 };
 
 #[cfg(not(target_os = "none"))]
 pub const DEFAULT_LIST_RELEASE_CHAIN_DESTROY_OPS: ListReleaseChainDestroyOps = ListReleaseChainDestroyOps {
     prepare_release_chain: missing_prepare_release_chain,
-    release_chain: missing_release_chain,
+    release_chain: super::word_pair_list_pool_release::word_pair_list_pool_release,
 };
 
 /// Active unresolved direct-callee boundary. Host tests install recorders.
