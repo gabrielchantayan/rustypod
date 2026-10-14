@@ -258762,3 +258762,34 @@ functions:
       ordered memory operations match; LLVM adds a frame-pointer prologue
       and returns with POP instead of BX LR. LLVM folds the identical
       word_pair_copy_forward body; both exported symbols remain present.
+  - address: 0x083d3048
+    ghidra: FUN_083d3048
+    name: word_pair_copy_insert_result
+    size: 20
+    sig: "uint32_t *word_pair_copy_insert_result(uint32_t *destination, const uint32_t *source)"
+    module: util/word_pair_copy_forward
+    status: ported
+    renames:
+      param_1/r0: destination (preserved and returned)
+      param_2/r1: source
+      r2: first_word
+    notes: >-
+      Raw words e5912000 e5802000 e5911004 e5801004 e12fff1e establish
+      extent [0x083d3048,0x083d305c), followed by an independent copy body.
+      Whole-image aligned ARM decoding verifies one plain inbound BL at
+      0x0826a100, zero predicated inbound BLs and zero outbound BLs.
+      Caller 0x0826a00c copies the first two words of an insertion result
+      from sp+12 to sp+4 and then loads both through preserved r0.
+      Alternating aligned word reads and writes preserve sequential overlap,
+      including first-word propagation on forward overlap. No callee seams
+      or deliberate behavioral deviations. Existing module tests now cover
+      this entry with disjoint full-bit values, sentinels, self-copy and all
+      relative overlap positions against a sequential reference.
+      Host suite and ARM build-std release pass; actual-source host smoke
+      verifies forward overlap propagation and destination return.
+      LLVM folds this export with word_pair_copy_construct and
+      word_pair_copy_forward; all three symbols remain present at size 28.
+      match.py cannot find the alias label for this export. Comparing the
+      shared word_pair_copy_construct body against this address shows the
+      same four ordered memory operations, with frame-pointer setup and
+      POP return replacing the stock BX LR.
