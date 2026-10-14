@@ -65389,6 +65389,54 @@ functions:
       return this. Rust emits explicit byte loops and inlines the trivial
       fTable +4 accessor/tracker no-op rather than their retailOS calls.
 
+  - address: 0x083d3b28
+    ghidra: FUN_083d3b28
+    name: element_array3_expand
+    size: 120
+    sig: "void element_array3_expand(u32 *array)"
+    module: app/element_array3_expand
+    status: ported
+    renames:
+      param_1: array
+      iVar3: expanded_capacity
+      iVar1: resized_storage
+      pcVar2: diagnostic_result
+      "array+0x00": storage
+      "array+0x04": capacity
+      "array+0x08": used
+      "array+0x0c": options
+      "array+0x10": growth_factor
+      "array+0x14": diagnostic_name
+      FUN_0802edec: realloc
+      thunk_EXT_FUN_2200027c: memzero_aligned_iram_veneer
+      FUN_083d3a8c: tracker_trace
+    notes: >-
+      Raw A32 words establish the 120-byte body [0x083d3b28,0x083d3ba0).
+      Diagnostic strings occupy 60 more bytes before the next real function's
+      push at 0x083d3bdc, giving a 180-byte occupied extent. Independent
+      whole-image word scan finds zero inbound plain BLs and one inbound BLEQ
+      at 0x083d3ad8. Three outbound plain BLs at 0x083d3b44 to ported realloc
+      0x0802edec, 0x083d3b64 to the zero-fill veneer 0x08037db8, and
+      0x083d3b98 to ported tracker_trace 0x083d3a8c; no predicated outbound BLs.
+      Array-3 identity follows the adjacent element_array3_construct using the
+      same diagnostic. Multiply capacity by growth modulo 2^32, request
+      expanded capacity times four bytes, and publish the returned pointer
+      including NULL. On success clear only the added tail and commit capacity;
+      failure preserves capacity and every other header field. Share the existing
+      element_tracker_array_expand algorithm with four-byte header words on hosts.
+      Raw zero-fill veneer is ldr pc,[pc,#-4] plus 0x2200027c, the IRAM mirror
+      of ported memzero_aligned at 0x0800027c. Deliberately omit diagnostic
+      arguments and tracker_trace: its sole word is bx lr and r0 is not consumed.
+      Host tests cover relocation, unchanged capacity, exact clearing, zero-byte
+      freeing, failure and wrapped sizes; standalone smoke verifies relocation
+      and failure with the real shared algorithm and zero-fill implementation.
+      ARM LLVM intentionally folds this symbol into element_array0_expand:
+      objdump's symbol table places both at offset zero in the same 96-byte
+      section. Requested match.py cannot find the alias label; comparing the
+      canonical label confirms multiply, unconditional pointer publication,
+      failure branch, tail clear and capacity commit. Volatile helper loads use
+      BLX instead of BL; the inert diagnostic is absent.
+
   - address: 0x083d3c28
     ghidra: FUN_083d3c28
     name: element_array3_construct
