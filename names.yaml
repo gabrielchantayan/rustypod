@@ -259514,3 +259514,43 @@ functions:
       frame-pointer prologue/epilogue and sub/clz/lsr replace the retail
       cmp/movne/moveq selection; two word loads and normalized equality
       are preserved.
+  - address: 0x083c5a34
+    ghidra: FUN_083c5a34
+    name: string_pair_tree_node_pool_recycle
+    size: 40
+    sig: "void string_pair_tree_node_pool_recycle(u32 *pool, u32 *node, u32 release_value)"
+    module: cxx/string_pair_tree_node_pool_recycle
+    status: ported
+    renames:
+      param_1/r0/r5: pool
+      param_2/r1/r4: node
+      param_3/r2: release_value
+      pool+0x04: free_head
+      node+0x0c: free_next
+      node+0x10: string
+      FUN_083d8b04: cxx_string_release
+    notes: >-
+      Raw osos.dec establishes ten A32 words, 40 bytes from 0x083c5a34
+      through pop at 0x083c5a58; the independent rotation at 0x083c5a5c
+      is the next real function. Whole-image aligned raw BL decoding finds
+      one inbound plain BL at 0x082a81b4 and no predicated inbound BLs.
+      The body has zero plain BLs and one predicated BL at 0x083c5a50 to
+      the existing cxx_string_release port at 0x083d8b04. It stores pool+4
+      into node+12, releases the COW string at node+16 for any nonzero flag,
+      then stores the node into pool+4. Caller 0x082a8170 recycles the tree
+      header with flag zero before draining pool chunks. Adjacent acquire
+      0x083c597c verifies the 24-byte pair-payload node and four-word pool.
+      Deliberate deviations: target pointers stay u32 on hosts, with the
+      COW data pointer widened into a temporary host slot; ARM passes the
+      actual node string slot. Rust branches replace ARM predication.
+      Host tests cover empty/nonempty free heads, zero/high-bit/all-bits
+      release flags, real shared COW refcount decrements, untouched node
+      payload and pool fields, and recycling an uninitialized header value.
+      Required host suite passes 16122 tests; ARM release build succeeds.
+      match.py resolves the export and reports 11 versus 10 instructions
+      (exit 1): LLVM adds a frame pointer; loads, stores, predicated string
+      release and publication order match. Standalone host smoke cannot
+      compile because existing non-test helpers prepare_metadata,
+      extract_metadata, configure_shared_payload_kind and
+      notify_calendar_change are undefined. The new host test exercises
+      the actual exported function and real COW destructor successfully.
