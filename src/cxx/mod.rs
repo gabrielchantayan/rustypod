@@ -392,6 +392,7 @@ pub mod record_40_list_clear;
 pub mod list_node_pool_list_construct;
 pub mod selector_list_construct;
 pub mod list_node_pool_list_insert_payload_range;
+pub mod list_node_pool_list_assign_payload;
 pub mod list_node_pool_list_clear;
 pub mod word_list_node_pool_list_recycle_all;
 pub mod vector_word_copy_construct;
