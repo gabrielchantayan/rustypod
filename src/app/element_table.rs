@@ -1024,43 +1024,6 @@ pub unsafe extern "C" fn element_array8_at(index: i32) -> *mut u8 {
     element_array_at(8, index)
 }
 
-/// Calls the retail array-8 expansion member at `0x083d44b4`.
-///
-/// The sibling has no recovered semantic name. Raw code verifies that it is
-/// the direct callee when this array's live count equals capacity, so target
-/// builds retain that fixed call edge.
-#[cfg(target_os = "none")]
-#[inline(always)]
-unsafe fn element_array8_expand_for_insert(this: *mut u8) {
-    let retail_expand: unsafe extern "C" fn(*mut u8) =
-        core::mem::transmute(0x083d_44b4usize);
-    retail_expand(this);
-}
-
-#[cfg(all(not(target_os = "none"), test))]
-static mut ELEMENT_ARRAY8_EXPAND_FOR_INSERT: unsafe extern "C" fn(*mut u8) =
-    missing_element_array8_expand_for_insert;
-
-#[cfg(all(not(target_os = "none"), test))]
-unsafe extern "C" fn missing_element_array8_expand_for_insert(_this: *mut u8) {
-    panic!("element_array8_insert_unique expansion seam was not installed")
-}
-
-#[cfg(all(not(target_os = "none"), test))]
-#[inline(always)]
-unsafe fn element_array8_expand_for_insert(this: *mut u8) {
-    let expand = core::ptr::read_volatile(core::ptr::addr_of!(
-        ELEMENT_ARRAY8_EXPAND_FOR_INSERT
-    ));
-    expand(this);
-}
-
-#[cfg(all(not(target_os = "none"), not(test)))]
-#[inline(always)]
-unsafe fn element_array8_expand_for_insert(_this: *mut u8) {
-    panic!("element_array8_insert_unique requires retailOS expansion member")
-}
-
 /// element_array8_insert_unique — original: `FUN_083d441c` @ **0x083d441c**
 /// (**152 bytes**; **two direct inbound plain `bl` call sites**).
 /// Raw A32 words establish the exact extent `0x083d441c..0x083d44b4`:
@@ -1071,23 +1034,21 @@ unsafe fn element_array8_expand_for_insert(_this: *mut u8) {
 ///
 /// Scans every signed-valid slot for the exact pointer first, returning `-1`
 /// without mutation for a duplicate (including a NULL argument in an empty
-/// table). If the live count equals capacity, it expands through the retail
-/// sibling. It then rescans for the first NULL slot; if one exists, it stores
+/// table). If the live count equals capacity, it calls the ported array-8
+/// expansion. It then rescans for the first NULL slot; if one exists, it stores
 /// the pointer, increments `used` with ARM wrapping semantics, and returns
 /// that index. A full table whose `used` does not equal capacity still returns
 /// `-1`; the scan, not `used`, decides vacancy.
 ///
-/// Device deviation: none. The target directly calls the unported retail
-/// expansion sibling. Host unit tests install that one call as a volatile
-/// seam; pointer slots remain pointer-width on the host while retaining the
-/// target's four-byte stride on ARM.
+/// Host pointer slots and header strides remain pointer-width; ARM retains
+/// the target's four-byte stride.
 ///
 /// # Safety
 ///
 /// `this` must be non-null and word-aligned through its six element-array
 /// words. Its `data` word must address `slots` readable/writable pointer
-/// slots whenever signed `slots` is positive. When `used == slots`, the
-/// retail expansion member must be callable.
+/// slots whenever signed `slots` is positive. When `used == slots`, storage
+/// must satisfy the expansion function's allocation and tail-range contract.
 #[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 #[cfg_attr(target_os = "none", link_section = ".text.element_array8_insert_unique")]
@@ -1105,7 +1066,7 @@ pub unsafe extern "C" fn element_array8_insert_unique(this: *mut u8, element: *m
 
     let used = (this.add(ARRAY_USED_INDEX * WORD) as *const u32).read();
     if used == slots as u32 {
-        element_array8_expand_for_insert(this);
+        crate::app::element_array8_expand::element_array8_expand(this);
     }
 
     slots = array_slots(this);
@@ -2210,21 +2171,6 @@ mod element_array7_insert_tests {
         ExpandSeamReset(previous)
     }
 
-    struct Array8ExpandSeamReset(unsafe extern "C" fn(*mut u8));
-
-    impl Drop for Array8ExpandSeamReset {
-        fn drop(&mut self) {
-            unsafe {
-                ELEMENT_ARRAY8_EXPAND_FOR_INSERT = self.0;
-            }
-        }
-    }
-
-    unsafe fn install_array8_expand_seam() -> Array8ExpandSeamReset {
-        let previous = ELEMENT_ARRAY8_EXPAND_FOR_INSERT;
-        ELEMENT_ARRAY8_EXPAND_FOR_INSERT = expand_to_four_slots;
-        Array8ExpandSeamReset(previous)
-    }
 
     struct Array6ExpandSeamReset(unsafe extern "C" fn(*mut u8));
 
@@ -2340,28 +2286,6 @@ mod element_array7_insert_tests {
         assert_eq!(unsafe { used(this) }, 3);
     }
 
-    #[test]
-    fn array8_expands_at_capacity_and_rejects_null_without_mutation() {
-        let _guard = INSERT_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-        let first = 0x1111usize as *mut u8;
-        let second = 0x2222usize as *mut u8;
-        let inserted = 0x3333usize as *mut u8;
-        let mut old_entries = [first, second];
-        let mut expanded_entries = [first, second, ptr::null_mut(), ptr::null_mut()];
-        let mut header = [0usize; ELEMENT_ARRAY_WORDS];
-        let this = unsafe { make_array(&mut header, old_entries.as_mut_ptr(), 2, 2) };
-
-        unsafe {
-            EXPANDED_DATA = expanded_entries.as_mut_ptr();
-            EXPAND_CALLS = 0;
-            let _expand_reset = install_array8_expand_seam();
-            assert_eq!(element_array8_insert_unique(this, inserted), 2);
-            assert_eq!(EXPAND_CALLS, 1);
-        }
-        assert_eq!(expanded_entries, [first, second, inserted, ptr::null_mut()]);
-        assert_eq!(unsafe { element_array8_insert_unique(this, ptr::null_mut()) }, -1);
-        assert_eq!(unsafe { used(this) }, 3);
-    }
     #[test]
     fn a_full_buffer_does_not_expand_when_used_disagrees_with_capacity() {
         let _guard = INSERT_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());

@@ -28887,19 +28887,53 @@ functions:
       "array+0x00": data
       "array+0x04": slots
       "array+0x08": used
-      FUN_083d44b4: element_array8_expand_for_insert
+      FUN_083d44b4: element_array8_expand
     notes: >-
       Raw A32 words establish the exact 152-byte body from push {r4,r5,r6,lr}
       at 0x083d441c through pop {r4,r5,r6,pc} at 0x083d44b0; the push at
       0x083d44b4 starts the next real function. There are two plain direct bl
       callers and no predicated inbound bl; the body has one predicated
-      outgoing bleq at 0x083d4464 to the unrecovered expansion sibling
+      outgoing bleq at 0x083d4464 to element_array8_expand at
       0x083d44b4. The function rejects duplicate pointers before testing
       fullness, expands exactly when used == slots, then inserts into the
       first NULL slot and increments used. A full slot buffer with stale used
-      returns -1 without expansion. Target builds retain the verified fixed
-      call; host tests use a volatile seam because the callee has no recovered
-      identity.
+      returns -1 without expansion. Calls the ported expansion on all targets.
+  - address: 0x083d44b4
+    ghidra: FUN_083d44b4
+    name: element_array8_expand
+    size: 120
+    sig: "void element_array8_expand(ElementArray *array)"
+    module: app/element_array8_expand
+    status: ported
+    renames:
+      param_1: array
+      iVar3: expanded_capacity
+      iVar1: resized_storage
+      "array+0x00": storage
+      "array+0x04": capacity
+      "array+0x08": used
+      "array+0x10": growth_factor
+      "array+0x14": diagnostic_name
+      FUN_0802edec: realloc
+      thunk_EXT_FUN_2200027c: memzero_aligned_iram_veneer
+      FUN_083d4418: tracker_array_diagnostic_noop
+    notes: >-
+      Raw A32 body is 0x083d44b4..0x083d452c (120 bytes); 60 bytes of
+      diagnostic strings precede the next real function at 0x083d4568.
+      Independent whole-image raw word decoding finds zero inbound plain BLs
+      and one BLEQ at 0x083d4464. Three outgoing plain BLs at 0x083d44d0
+      (realloc 0x0802edec), 0x083d44f0 (IRAM zero-fill veneer 0x08037db8),
+      and 0x083d4524 (diagnostic 0x083d4418); no outgoing predicated BLs.
+      Multiply capacity by growth modulo 2^32, publish realloc result including
+      NULL, clear the added tail on success, then commit capacity. Failure
+      preserves other header fields. Reuse ported allocation, zero-fill and
+      diagnostic functions. Deviations: native pointer-width host header and
+      slot strides matching element_table; omit unused diagnostic arguments
+      because raw callee is exactly bx lr. Host tests cover relocation, tail
+      bounds, empty and unchanged capacity, failure, wrapped allocation size,
+      and insertion into newly cleared slots.
+      Isolated exported-path smoke verifies insertion-triggered expansion
+      through the real realloc entry, tail bounds, and failure state.
   - address: 0x083d5784
     ghidra: FUN_083d5784
     name: fixed_increment_u32_array_append
