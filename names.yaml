@@ -258706,3 +258706,30 @@ functions:
       instructions: duplicate loop, conditional expansion, signed capacity guard,
       hole loop, count increment and slot store remain; prologue, register
       allocation, loop direction and predication differ.
+  - address: 0x083d3070
+    ghidra: FUN_083d3070
+    name: word_pair_copy_forward
+    size: 20
+    sig: "uint32_t *word_pair_copy_forward(uint32_t *destination, const uint32_t *source)"
+    module: util/word_pair_copy_forward
+    status: ported
+    renames:
+      param_1/r0: destination (preserved and returned)
+      param_2/r1: source
+      r2: first_word
+    notes: >-
+      Raw osos.dec words e5912000 e5802000 e5911004 e5801004 e12fff1e
+      establish the exact 20-byte extent [0x083d3070,0x083d3084).
+      The next independent function begins with e92d40f0 (PUSH).
+      Whole-image aligned ARM BL decoding verifies one plain inbound BL
+      at 0x082691c8, zero predicated inbound BLs and zero outbound BLs.
+      Caller 0x082690a4 copies the first two words of an insertion result
+      into an eight-byte stack object. Copy two aligned u32 words in
+      ascending order with alternating loads and stores; forward overlap
+      propagates the first word rather than providing memmove semantics.
+      r0 remains destination, exposed as the Rust return value; no seams
+      or deliberate behavioral deviations. Host tests cover full-bit
+      values, sentinels, self-copy and both overlap directions against a
+      sequential reference. All 16090 host tests pass; ARM release builds.
+      Standalone smoke verifies forward overlap and destination return.
+      match.py shows five stock versus seven Rust instructions: identical

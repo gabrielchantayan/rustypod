@@ -154,6 +154,7 @@ pub mod copy_word_range;
 pub mod word_range_copy;
 pub mod word_pair_has_nonzero_word;
 pub mod copy_four_words;
+pub mod word_pair_copy_forward;
 pub mod counted_wstr_eq;
 pub mod counted_wstr_validate;
 pub mod clock_pair;
